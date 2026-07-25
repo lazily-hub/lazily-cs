@@ -1,0 +1,30 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <LangVersion>latest</LangVersion>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <TreatWarningsAsErrors>true</TreatWarningsAsErrors>
+    <EnableNETAnalyzers>true</EnableNETAnalyzers>
+    <AnalysisLevel>latest</AnalysisLevel>
+    <GenerateDocumentationFile>true</GenerateDocumentationFile>
+    <RootNamespace>Lazily</RootNamespace>
+    <AssemblyName>Lazily</AssemblyName>
+  </PropertyGroup>
+
+  <PropertyGroup>
+    <PackageId>Lazily</PackageId>
+    <Version>0.1.0</Version>
+    <Authors>lazily-hub</Authors>
+    <Description>Lazy reactive primitives for C#/.NET — Sources, Computeds, and Effects with automatic dependency tracking, plus the lazily-spec wire protocol.</Description>
+    <PackageLicenseExpression>MIT</PackageLicenseExpression>
+    <RepositoryUrl>https://github.com/lazily-hub/lazily-cs</RepositoryUrl>
+    <PackageProjectUrl>https://github.com/lazily-hub/lazily-cs</PackageProjectUrl>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <InternalsVisibleTo Include="Lazily.Tests" />
+  </ItemGroup>
+
+</Project>

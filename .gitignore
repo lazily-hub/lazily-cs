@@ -1,0 +1,15 @@
+# .NET
+bin/
+obj/
+*.user
+*.suo
+artifacts/
+TestResults/
+coverage.*.xml
+.vs/
+
+# editor / OS
+.DS_Store
+*.swp
+.idea/
+.tsift/

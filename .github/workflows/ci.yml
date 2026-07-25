@@ -1,0 +1,67 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: "10.0.x"
+
+      - name: restore
+        run: dotnet restore
+
+      - name: build
+        run: dotnet build --no-restore --nologo -warnaserror
+
+      # The conformance runners resolve fixtures through the sibling-relative path
+      # ../lazily-spec/conformance. Fixtures are never vendored into this repo —
+      # a bundled copy drifts from the spec.
+      - name: Fetch canonical lazily-spec conformance fixtures
+        run: git clone --depth 1 https://github.com/lazily-hub/lazily-spec.git ../lazily-spec
+
+      # Assert the fixtures are actually present BEFORE running the suite. The runner
+      # fails hard when the corpus is absent rather than skipping, but checking here
+      # turns a confusing assertion failure into an explicit annotation.
+      - name: Guard — canonical fixtures present
+        run: |
+          test -d ../lazily-spec/conformance || { echo "::error::../lazily-spec/conformance missing"; exit 1; }
+          for corpus in reactive-graph; do
+            test -d "../lazily-spec/conformance/$corpus" || { echo "::error::../lazily-spec/conformance/$corpus missing"; exit 1; }
+          done
+
+      - name: test
+        run: dotnet test --no-build --nologo --verbosity normal
+
+      # "Green" and "ran nothing" must not be indistinguishable. The conformance test
+      # asserts a positive fixture and assertion count internally; this step asserts
+      # from the outside that the conformance tests were actually selected and passed.
+      - name: Conformance replay executed, zero skips
+        run: |
+          out=$(dotnet test --no-build --nologo --verbosity normal --filter "FullyQualifiedName~Conformance" 2>&1) || { echo "$out"; exit 1; }
+          echo "$out"
+          echo "$out" | grep -qE 'Passed:[[:space:]]*[1-9]' || { echo "::error::no conformance tests ran"; exit 1; }
+          if echo "$out" | grep -qE 'Skipped:[[:space:]]*[1-9]'; then
+            echo "::error::a conformance test skipped — the corpus must always replay in CI"
+            exit 1
+          fi
+
+  format:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: "10.0.x"
+      - name: dotnet format --verify-no-changes
+        run: dotnet format --verify-no-changes

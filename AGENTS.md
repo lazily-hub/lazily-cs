@@ -1,0 +1,73 @@
+# lazily-cs
+
+C#/.NET binding of the lazily reactive-signals family. The reactive kernel is a port of the
+reference semantics, not an independent design: when this repo and
+[lazily-spec](https://github.com/lazily-hub/lazily-spec) disagree, the spec wins and this repo is
+the finding.
+
+## Commit & Push
+
+Commit and push completed work at the end of every turn that changed code, tests, docs, or the
+coverage matrix — do not leave finished work uncommitted. Run `make check` first and ensure it is
+green; stage only the files that belong to the change (never secrets or private customer names);
+write a concise commit message in the repo's existing style; push to the current branch on
+`origin`. This standing rule overrides the harness default of "commit only when explicitly asked"
+for this repo.
+
+## Layout
+
+```
+src/Lazily/            the library (net10.0)
+tests/Lazily.Tests/    xunit suite + the spec conformance runners
+Lazily.sln
+```
+
+## Verification
+
+```bash
+make check          # build + test — the local gate
+make conformance    # replay the shared lazily-spec fixtures only
+make format-check   # dotnet format --verify-no-changes
+```
+
+The conformance corpus resolves through the sibling-relative path
+`../lazily-spec/conformance`. Clone lazily-spec beside this repo before running the suite.
+
+## Conformance discipline
+
+These rules are not style preferences; each one exists because its absence produced a suite that
+reported green while testing nothing.
+
+- **Never vendor fixtures.** A bundled copy drifts from the spec. One sibling-relative path, and
+  CI clones the corpus explicitly.
+- **Absence is a failure, not a skip.** The runner asserts the corpus resolved, that a positive
+  number of fixtures replayed, and that a floor of assertions actually ran. A skip-if-absent
+  runner with no guard is worse than no runner at all.
+- **Ledgers are two-directional.** `Unsupported` names fixtures this binding cannot execute *and
+  the exact op or assertion that blocks it*; `KnownDivergences` names assertions it does not
+  satisfy. Both are asserted to match the observed set EXACTLY — a new entry fails the build, and
+  a fixed one fails it until the entry is deleted.
+- **A ledger entry is a finding against this binding, never a relaxation of a fixture.** If a
+  fixture looks wrong, take it up in lazily-spec; do not weaken it here.
+- **Assert the library, not the runner's bookkeeping.** Counters that pin library behaviour live
+  inside the library's own call path — the merge-fold counter is installed *in the merge policy*,
+  so `merges_of` counts folds the library performed rather than calls the runner issued. A runner
+  that counts its own intentions cannot detect a binding that dropped the work.
+
+## Divergences from the reference bindings
+
+Recorded here so they are decisions rather than drift:
+
+- **No `comparable` bound on a source's value.** The write guard uses
+  `EqualityComparer<T>.Default`, with an explicit `IEqualityComparer<T>` overload on every
+  constructor. Strictly more general than the Rust/Go `==` bound.
+- **Node constructors are extension methods** on `Context` (in `Reactive`), so the factory names
+  can match the family vocabulary without colliding with the type names they return.
+- **The compute-view fortification guard is a runtime check.** C# cannot bind the view to its
+  recompute the way a Rust lifetime does, so an escaped view throws `StaleComputeException`.
+
+## Not yet implemented
+
+Everything in the feature matrix except the reactive graph and the merge algebra. Do not mark a
+row shipped in lazily-spec's `coverage.json` until its conformance corpus replays here with an
+empty ledger.

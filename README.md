@@ -1,0 +1,218 @@
+# lazily-cs
+
+Lazy reactive primitives for C#/.NET — `Source`, `Computed`, and `Effect` with automatic
+dependency tracking, plus the [lazily-spec](https://github.com/lazily-hub/lazily-spec) wire
+protocol, CRDTs, and distributed plane.
+
+This is the ninth binding in the lazily family. The reactive kernel is a direct port of the
+reference semantics, and it replays the shared cross-language conformance corpus rather than
+asserting behaviour it invented locally.
+
+> **Status: early.** The reactive graph and the merge algebra are shipped and spec-conformant.
+> The remaining planes named in the feature matrix below are not implemented yet — the matrix is
+> the honest, single-source record of what exists.
+
+## Install
+
+```bash
+dotnet add package Lazily
+```
+
+Targets `net10.0`.
+
+## Quick start
+
+```csharp
+using Lazily;
+
+var ctx = new Context();
+
+var celsius = ctx.Source(21.0);
+var fahrenheit = ctx.Computed<double>(c => celsius.Get(c) * 9 / 5 + 32);
+
+Console.WriteLine(fahrenheit.Get()); // 69.8 — computed on first read, then cached
+
+using var log = ctx.Effect(c =>
+{
+    Console.WriteLine($"now {fahrenheit.Get(c):F1}F");
+    return null; // an optional cleanup callback
+});
+
+celsius.Set(25.0); // the effect reruns; fahrenheit recomputes on demand
+```
+
+## The model
+
+**Two cell kinds, one read surface, one write surface.**
+
+- `Source<T>` is a value written from outside the graph. It is the only kind carrying
+  `Set`/`Merge`, so write protection lives in the type rather than in a runtime gate.
+- `Computed<T>` derives a value from upstream. It is lazy and cached, and **guarded** by default:
+  a recompute yielding an equal value suppresses the whole downstream cascade.
+- `Effect` is the only sink. There are no observers, no subscriptions, and no change callbacks on
+  a handle — if you want to react to something, you write an effect.
+
+**Tracking is value-threaded, never ambient.** A compute body receives a `Compute` view carrying
+the recomputing node's identity as a value:
+
+```csharp
+var total = ctx.Computed<int>(c => a.Get(c) + b.Get(c));   // tracked: forms edges
+var once  = ctx.Computed<int>(c => a.Get(c.Untracked()));  // untracked: forms none
+```
+
+There is no ambient recompute stack to read from, so `Untracked()` is genuinely untracked and a
+read outside a compute cannot accidentally attribute an edge to whatever ran last. C# cannot bind
+the view to its recompute the way a lifetime does, so escape is caught at runtime: using a stored
+view after its compute returned throws `StaleComputeException` instead of silently registering an
+edge against a node that is no longer recomputing.
+
+**Invalidation is a non-consuming mark-frontier walk.** A write marks its transitive dependent
+cone stale and leaves every edge in place; nothing recomputes until something is read. Because the
+edges survive, a node can be marked clean again *without* recomputing and still be reachable from
+its source — which is what keeps the next genuine change from being lost at depth two.
+
+**Batching coalesces the cascade, never the algebra.**
+
+```csharp
+ctx.Batch(() =>
+{
+    acc.Merge(1);
+    acc.Merge(2);
+    acc.Merge(3);
+});
+// three folds happened synchronously; the watcher ran once
+```
+
+**Eager is a state, not a kind.** `computed.Eager()` attaches a puller effect that materializes
+the value immediately and again after every invalidation. Because the puller is an ordinary
+effect, N invalidations inside a batch coalesce into one pull at the flush. `Lazy()` reverses it.
+
+**Disposal is explicit, and it dirties what survives.** Dropping the last C# reference to a node
+reclaims nothing reactive: the graph holds strong edges, so a long-lived source retains every node
+that ever read it. `Dispose()` detaches both edge directions and marks the surviving cone stale.
+A `TeardownScope` groups nodes and tears them down in reverse creation order:
+
+```csharp
+var scope = ctx.Scope();
+var view = scope.Own(ctx.Computed<int>(c => source.Get(c) * 2));
+scope.Close();   // reverse creation order; effect cleanups run
+```
+
+**A divergent feedback loop reports exhaustion instead of hanging.** An effect that writes into
+its own dependency cone closes a loop through the *scheduler*, not the graph — it is not a
+dependency cycle, and it runs flat at constant stack depth, so neither acyclicity nor recursion
+bounds can catch it. `Context.DrainBudget` is the only exit, and `LastDrainExhaustion` identifies
+the effect that concentrated the runs rather than merely announcing that a counter was hit.
+
+## Merge algebra
+
+A `Source<T>` folds writes under a `MergePolicy<T>`; the default is keep-latest, so a plain source
+*is* a plain cell (`Cell ≡ Source<KeepLatest>`). Associativity is a law, verified by the law tests.
+The flags are declarations about which overflow behaviour is sound downstream: commutativity is
+the reordering tax, idempotency the durability tax, and only raw FIFO cannot conflate.
+
+| Policy | Fold | Commutative | Idempotent | Conflates |
+|---|---|:---:|:---:|:---:|
+| `KeepLatest` | `op` | — | ✅ | ✅ |
+| `Sum` | `a + b` | ✅ | — | ✅ |
+| `Max` | `max(a, b)` | ✅ | ✅ | ✅ |
+| `SetUnion` | `a ∪ b` | ✅ | ✅ | ✅ |
+| `RawFifo` | `a ++ b` | — | — | — |
+
+The write guard runs on the merged result, so an idempotent policy's no-op merge fires no cascade.
+
+## Divergences from the reference bindings
+
+- **No `comparable` bound.** Rust and Go bound a source's value so the write guard can use `==`.
+  C# has no such bound, so the guard uses `EqualityComparer<T>.Default` and every constructor
+  accepts an explicit `IEqualityComparer<T>`. That is strictly more general, and it means a
+  reference type without a value-equality override is guarded by reference identity unless you
+  pass a comparer.
+- **Constructors are extension methods.** `ctx.Source(…)`, `ctx.Computed(…)`, `ctx.Slot(…)`, and
+  `ctx.Effect(…)` live on `Reactive` so the factory names can match the family vocabulary without
+  colliding with the type names they return.
+
+## Conformance
+
+The cross-language corpus lives in [lazily-spec](https://github.com/lazily-hub/lazily-spec) and is
+**never vendored here** — a bundled copy drifts from the spec. Clone it beside this repo:
+
+```bash
+git clone https://github.com/lazily-hub/lazily-spec.git ../lazily-spec
+make check
+```
+
+The runner fails hard when the corpus is absent rather than skipping, asserts a positive fixture
+and assertion count, and keeps an explicit ledger of unsupported fixtures and known divergences —
+both are asserted to match exactly, so a new divergence fails the build and a fixed one fails it
+until its entry is deleted. Today lazily-cs replays **the whole `reactive-graph` corpus with an
+empty ledger**, including the merge-feed and bounded-feedback-drain fixtures.
+
+## Feature coverage
+
+Generated from `coverage.json` in lazily-spec — do not edit by hand.
+
+<!-- coverage-table:start -->
+| Feature | Rust | Python | Kotlin | JS | Dart | Zig | Go | C++ | C# |
+| --------- | :----: | :------: | :------: | :--: | :----: | :---: | :--: | :---: | :--: |
+| Reactive graph — two cell kinds (nodes `SourceCell` / `ComputedCell`; handles `Source<T, M>` / `Computed<T>`) + `Effect` sink + eager `Computed` (`computed().eager()`) / all cells guarded / batch | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |
+| Keyed-map materialization (`SlotMap`) — mint-on-access derived slots: transparency + deferral (`#lzmatmode`) | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | — |
+| Thread-safe keyed map (`ThreadSafeSlotMap`) — `Send + Sync` + materialization confluence (`#lzmatmode`) | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | — |
+| Async keyed map (`AsyncSlotMap`) — eventual transparency (`#lzmatmode`) | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | — |
+| Keyed-map sync — membership propagation + materialize-on-ingest + derived-aggregate transparency (`#lzfamilysync`) | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | — |
+| Thread-safe context (lock-backed) | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | — |
+| Async reactive context | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | — |
+| Flat state machine | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | — |
+| Harel state charts | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | — |
+| Keyed reactive maps (`ReactiveMap`: `CellMap` / `SlotMap`) + `CellTree` + reconcile | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | — |
+| Memoized semantic tree (`SemTree`) | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | — |
+| Stable-id alignment (manufactured identity) | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | — |
+| Reactive queue (`QueueCell` SPSC/MPSC + `QueueStorage` adapter) | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | — |
+| Broadcast topic (`TopicCell`) — independent cursors + durable replay + safe GC (`#lztopiccell`) | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | — |
+| Competing-consumer work queue (`WorkQueueCell`) — exclusive leases + ack/nack + redelivery + DLQ (`#lzworkqueue`) | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | — |
+| Merge algebra + `Source<T, M>` — associative `MergePolicy` (`KeepLatest`/`Sum`/`Max`/`SetUnion`/`RawFifo`), `Cell ≡ Source<KeepLatest>`, read-any-cell/write-`Source` split (`#relaycell`) | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |
+| RelayCell — conflating relay + `BackpressurePolicy` + `SpillStore` + `Transport` + Inbox/Outbox + Rate/Window/Expiry/Priority/keyed policies (`#relaycell`) | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | — |
+| Free-text character CRDT (`TextCrdt`) | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | — |
+| `TextCrdt` delta sync (`version_vector` / `delta_since` / `apply_delta`) | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | — |
+| `CrdtTree` lossless document contract (`#lzcrdttree`) | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | — |
+| Move-aware sequence CRDT (`SeqCrdt`) | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | — |
+| Lossless tree CRDT core (`LosslessTreeCrdt`, M1) | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | — |
+| Lossless tree — dotted-frontier anti-entropy | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | — |
+| Lossless tree — concurrent merge convergence | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | — |
+| Registers (LWW / MV) + `PnCounter` + `CellCrdt` | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | — |
+| IPC wire — `Snapshot` + `Delta` + `CrdtSync` | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | — |
+| Shared-memory blob path (`ShmBlobArena`) | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | — |
+| Cross-process zero-copy transport (`BlobBackend` / shm / arrow) | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | — |
+| Distributed CRDT plane (`CrdtPlaneRuntime` / anti-entropy) | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | — |
+| Reliable sync — resync coordinator + at-least-once durable outbox + OR-set/LWW liveness (`#lzsync`) | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | — |
+| Storage-independent durable outbox (`OutboxStore` + shared outbox protocol; SQLite/Room/IndexedDB/file adapters) | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | — |
+| Reliable-sync transport seam + full-duplex `SyncDriver` loop (`IpcSink`/`IpcSource`, `#sync-driver`) | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | — |
+| Distributed plane — WebRTC transport + signaling | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | — |
+| State projection / mirror | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | — |
+| Causal receipts (`CausalReceipts` outcome projection) | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | — |
+| Message-passing + RPC command plane (`command-plane-v1`) | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | — |
+| C-ABI FFI boundary | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | — |
+| Permission boundary (`PeerPermissions` / `RemoteOp`) | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | — |
+| Capability negotiation (`SessionHandshake`) | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | — |
+| Instrumentation / benchmarks | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | — |
+| Temporal sources — `TimerCell` / `IntervalCell` / `CronCell` / `DeadlineCell` over a logical clock (`#lztime`) | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | — |
+| Rate-shaping operators — `DebounceCell` / `ThrottleCell` / `SampleCell` / `ProbabilisticSampleCell` (`#lzrateshape`) | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | — |
+| Membership + failure detection — `MembershipCell` (SWIM + Phi-accrual) / `PeerSet` / `PeerChangeEvent` (`#lzmemb`) | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | — |
+| Distributed coordination — `LeaseCell` / `LeaderCell` / `LockCell` / `SemaphoreCell` / `BarrierCell`+`QuorumCell` (`#lzcoord`) | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | — |
+| Presence + ephemeral plane — `PresenceCell` / `AwarenessCell` / `EphemeralCell` + `Ephemeral`/`Durable` markers (`#lzpresence`) | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | — |
+| Stream windowing — `TumblingWindow` / `SlidingWindow` / `SessionWindow` over the merge algebra (`#lzwindow`) | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | — |
+| Fault tolerance — `CircuitBreakerCell` / `RetryPolicyCell` / `BulkheadCell` / `TimeoutCell` (`#lzresilience`) | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | — |
+| Embedded-service plane — `HealthCell` / `ReadinessCell` / `DiscoveryCell` / `ServiceRegistry` (`#lzservice`) | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | — |
+<!-- coverage-table:end -->
+
+## Development
+
+```bash
+make check          # build + test — run before committing
+make conformance    # replay the shared lazily-spec fixtures only
+make format-check   # dotnet format --verify-no-changes
+```
+
+## License
+
+MIT
