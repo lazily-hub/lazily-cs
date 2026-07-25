@@ -7,34 +7,27 @@ namespace Lazily.Tests;
 /// The fixture interpreter for the shared <c>reactive-graph</c> conformance corpus.
 /// </summary>
 /// <remarks>
-/// It replays a fixture's ops against a real <see cref="Context"/> and records every assertion
-/// that diverged. Divergences are DATA, not exceptions: the runner reports the full set so a
-/// single run shows every failure, and the ledger test asserts the observed set equals the
-/// declared one exactly — a new divergence fails the build, and a fixed one fails it until its
-/// entry is deleted. Both directions are load-bearing.
+/// It replays a fixture's ops against an <see cref="IGraphModel"/> — one of this binding's
+/// execution models — and records every assertion that diverged. Divergences are DATA, not
+/// exceptions: the runner reports the full set so a single run shows every failure, and the
+/// ledger test asserts the observed set equals the declared one exactly. A new divergence fails
+/// the build, and a fixed one fails it until its entry is deleted. Both directions are
+/// load-bearing.
+/// <para>
+/// The engine knows nothing about which context it is driving. That is deliberate: the op stream
+/// is the specification, and a defect that is correct on one execution model and broken on
+/// another only shows up when the identical stream runs on both.
+/// </para>
 /// </remarks>
 public sealed class ReactiveGraphEngine
 {
-    private enum Kind { Source, Computed, Effect }
-
-    private sealed record NodeRef(Kind Kind, ReactiveNode Handle);
-
-    private readonly Context _ctx = new();
+    private readonly IGraphModel _model;
     private readonly Dictionary<string, NodeRef> _nodes = [];
 
     // Handles are kept forever so `dispose_stale_handle` can dispose through an id that has since
     // been recycled.
     private readonly Dictionary<string, NodeRef> _stale = [];
-    private readonly Dictionary<string, TeardownScope> _scopes = [];
-
-    // Cumulative per-node counters, never reset: `computes_of` / `merges_of` are running totals
-    // from scenario start, so a fixture can assert that a step did NOT compute by repeating the
-    // previous step's number.
-    private readonly Dictionary<string, int> _computes = [];
-    private readonly Dictionary<string, int> _merges = [];
-
-    private readonly List<string> _runLog = [];
-    private readonly List<string> _cleanupLog = [];
+    private readonly Dictionary<string, IScopeModel> _scopes = [];
 
     // A reader that still names a disposed dependency errors on its next recompute and stays
     // broken until it is itself rebuilt.
@@ -54,8 +47,13 @@ public sealed class ReactiveGraphEngine
     private int _step;
 
     /// <summary>Creates an engine for one fixture (or one scenario within it).</summary>
+    /// <param name="model">The execution model to replay against.</param>
     /// <param name="fixture">The fixture name, used in divergence keys.</param>
-    public ReactiveGraphEngine(string fixture) => _fixture = fixture;
+    public ReactiveGraphEngine(IGraphModel model, string fixture)
+    {
+        _model = model;
+        _fixture = fixture;
+    }
 
     /// <summary>Replays a step list.</summary>
     /// <param name="steps">The fixture's <c>steps</c> array.</param>
@@ -66,49 +64,39 @@ public sealed class ReactiveGraphEngine
             _step = i;
             var step = steps[i];
             var op = step.GetProperty("op");
-            var runsBefore = _runLog.Count;
+            var runsBefore = _model.RunLog.Count;
             long? opValue = null;
             var opError = false;
             Ops++;
 
             // Measure this op's drain in isolation: exhaustion is a cumulative observable.
-            _ctx.ClearDrainExhaustion();
+            _model.ClearDrainExhaustion();
 
             switch (Str(op, "type"))
             {
                 case "cell":
-                    Define(Str(op, "id")!, new NodeRef(Kind.Source, Own(op, NewSource(Num(op, "value") ?? 0))));
+                    Define(Factory(op).Cell(Str(op, "id")!, Num(op, "value") ?? 0));
                     break;
 
                 case "merge_cell":
                     {
-                        // A merge cell is an ordinary source whose write folds under a policy. The
-                        // corpus only ever merges under Sum; reject anything else loudly rather than
-                        // silently folding under the wrong algebra.
+                        // The corpus only ever merges under Sum; reject anything else loudly
+                        // rather than silently folding under the wrong algebra.
                         var policy = Str(op, "policy");
                         if (policy is not null && policy != "Sum")
                             throw new NotSupportedException($"{_fixture}: unsupported merge policy {policy}");
-                        var id = Str(op, "id")!;
-                        _merges.TryAdd(id, 0);
-                        // `merges_of` counts folds the LIBRARY performed, not calls the runner made:
-                        // the counter lives inside the policy's fold, so a binding that deferred or
-                        // dropped the fold reports a lower count even though the call was issued. That
-                        // is exactly the discrimination the merge fixtures are written to make.
-                        var counted = MergePolicy.Sum<long>() with
-                        {
-                            Merge = (a, b) => { _merges[id] = _merges[id] + 1; return a + b; },
-                        };
-                        var src = _ctx.Source(Num(op, "value") ?? 0, counted);
-                        Define(id, new NodeRef(Kind.Source, Own(op, src)));
+                        Define(Factory(op).MergeCell(Str(op, "id")!, Num(op, "value") ?? 0));
                         break;
                     }
 
                 case "computed":
-                    DefineComputed(op, eager: false);
+                    Define(Factory(op).Computed(Str(op, "id")!, ReadsOf(op), Num(op, "offset") ?? 0));
                     break;
 
                 case "signal":
-                    DefineComputed(op, eager: true);
+                    // Never created inside a teardown scope by the corpus, so it lives on the
+                    // model rather than the shared node factory.
+                    Define(_model.Signal(Str(op, "id")!, ReadsOf(op), Num(op, "offset") ?? 0));
                     break;
 
                 case "effect":
@@ -123,31 +111,31 @@ public sealed class ReactiveGraphEngine
                     }
 
                 case "set_cell":
-                    SourceOf(Str(op, "id")!).Set(Num(op, "value") ?? 0);
+                    _model.SetCell(_nodes[Str(op, "id")!], Num(op, "value") ?? 0);
                     break;
 
                 case "batch":
                     {
                         var writes = Items(op, "writes");
                         var mergeOps = Items(op, "merges");
-                        _ctx.Batch(() =>
+                        _model.Batch(() =>
                         {
-                            foreach (var w in writes) SourceOf(Str(w, "id")!).Set(Num(w, "value") ?? 0);
+                            foreach (var w in writes) _model.SetCell(_nodes[Str(w, "id")!], Num(w, "value") ?? 0);
                             // Explicit merge() calls fold SYNCHRONOUSLY inside a batch; only
                             // propagation defers. N calls produce N folds — the caller decides how
                             // many ops exist, so the count is exact.
-                            foreach (var m in mergeOps) SourceOf(Str(m, "id")!).Merge(Num(m, "value") ?? 0);
+                            foreach (var m in mergeOps) _model.MergeInto(_nodes[Str(m, "id")!], Num(m, "value") ?? 0);
                         });
                         break;
                     }
 
                 case "dispose":
-                    DisposeRef(_nodes[Str(op, "id")!]);
+                    _model.DisposeNode(_nodes[Str(op, "id")!]);
                     break;
 
                 case "dispose_signal":
                     // Only the puller goes; the backing computed stays readable and reverts to lazy.
-                    ((Computed<long>)_nodes[Str(op, "id")!].Handle).Lazy();
+                    _model.DisposeSignal(_nodes[Str(op, "id")!]);
                     break;
 
                 case "fanout":
@@ -158,10 +146,7 @@ public sealed class ReactiveGraphEngine
                         var prefix = Str(op, "id_prefix")!;
                         var reads = ReadsOf(op);
                         for (var k = 0; k < (Num(op, "count") ?? 0); k++)
-                        {
-                            var id = $"{prefix}_{k}";
-                            Define(id, new NodeRef(Kind.Effect, PlainEffect(id, reads)));
-                        }
+                            Define(_model.Effect($"{prefix}_{k}", reads));
                         break;
                     }
 
@@ -170,7 +155,7 @@ public sealed class ReactiveGraphEngine
                         var prefix = Str(op, "id_prefix")!;
                         for (var k = 0; k < (Num(op, "count") ?? 0); k++)
                         {
-                            if (_nodes.TryGetValue($"{prefix}_{k}", out var n)) DisposeRef(n);
+                            if (_nodes.TryGetValue($"{prefix}_{k}", out var n)) _model.DisposeNode(n);
                         }
                         break;
                     }
@@ -180,7 +165,7 @@ public sealed class ReactiveGraphEngine
                     break;
 
                 case "begin_scope":
-                    _scopes[Str(op, "scope")!] = _ctx.Scope();
+                    _scopes[Str(op, "scope")!] = _model.Scope();
                     break;
 
                 case "end_scope":
@@ -188,18 +173,15 @@ public sealed class ReactiveGraphEngine
                         var name = Str(op, "scope")!;
                         var sc = _scopes[name];
                         _scopes.Remove(name);
-                        try { sc.Close(); }
+                        try { sc.CloseScope(); }
                         catch (DisposedNodeException) { opError = true; }
                         break;
                     }
 
                 case "disarm":
-                    {
-                        var name = Str(op, "scope")!;
-                        _scopes[name].Disarm();
-                        // A disarmed scope owns nothing; a later end_scope on it is a no-op.
-                        break;
-                    }
+                    // A disarmed scope owns nothing; a later end_scope on it is a no-op.
+                    _scopes[Str(op, "scope")!].Disarm();
+                    break;
 
                 case "dispose_stale_handle":
                     {
@@ -209,14 +191,14 @@ public sealed class ReactiveGraphEngine
                         var want = Str(op, "handle_kind");
                         var matches = want switch
                         {
-                            "cell" => h.Kind == Kind.Source,
-                            "slot" or "computed" => h.Kind == Kind.Computed,
-                            "effect" => h.Kind == Kind.Effect,
+                            "cell" => h.Kind == NodeKind.Cell,
+                            "slot" or "computed" => h.Kind is NodeKind.Computed or NodeKind.Signal,
+                            "effect" => h.Kind == NodeKind.Effect,
                             _ => false,
                         };
                         if (!matches)
                             throw new InvalidOperationException($"{_fixture}: handle_kind {want} does not match recorded handle for {of}");
-                        DisposeRef(h);
+                        _model.DisposeNode(h);
                         break;
                     }
 
@@ -224,8 +206,12 @@ public sealed class ReactiveGraphEngine
                     throw new NotSupportedException($"{_fixture}: unknown op {Str(op, "type")}");
             }
 
+            // Async computes and effect bodies are spawned, so every observable below is
+            // meaningless until the model has run them. Synchronous models are already quiescent.
+            _model.Settle();
+
             if (!step.TryGetProperty("expect", out var expect)) continue;
-            Assert(expect, op, opValue, opError, _runLog.Skip(runsBefore).ToList());
+            Assert(expect, op, opValue, opError, _model.RunLog.Skip(runsBefore).ToList());
         }
     }
 
@@ -237,7 +223,8 @@ public sealed class ReactiveGraphEngine
     public IReadOnlyList<string> ReplayTail(JsonElement expected)
     {
         _step = -1; // the expected tail is not a numbered step
-        var observation = new List<string> { $"cleanup_order={string.Join(",", _cleanupLog)}" };
+        _model.Settle();
+        var observation = new List<string> { $"cleanup_order={string.Join(",", _model.CleanupLog)}" };
 
         if (expected.TryGetProperty("final_state", out var fin))
         {
@@ -245,7 +232,7 @@ public sealed class ReactiveGraphEngine
             {
                 foreach (var p in deps.EnumerateObject())
                 {
-                    var got = _ctx.DependentCount(_nodes[p.Name].Handle);
+                    var got = _model.DependentCount(_nodes[p.Name]);
                     Check($"final.dependents_of.{p.Name}", got, p.Value.GetInt32());
                     observation.Add($"dependents_of.{p.Name}={got}");
                 }
@@ -254,9 +241,7 @@ public sealed class ReactiveGraphEngine
             {
                 foreach (var p in readable.EnumerateObject())
                 {
-                    var alive = !_nodes.TryGetValue(p.Name, out var n) ? false
-                        : n.Kind == Kind.Effect ? ((Effect)n.Handle).IsActive
-                        : Read(p.Name).Ok;
+                    var alive = Readable(p.Name);
                     Check($"final.readable.{p.Name}", alive, p.Value.GetBoolean());
                     observation.Add($"readable.{p.Name}={alive}");
                 }
@@ -275,9 +260,10 @@ public sealed class ReactiveGraphEngine
         if (expected.TryGetProperty("after_publish", out var publish) &&
             publish.TryGetProperty("op", out var pop))
         {
-            var before = _runLog.Count;
-            SourceOf(Str(pop, "id")!).Set(Num(pop, "value") ?? 0);
-            var observed = _runLog.Skip(before).ToList();
+            var before = _model.RunLog.Count;
+            _model.SetCell(_nodes[Str(pop, "id")!], Num(pop, "value") ?? 0);
+            _model.Settle();
+            var observed = _model.RunLog.Skip(before).ToList();
             observation.Add($"after_publish.observed_by={string.Join(",", observed)}");
             if (publish.TryGetProperty("observed_by", out var wantObserved))
                 Check("after_publish.observed_by", string.Join(",", observed), string.Join(",", Strings(wantObserved)));
@@ -294,7 +280,7 @@ public sealed class ReactiveGraphEngine
             {
                 foreach (var p in pDeps.EnumerateObject())
                 {
-                    var got = _ctx.DependentCount(_nodes[p.Name].Handle);
+                    var got = _model.DependentCount(_nodes[p.Name]);
                     Check($"after_publish.dependents_of.{p.Name}", got, p.Value.GetInt32());
                     observation.Add($"after_publish.dependents_of.{p.Name}={got}");
                 }
@@ -319,10 +305,10 @@ public sealed class ReactiveGraphEngine
         {
             foreach (var p in computesOf.EnumerateObject())
             {
-                var got = _computes.TryGetValue(p.Name, out var c)
-                    ? c
-                    // "computes" of an effect are its runs, already recorded in the run log.
-                    : _runLog.Count(n => n == p.Name);
+                var got = _model.ComputesOf(p.Name);
+                // "computes" of an effect are its runs, already recorded in the run log.
+                if (got == 0 && _nodes.TryGetValue(p.Name, out var n) && n.Kind == NodeKind.Effect)
+                    got = _model.RunLog.Count(x => x == p.Name);
                 Check($"computes_of.{p.Name}", got, p.Value.GetInt32());
             }
         }
@@ -338,24 +324,24 @@ public sealed class ReactiveGraphEngine
                 case "merges_of":
                     foreach (var p in prop.Value.EnumerateObject())
                     {
-                        if (!_merges.TryGetValue(p.Name, out var got))
+                        if (!_model.KnowsMerge(p.Name))
                             throw new InvalidOperationException($"{_fixture}: merges_of unknown cell {p.Name}");
-                        Check($"merges_of.{p.Name}", got, p.Value.GetInt32());
+                        Check($"merges_of.{p.Name}", _model.MergesOf(p.Name), p.Value.GetInt32());
                     }
                     break;
 
                 case "drain_exhausted":
-                    Check("drain_exhausted", _ctx.LastDrainExhaustion is not null, prop.Value.GetBoolean());
+                    Check("drain_exhausted", _model.DrainExhausted, prop.Value.GetBoolean());
                     break;
 
                 case "dependents_of":
                     foreach (var p in prop.Value.EnumerateObject())
-                        Check($"dependents_of.{p.Name}", _ctx.DependentCount(_nodes[p.Name].Handle), p.Value.GetInt32());
+                        Check($"dependents_of.{p.Name}", _model.DependentCount(_nodes[p.Name]), p.Value.GetInt32());
                     break;
 
                 case "dependencies_of":
                     foreach (var p in prop.Value.EnumerateObject())
-                        Check($"dependencies_of.{p.Name}", _ctx.DependencyCount(_nodes[p.Name].Handle), p.Value.GetInt32());
+                        Check($"dependencies_of.{p.Name}", _model.DependencyCount(_nodes[p.Name]), p.Value.GetInt32());
                     break;
 
                 case "error":
@@ -390,15 +376,7 @@ public sealed class ReactiveGraphEngine
 
                 case "readable":
                     foreach (var p in prop.Value.EnumerateObject())
-                    {
-                        bool alive;
-                        if (!_nodes.TryGetValue(p.Name, out var n)) alive = false;
-                        // A signal is readable iff its backing computed is: disposing the puller
-                        // leaves the value live, so this must NOT consult the puller.
-                        else if (n.Kind == Kind.Effect) alive = ((Effect)n.Handle).IsActive;
-                        else alive = Read(p.Name).Ok;
-                        Check($"readable.{p.Name}", alive, p.Value.GetBoolean());
-                    }
+                        Check($"readable.{p.Name}", Readable(p.Name), p.Value.GetBoolean());
                     break;
 
                 case "observed_by":
@@ -414,14 +392,14 @@ public sealed class ReactiveGraphEngine
                         // Only effects run a cleanup callback, so the expected order is projected onto
                         // its effect entries. `cleanup_order` is cumulative, not per-step.
                         var want = Strings(prop.Value)
-                            .Where(id => _stale.TryGetValue(id, out var h) && h.Kind == Kind.Effect);
-                        Check("cleanup_order", string.Join(",", _cleanupLog), string.Join(",", want));
+                            .Where(id => _stale.TryGetValue(id, out var h) && h.Kind == NodeKind.Effect);
+                        Check("cleanup_order", string.Join(",", _model.CleanupLog), string.Join(",", want));
                         break;
                     }
 
                 case "scope_owned_count":
                     foreach (var p in prop.Value.EnumerateObject())
-                        Check($"scope_owned_count.{p.Name}", _scopes[p.Name].Count, p.Value.GetInt32());
+                        Check($"scope_owned_count.{p.Name}", _scopes[p.Name].Owned, p.Value.GetInt32());
                     break;
 
                 default:
@@ -442,37 +420,21 @@ public sealed class ReactiveGraphEngine
     // Node construction
     // -----------------------------------------------------------------------
 
-    private void Define(string id, NodeRef n)
+    private void Define(NodeRef n)
     {
-        _nodes[id] = n;
-        _stale[id] = n;
-        _poisoned.Remove(id);
+        _nodes[n.Id] = n;
+        _stale[n.Id] = n;
+        _poisoned.Remove(n.Id);
     }
 
-    private Source<long> NewSource(long v) => _ctx.Source(v);
-
-    private TNode Own<TNode>(JsonElement op, TNode node) where TNode : ReactiveNode
+    /// <summary>
+    /// The construction surface for an op: the named teardown scope when the op declares one,
+    /// otherwise the model itself. One code path covers both.
+    /// </summary>
+    private INodeFactory Factory(JsonElement op)
     {
         var scope = Str(op, "scope");
-        return scope is null ? node : _scopes[scope].Own(node);
-    }
-
-    private void DefineComputed(JsonElement op, bool eager)
-    {
-        var id = Str(op, "id")!;
-        var reads = ReadsOf(op);
-        var offset = Num(op, "offset") ?? 0;
-        _computes.TryAdd(id, 0);
-        var node = _ctx.Computed<long>(c =>
-        {
-            _computes[id] = _computes.GetValueOrDefault(id) + 1;
-            var sum = offset;
-            foreach (var r in reads) sum += ReadTracked(r, c);
-            return sum;
-        }, name: id);
-        Own(op, node);
-        if (eager) node.Eager();
-        Define(id, new NodeRef(Kind.Computed, node));
+        return scope is null ? _model : _scopes[scope];
     }
 
     private void DefineEffect(JsonElement op)
@@ -481,59 +443,16 @@ public sealed class ReactiveGraphEngine
         var mergesInto = Str(op, "merges_into");
         var writesOwnCone = Str(op, "writes_own_cone");
 
-        Effect effect;
-        if (mergesInto is not null)
-        {
-            // A feed effect reads upstream (tracked) and folds the sum into the merge cell through
-            // the UNTRACKED write surface — the write is an argument, not a dependency.
-            var reads = ReadsOf(op);
-            var target = SourceOf(mergesInto);
-            _merges.TryAdd(mergesInto, 0);
-            effect = new Effect(_ctx, c =>
-            {
-                _runLog.Add(id);
-                long acc = 0;
-                foreach (var r in reads) acc += ReadTracked(r, c);
-                target.Merge(acc);
-                return () => _cleanupLog.Add(id);
-            });
-        }
-        else if (writesOwnCone is not null)
-        {
-            // The divergent effect: read `own` (tracked, so it is a dependency) and write an
-            // incremented value back into it. The write reschedules the effect through the
-            // SCHEDULER — a scheduler-closed loop, not a graph cycle — which the bounded drain
-            // cuts short. Lowering the budget here keeps the exhausting loop fast.
-            //
-            // Zero is held as a fixed point so that at creation the effect reads 0, writes 0, the
-            // store guard skips the invalidation, and the loop is not kicked yet. The edge is
-            // registered the instant the read runs, so a plain n+1 body would reschedule itself
-            // mid-creation and exhaust before the external kick ever landed.
-            var own = SourceOf(writesOwnCone);
-            _ctx.DrainBudget = 256;
-            effect = new Effect(_ctx, c =>
-            {
-                _runLog.Add(id);
-                var v = own.Get(c);
-                own.Set(v == 0 ? 0 : unchecked(v + 1));
-                return () => _cleanupLog.Add(id);
-            });
-        }
-        else
-        {
-            effect = PlainEffect(id, ReadsOf(op));
-        }
-
-        Own(op, effect);
-        Define(id, new NodeRef(Kind.Effect, effect));
+        // A feed effect reads upstream (tracked) and folds the sum into a merge cell through the
+        // UNTRACKED write surface; the divergent effect reads and writes the same cell, closing a
+        // feedback loop through the SCHEDULER rather than through the graph.
+        var node = mergesInto is not null
+            ? _model.FeedEffect(id, ReadsOf(op), _nodes[mergesInto])
+            : writesOwnCone is not null
+                ? _model.SelfWritingEffect(id, _nodes[writesOwnCone])
+                : Factory(op).Effect(id, ReadsOf(op));
+        Define(node);
     }
-
-    private Effect PlainEffect(string id, IReadOnlyList<NodeRef> reads) => new(_ctx, c =>
-    {
-        _runLog.Add(id);
-        foreach (var r in reads) ReadTracked(r, c);
-        return () => _cleanupLog.Add(id);
-    });
 
     private void Churn(JsonElement op)
     {
@@ -549,8 +468,8 @@ public sealed class ReactiveGraphEngine
                 for (var c = 0L; c < cycles; c++)
                 {
                     var id = $"{prefix}_{c % width}";
-                    if (_nodes.TryGetValue(id, out var existing)) DisposeRef(existing);
-                    Define(id, new NodeRef(Kind.Effect, PlainEffect(id, [source])));
+                    if (_nodes.TryGetValue(id, out var existing)) _model.DisposeNode(existing);
+                    Define(_model.Effect(id, [source]));
                 }
                 break;
 
@@ -560,9 +479,9 @@ public sealed class ReactiveGraphEngine
                     var name = $"{prefix}_scoped";
                     for (var c = 0L; c < cycles; c++)
                     {
-                        var sc = _ctx.Scope();
-                        sc.Own(PlainEffect(name, [source]));
-                        sc.Close();
+                        var sc = _model.Scope();
+                        sc.Effect(name, [source]);
+                        sc.CloseScope();
                     }
                     break;
                 }
@@ -576,49 +495,22 @@ public sealed class ReactiveGraphEngine
     // Reads
     // -----------------------------------------------------------------------
 
-    private long ReadTracked(NodeRef n, Compute c) => n.Kind switch
+    private bool Readable(string id)
     {
-        Kind.Source => ((Source<long>)n.Handle).Get(c),
-        Kind.Computed => ((Computed<long>)n.Handle).Get(c),
-        _ => throw new InvalidOperationException($"{_fixture}: cannot read node kind {n.Kind}"),
-    };
+        if (!_nodes.TryGetValue(id, out var n)) return false;
+        // A signal is readable iff its backing computed is: disposing the puller leaves the value
+        // live, so this must NOT consult the puller.
+        return n.Kind == NodeKind.Effect ? _model.IsEffectActive(n) : Read(id).Ok;
+    }
 
     private (bool Ok, long Value) Read(string id)
     {
         if (_poisoned.Contains(id)) return (false, 0);
         if (!_nodes.TryGetValue(id, out var n))
             throw new InvalidOperationException($"{_fixture}: read of unknown node {id}");
-        try
-        {
-            return n.Kind switch
-            {
-                Kind.Source => (true, ((Source<long>)n.Handle).Get()),
-                Kind.Computed => (true, ((Computed<long>)n.Handle).Get()),
-                _ => throw new InvalidOperationException($"{_fixture}: read of effect {id}"),
-            };
-        }
-        catch (DisposedNodeException)
-        {
-            _poisoned.Add(id);
-            return (false, 0);
-        }
-    }
-
-    private Source<long> SourceOf(string id) => _nodes[id] switch
-    {
-        { Kind: Kind.Source, Handle: Source<long> s } => s,
-        _ => throw new InvalidOperationException($"{_fixture}: {id} is not a source cell"),
-    };
-
-    private static void DisposeRef(NodeRef n)
-    {
-        switch (n.Handle)
-        {
-            case Source<long> s: s.Dispose(); break;
-            case Computed<long> c: c.Dispose(); break;
-            case Effect e: e.Dispose(); break;
-            default: throw new InvalidOperationException($"unknown node handle {n.Handle.GetType()}");
-        }
+        var r = _model.Read(n);
+        if (!r.Ok) _poisoned.Add(id);
+        return r;
     }
 
     private IReadOnlyList<NodeRef> ReadsOf(JsonElement op)

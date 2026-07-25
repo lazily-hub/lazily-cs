@@ -104,6 +104,71 @@ dependency cycle, and it runs flat at constant stack depth, so neither acyclicit
 bounds can catch it. `Context.DrainBudget` is the only exit, and `LastDrainExhaustion` identifies
 the effect that concentrated the runs rather than merely announcing that a counter was hit.
 
+## Concurrency layers
+
+.NET has real threads, so both concurrency layers are required of this binding rather than
+declared `none`.
+
+**`ThreadSafeContext` — lock-backed.** It wraps a single-threaded `Context` with a reentrant lock
+and reuses the core batch coalescing, so it *refines* the kernel rather than reimplementing it: a
+one-write critical section is observationally a plain `Set`, and a batch of concurrent writes
+coalesces into one invalidation pass whose result is a function of the serialized write list, not
+of the interleaving the lock happened to pick.
+
+```csharp
+var ts = new ThreadSafeContext();
+Source<int> total = null!;
+ts.WithLock(ctx => total = ctx.Source(0));
+
+ts.Batch(() =>          // three writes, one coalesced cascade
+{
+    ts.Set(total, 1);
+    ts.Set(total, 2);
+    ts.Set(total, 3);
+});
+
+var now = ts.WithLock(_ => total.Peek());
+```
+
+`ThreadSafeKernel.ApplyBatch` / `FlushBatch` are the pure counterpart of the Lean
+`LazilyFormal.ThreadSafe` model — the coalescing law over a plain node table, checkable without a
+live graph.
+
+**`AsyncContext` — a distinct graph.** It is not an overload of the other two. An async slot can
+be *in flight* when its inputs change, can complete after those inputs are gone, and can be
+cancelled mid-flight, so it carries an explicit state machine (`Empty` / `Computing` / `Resolved`
+/ `Error`), a revision per slot, and its own handles. Sources stay the **synchronous input layer**:
+`Source`, `Peek`, and `Set` are synchronous; only computed evaluation and effects are async.
+
+```csharp
+await using var ctx = new AsyncContext();
+var userId = ctx.Source(1);
+var profile = ctx.Computed(async cc => await FetchAsync(cc.Track(userId), cc.Token));
+
+Console.WriteLine(await profile.GetAsync());
+userId.Set(2);                       // supersedes the in-flight compute
+Console.WriteLine(await profile.GetAsync());
+```
+
+The contract it honours in full:
+
+- **Revision tracking discards every stale completion.** A run publishes only while the slot still
+  holds the token it started with, so a value the graph has already moved past is never served.
+- **Dropping one waiter cancels only that waiter.** The shared computation keeps running for the
+  readers that remain, and there is at most one in flight per revision — concurrent readers attach
+  rather than spawning duplicates.
+- **`GetAsync` re-resolves rather than asserting.** The slot can change between lock acquisitions
+  and a superseded run closes its waiters without a value; both windows are benign and neither
+  throws.
+- **Effect cleanup runs on rerun or dispose and at no other time** — never at the end of the flush
+  that ran the body. The canonical effect acquires in the body and releases in the cleanup, so a
+  flush-end cleanup would release while the effect is still live. Reruns are serialized: the next
+  body does not start until the previous cleanup completes.
+- **Disposal awaits.** Disposing the context cancels every in-flight computation and awaits every
+  active cleanup before returning.
+- **`Batch` is synchronous at the mutation boundary.** Writes queue their roots; async reruns fire
+  after the outermost batch exits, never inside it.
+
 ## Merge algebra
 
 A `Source<T>` folds writes under a `MergePolicy<T>`; the default is keep-latest, so a plain source
@@ -131,6 +196,11 @@ The write guard runs on the merged result, so an idempotent policy's no-op merge
 - **Constructors are extension methods.** `ctx.Source(…)`, `ctx.Computed(…)`, `ctx.Slot(…)`, and
   `ctx.Effect(…)` live on `Reactive` so the factory names can match the family vocabulary without
   colliding with the type names they return.
+- **`AsyncContext` serializes on a lock, not an owner loop.** lazily-go funnels every graph
+  mutation through one goroutine and a command channel; `Monitor` is reentrant, so the same
+  invariant is expressed directly as a lock. Bodies run off it on the thread pool.
+- **An async slot in `Error` retries on the next read.** lazily-go serves the stored error
+  forever; `docs/async.md` lists `Error → Computing` on retry, and the spec is the authority.
 
 ## Conformance
 
@@ -147,6 +217,14 @@ and assertion count, and keeps an explicit ledger of unsupported fixtures and kn
 both are asserted to match exactly, so a new divergence fails the build and a fixed one fails it
 until its entry is deleted. Today lazily-cs replays **the whole `reactive-graph` corpus with an
 empty ledger**, including the merge-feed and bounded-feedback-drain fixtures.
+
+The runner is parameterised over the **execution model** and replays the same op stream against
+`Context`, `ThreadSafeContext`, and `AsyncContext`. That is not thoroughness for its own sake: a
+cascade that stops one level below the write is correct synchronously and broken asynchronously,
+because an async read short-circuits on a resolved cache and serves the stale value forever. A
+single-context replay cannot see it. Constructs one plane does not ship (the eager `signal`, the
+`merge_cell` fold, the bounded drain — all synchronous-kernel constructs) are gated per model with
+a stated reason, never degraded to the nearest available substitute.
 
 ## Feature coverage
 
