@@ -44,9 +44,7 @@ public sealed class CollectionsConformanceTests
         ["queuecell_mpsc_multi_writer.json"] = "QueueCell",
         ["queuecell_popped_head_observation.json"] = "QueueCell",
         ["queuecell_spsc_push_pop.json"] = "QueueCell",
-        ["semtree_incremental.json"] = "SemTree",
         ["seqcrdt_convergence.json"] = "SeqCrdt",
-        ["stableid_alignment.json"] = "stable-id alignment",
         ["textcrdt_convergence.json"] = "TextCrdt",
         ["textcrdt_delta_sync.json"] = "TextCrdt",
         ["topiccell_broadcast_cursor_isolation.json"] = "TopicCell",
@@ -55,6 +53,21 @@ public sealed class CollectionsConformanceTests
         ["topiccell_offline_tail_bounds.json"] = "TopicCell",
         ["workqueue_competing_delivery.json"] = "WorkQueueCell",
         ["workqueue_lease_deadletter.json"] = "WorkQueueCell",
+    };
+
+    /// <summary>
+    /// Fixtures in this corpus that a DIFFERENT runner in this suite replays.
+    /// </summary>
+    /// <remarks>
+    /// Deliberately separate from <see cref="Unsupported"/>: that is a ledger of gaps in the
+    /// binding, and folding "another runner owns this" into it would quietly overstate what is
+    /// missing. These fixtures are shaped differently (scenario-based rather than step- or
+    /// reconcile-based) and have their own replay, so they are excluded here and covered there.
+    /// </remarks>
+    private static readonly Dictionary<string, string> HandledElsewhere = new(StringComparer.Ordinal)
+    {
+        ["semtree_incremental.json"] = nameof(SemTreeConformanceTests),
+        ["stableid_alignment.json"] = nameof(StableIdConformanceTests),
     };
 
     /// <summary>Assertions this binding does not satisfy, keyed <c>fixture#step:key</c>.</summary>
@@ -77,7 +90,7 @@ public sealed class CollectionsConformanceTests
 
         foreach (var name in names)
         {
-            if (Unsupported.ContainsKey(name)) continue;
+            if (Unsupported.ContainsKey(name) || HandledElsewhere.ContainsKey(name)) continue;
 
             using var doc = SpecCorpus.Load(Corpus, name);
             var fx = doc.RootElement;
@@ -95,7 +108,8 @@ public sealed class CollectionsConformanceTests
         }
 
         Assert.Equal(
-            names.Where(n => !Unsupported.ContainsKey(n)).Order(StringComparer.Ordinal).ToArray(),
+            names.Where(n => !Unsupported.ContainsKey(n) && !HandledElsewhere.ContainsKey(n))
+                .Order(StringComparer.Ordinal).ToArray(),
             replayed.Order(StringComparer.Ordinal).ToArray());
         Assert.Equal(
             KnownDivergences.Values.Order(StringComparer.Ordinal).ToArray(),
