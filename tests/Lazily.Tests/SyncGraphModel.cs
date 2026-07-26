@@ -55,6 +55,9 @@ public class SyncGraphModel : IGraphModel
     /// <inheritdoc/>
     public int ComputesOf(string id) => _computes.Count(id);
 
+    /// <inheritdoc />
+    public void FailNext(string id, int count) => _computes.Arm(id, count);
+
     /// <inheritdoc/>
     public int MergesOf(string id) => _merges.Count(id);
 
@@ -111,7 +114,7 @@ public class SyncGraphModel : IGraphModel
         var deps = reads.ToArray();
         return _ctx.Computed<long>(c =>
         {
-            _computes.Tick(id);
+            if (_computes.Tick(id)) throw new ComputeFailedException(id);
             var sum = offset;
             foreach (var d in deps) sum += TrackRead(d, c);
             return sum;

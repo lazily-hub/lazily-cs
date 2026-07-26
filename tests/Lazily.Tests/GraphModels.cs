@@ -1,5 +1,17 @@
 namespace Lazily.Tests;
 
+/// <summary>
+/// The failure a <c>fail_next</c>-armed compute body throws.
+/// </summary>
+/// <remarks>
+/// A runner-owned sentinel, not a library error: the contract under test is that the library does
+/// not CACHE it, so what it is matters less than that the same body throws it once per armed run
+/// and the node still re-runs afterwards.
+/// </remarks>
+/// <param name="id">The fixture id whose compute was armed.</param>
+public sealed class ComputeFailedException(string id)
+    : InvalidOperationException($"reactive-graph: compute_failed (fail_next) for {id}");
+
 /// <summary>The kind of node a fixture op created.</summary>
 public enum NodeKind
 {
@@ -150,6 +162,15 @@ public interface IGraphModel : INodeFactory, IDisposable
     /// <param name="id">The fixture-level id.</param>
     int ComputesOf(string id);
 
+    /// <summary>
+    /// Arms the next <paramref name="count"/> computes of an existing node to throw, so a fixture
+    /// can assert on <see cref="ComputesOf"/> that a failed compute is never cached. Creates
+    /// nothing and touches no dependency set.
+    /// </summary>
+    /// <param name="id">The fixture-level id.</param>
+    /// <param name="count">How many upcoming computes must fail.</param>
+    void FailNext(string id, int count);
+
     /// <summary>The cumulative number of folds the LIBRARY performed for a merge cell.</summary>
     /// <param name="id">The fixture-level id.</param>
     int MergesOf(string id);
@@ -226,6 +247,9 @@ public sealed class CountLog
     private readonly System.Threading.Lock _gate = new();
     private readonly Dictionary<string, int> _counts = [];
 
+    // How many upcoming compute bodies must fail, per fixture id (`fail_next`).
+    private readonly Dictionary<string, int> _armed = [];
+
     /// <summary>Declares an id so a zero count is distinguishable from an unknown one.</summary>
     /// <param name="id">The fixture id.</param>
     public void Declare(string id)
@@ -233,11 +257,33 @@ public sealed class CountLog
         lock (_gate) _counts.TryAdd(id, 0);
     }
 
-    /// <summary>Increments an id's count.</summary>
+    /// <summary>
+    /// Increments an id's count and reports whether this run is armed to fail (`fail_next`).
+    /// </summary>
+    /// <remarks>
+    /// The count moves FIRST, so an armed run is counted exactly like a successful one — which is
+    /// what lets <c>failed_compute_is_never_cached.json</c> assert the retry on <c>computes_of</c>
+    /// rather than on the error a caching binding also raises.
+    /// </remarks>
     /// <param name="id">The fixture id.</param>
-    public void Tick(string id)
+    public bool Tick(string id)
     {
-        lock (_gate) _counts[id] = _counts.GetValueOrDefault(id) + 1;
+        lock (_gate)
+        {
+            _counts[id] = _counts.GetValueOrDefault(id) + 1;
+            var armed = _armed.GetValueOrDefault(id);
+            if (armed <= 0) return false;
+            _armed[id] = armed - 1;
+            return true;
+        }
+    }
+
+    /// <summary>Arms the next <paramref name="count"/> computes of an id to fail.</summary>
+    /// <param name="id">The fixture id.</param>
+    /// <param name="count">How many upcoming computes must fail.</param>
+    public void Arm(string id, int count)
+    {
+        lock (_gate) _armed[id] = _armed.GetValueOrDefault(id) + (count > 0 ? count : 1);
     }
 
     /// <summary>Whether an id has been declared.</summary>

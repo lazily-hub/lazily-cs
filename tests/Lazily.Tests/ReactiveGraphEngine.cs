@@ -110,6 +110,12 @@ public sealed class ReactiveGraphEngine
                         break;
                     }
 
+                case "fail_next":
+                    // Arms the next N computes of an existing node to throw. It creates nothing
+                    // and touches no dependency set.
+                    _model.FailNext(Str(op, "id")!, (int)(Num(op, "count") ?? 1));
+                    break;
+
                 case "set_cell":
                     _model.SetCell(_nodes[Str(op, "id")!], Num(op, "value") ?? 0);
                     break;
@@ -508,9 +514,20 @@ public sealed class ReactiveGraphEngine
         if (_poisoned.Contains(id)) return (false, 0);
         if (!_nodes.TryGetValue(id, out var n))
             throw new InvalidOperationException($"{_fixture}: read of unknown node {id}");
-        var r = _model.Read(n);
-        if (!r.Ok) _poisoned.Add(id);
-        return r;
+        try
+        {
+            var r = _model.Read(n);
+            if (!r.Ok) _poisoned.Add(id);
+            return r;
+        }
+        catch (ComputeFailedException)
+        {
+            // A failed read that must NOT latch: disposal is permanent by contract, a `fail_next`
+            // compute failure is recoverable by contract — the next read re-runs the body.
+            // Latching would make the engine report the very defect
+            // `failed_compute_is_never_cached.json` exists to catch.
+            return (false, 0);
+        }
     }
 
     private IReadOnlyList<NodeRef> ReadsOf(JsonElement op)

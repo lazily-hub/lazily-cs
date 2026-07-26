@@ -48,6 +48,9 @@ public sealed class AsyncGraphModel : IGraphModel
     /// <inheritdoc/>
     public int ComputesOf(string id) => _computes.Count(id);
 
+    /// <inheritdoc />
+    public void FailNext(string id, int count) => _computes.Arm(id, count);
+
     /// <inheritdoc/>
     public int MergesOf(string id) =>
         throw new NotSupportedException($"AsyncContext ships no merge policy — {GateHint}");
@@ -94,7 +97,7 @@ public sealed class AsyncGraphModel : IGraphModel
         var deps = reads.ToArray();
         var node = _ctx.Computed<long>(async cc =>
         {
-            _computes.Tick(id);
+            if (_computes.Tick(id)) throw new ComputeFailedException(id);
             var sum = offset;
             foreach (var d in deps) sum += await TrackRead(d, cc).ConfigureAwait(false);
             return sum;
