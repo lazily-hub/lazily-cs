@@ -68,6 +68,15 @@ reported green while testing nothing.
 
 Recorded here so they are decisions rather than drift:
 
+- **No deprecated aliases for the pre-v2 map names.** The other eight bindings keep
+  `CellMap` / `SlotMap` (and their ThreadSafe/Async variants) as deprecated aliases of
+  `SourceMap` / `ComputedMap`. C# has no exportable generic type alias — `using X<T> = Y<T>` is
+  file-scoped — so the only shim available is an `[Obsolete]` subclass, which forces the renamed
+  types to be unsealed and is still one-directional (a `SourceMap` the library returns is not a
+  `CellMap`). Deprecation exists to protect existing callers; this binding has none, since it is
+  unpublished and deliberately excluded from the release train. Permanently weakening four types
+  to serve zero consumers is the worse trade, so the old names are simply gone here.
+
 - **No `comparable` bound on a source's value.** The write guard uses
   `EqualityComparer<T>.Default`, with an explicit `IEqualityComparer<T>` overload on every
   constructor. Strictly more general than the Rust/Go `==` bound.

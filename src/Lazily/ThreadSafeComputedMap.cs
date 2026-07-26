@@ -21,7 +21,7 @@ namespace Lazily;
 /// </remarks>
 /// <typeparam name="TKey">The key type.</typeparam>
 /// <typeparam name="TValue">The value type.</typeparam>
-public class ThreadSafeComputedMap<TKey, TValue>
+public sealed class ThreadSafeComputedMap<TKey, TValue>
     where TKey : notnull
 {
     private readonly ThreadSafeContext _ctx;
@@ -87,22 +87,4 @@ public class ThreadSafeComputedMap<TKey, TValue>
     /// <summary>The entry count, subscribing the caller to MEMBERSHIP.</summary>
     /// <returns>The entry count.</returns>
     public int Len() => _ctx.WithLock(_ => _inner.Len());
-}
-
-/// <summary>Deprecated alias for <see cref="ThreadSafeComputedMap{TKey,TValue}"/>.</summary>
-/// <remarks>
-/// See <see cref="CellMap{TKey,TValue}"/> for why the old name is a subclass rather than an alias.
-/// </remarks>
-/// <typeparam name="TKey">The key type.</typeparam>
-/// <typeparam name="TValue">The value type.</typeparam>
-[Obsolete("renamed to ThreadSafeComputedMap")]
-public sealed class ThreadSafeSlotMap<TKey, TValue> : ThreadSafeComputedMap<TKey, TValue>
-    where TKey : notnull
-{
-    /// <summary>Creates an empty thread-safe derived-slot map bound to <paramref name="ctx"/>.</summary>
-    /// <param name="ctx">The owning thread-safe context.</param>
-    public ThreadSafeSlotMap(ThreadSafeContext ctx)
-        : base(ctx)
-    {
-    }
 }

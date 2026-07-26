@@ -24,7 +24,7 @@ namespace Lazily;
 /// </remarks>
 /// <typeparam name="TKey">The key type.</typeparam>
 /// <typeparam name="TValue">The value type.</typeparam>
-public class AsyncComputedMap<TKey, TValue>
+public sealed class AsyncComputedMap<TKey, TValue>
     where TKey : notnull
 {
     private readonly AsyncContext _ctx;
@@ -115,23 +115,5 @@ public class AsyncComputedMap<TKey, TValue>
     {
         _membershipVersion++;
         _membership.Set(_membershipVersion);
-    }
-}
-
-/// <summary>Deprecated alias for <see cref="AsyncComputedMap{TKey,TValue}"/>.</summary>
-/// <remarks>
-/// See <see cref="CellMap{TKey,TValue}"/> for why the old name is a subclass rather than an alias.
-/// </remarks>
-/// <typeparam name="TKey">The key type.</typeparam>
-/// <typeparam name="TValue">The value type.</typeparam>
-[Obsolete("renamed to AsyncComputedMap")]
-public sealed class AsyncSlotMap<TKey, TValue> : AsyncComputedMap<TKey, TValue>
-    where TKey : notnull
-{
-    /// <summary>Creates an empty async derived-slot map bound to <paramref name="ctx"/>.</summary>
-    /// <param name="ctx">The owning async context.</param>
-    public AsyncSlotMap(AsyncContext ctx)
-        : base(ctx)
-    {
     }
 }
