@@ -38,7 +38,7 @@ public sealed class Effect : ReactiveNode
     internal bool ForceRun;
 
     /// <summary>
-    /// Creates and immediately runs a side-effect observer.
+    /// Creates and immediately runs an Effect.
     /// </summary>
     /// <param name="ctx">The owning reactive scope.</param>
     /// <param name="run">The effect body.</param>
@@ -56,7 +56,7 @@ public sealed class Effect : ReactiveNode
     public bool IsActive => _active;
 
     /// <summary>
-    /// Removes the observer: invokes the last cleanup, then unsubscribes from all dependencies.
+    /// Disposes the Effect: invokes the last cleanup, then unsubscribes from all dependencies.
     /// Idempotent.
     /// </summary>
     public void Dispose()

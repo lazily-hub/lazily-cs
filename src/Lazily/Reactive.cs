@@ -116,7 +116,7 @@ public static class Reactive
         return new Computed<T>(ctx, compute, (prev, next) => !changed(prev, next), name);
     }
 
-    /// <summary>Creates and immediately runs a side-effect observer.</summary>
+    /// <summary>Creates and immediately runs an Effect.</summary>
     /// <param name="ctx">The owning scope.</param>
     /// <param name="run">The effect body; it may return a cleanup callback.</param>
     public static Effect Effect(this Context ctx, EffectRun run)
