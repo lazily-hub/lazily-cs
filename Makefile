@@ -1,6 +1,6 @@
 # lazily-cs — build, test, and verification targets.
 
-.PHONY: all restore build test format format-check conformance pack check clean
+.PHONY: all restore build test format format-check conformance pack check clean conformance-coverage
 
 DOTNET ?= dotnet
 
@@ -31,8 +31,14 @@ pack:
 	$(DOTNET) pack src/Lazily/Lazily.csproj -c Release --nologo
 
 # Full local gate — run before committing.
-check: build test
+check: build test conformance-coverage
 	@echo "lazily-cs: check OK"
 
 clean:
 	$(DOTNET) clean --nologo
+
+# Conformance-coverage guard (#portconformancecoverage). Static: fails when the
+# canonical corpus grows a fixture no test in this repo even names. Naming is not
+# replaying — see the script header for what this does and does not prove.
+conformance-coverage:
+	./scripts/check-conformance-coverage.sh
