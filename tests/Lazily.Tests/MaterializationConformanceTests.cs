@@ -229,13 +229,13 @@ public sealed class MaterializationConformanceTests
     private sealed class SyncMapModel : IMapModel
     {
         private readonly Context _ctx = new();
-        private readonly CellMap<string, int> _cells;
-        private readonly SlotMap<string, int> _slots;
+        private readonly SourceMap<string, int> _cells;
+        private readonly ComputedMap<string, int> _slots;
 
         internal SyncMapModel()
         {
-            _cells = new CellMap<string, int>(_ctx);
-            _slots = new SlotMap<string, int>(_ctx);
+            _cells = new SourceMap<string, int>(_ctx);
+            _slots = new ComputedMap<string, int>(_ctx);
         }
 
         public int PresentCount => _cells.PresentCount + _slots.PresentCount;
@@ -258,13 +258,13 @@ public sealed class MaterializationConformanceTests
     private sealed class ThreadSafeMapModel : IMapModel
     {
         private readonly ThreadSafeContext _ctx = new();
-        private readonly CellMap<string, int> _cells;
-        private readonly ThreadSafeSlotMap<string, int> _slots;
+        private readonly SourceMap<string, int> _cells;
+        private readonly ThreadSafeComputedMap<string, int> _slots;
 
         internal ThreadSafeMapModel()
         {
-            _cells = _ctx.WithLock(inner => new CellMap<string, int>(inner));
-            _slots = new ThreadSafeSlotMap<string, int>(_ctx);
+            _cells = _ctx.WithLock(inner => new SourceMap<string, int>(inner));
+            _slots = new ThreadSafeComputedMap<string, int>(_ctx);
         }
 
         public int PresentCount => _ctx.WithLock(_ => _cells.PresentCount) + _slots.PresentCount;
@@ -295,9 +295,9 @@ public sealed class MaterializationConformanceTests
     {
         private readonly AsyncContext _ctx = new();
         private readonly Dictionary<string, int> _cells = new(StringComparer.Ordinal);
-        private readonly AsyncSlotMap<string, int> _slots;
+        private readonly AsyncComputedMap<string, int> _slots;
 
-        internal AsyncMapModel() => _slots = new AsyncSlotMap<string, int>(_ctx);
+        internal AsyncMapModel() => _slots = new AsyncComputedMap<string, int>(_ctx);
 
         public int PresentCount => _cells.Count + _slots.PresentCount;
 

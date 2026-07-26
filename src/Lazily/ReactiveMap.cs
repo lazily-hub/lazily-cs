@@ -6,11 +6,11 @@ namespace Lazily;
 
 /// <summary>What kind of node a keyed map's entries are.</summary>
 /// <remarks>
-/// Orthogonal to materialization strategy: a <see cref="CellMap{TKey,TValue}"/> holds input cells,
+/// Orthogonal to materialization strategy: a <see cref="SourceMap{TKey,TValue}"/> holds input cells,
 /// which are always materialized on mint under any strategy, while a
-/// <see cref="SlotMap{TKey,TValue}"/> holds derived slots, which are materialized eagerly by a
+/// <see cref="ComputedMap{TKey,TValue}"/> holds derived slots, which are materialized eagerly by a
 /// pre-mint loop or lazily on first read. There is deliberately no eager/lazy mode FLAG — eager is
-/// <see cref="SlotMap{TKey,TValue}.MaterializeAll"/> and lazy is
+/// <see cref="ComputedMap{TKey,TValue}.MaterializeAll"/> and lazy is
 /// <see cref="ReactiveMap{TKey,TValue,THandle}.GetOrInsertWith"/>, which is what makes
 /// "materialization changes allocation timing, never observed values" checkable rather than
 /// asserted. See the materialization corpus in lazily-spec.
@@ -38,7 +38,7 @@ public enum EntryKind
 /// </para>
 /// <para>
 /// The handle-kind operations (mint / observe / clear) are supplied by the
-/// <see cref="CellMap{TKey,TValue}"/> / <see cref="SlotMap{TKey,TValue}"/> constructor — the C#
+/// <see cref="SourceMap{TKey,TValue}"/> / <see cref="ComputedMap{TKey,TValue}"/> constructor — the C#
 /// analog of the Rust <c>MapHandle</c> trait and the Go constructor closures.
 /// </para>
 /// </remarks>
@@ -283,12 +283,12 @@ public class ReactiveMap<TKey, TValue, THandle>
 /// <summary>A keyed map of INPUT CELLS. Entries are always materialized when minted, under any strategy.</summary>
 /// <typeparam name="TKey">The key type.</typeparam>
 /// <typeparam name="TValue">The value type.</typeparam>
-public sealed class CellMap<TKey, TValue> : ReactiveMap<TKey, TValue, Source<TValue>>
+public class SourceMap<TKey, TValue> : ReactiveMap<TKey, TValue, Source<TValue>>
     where TKey : notnull
 {
     /// <summary>Creates an empty keyed cell collection bound to <paramref name="ctx"/>.</summary>
     /// <param name="ctx">The owning context.</param>
-    public CellMap(Context ctx)
+    public SourceMap(Context ctx)
         : base(
             ctx,
             EntryKind.Cell,
@@ -391,12 +391,12 @@ public sealed class CellMap<TKey, TValue> : ReactiveMap<TKey, TValue, Source<TVa
 /// </remarks>
 /// <typeparam name="TKey">The key type.</typeparam>
 /// <typeparam name="TValue">The value type.</typeparam>
-public sealed class SlotMap<TKey, TValue> : ReactiveMap<TKey, TValue, Computed<TValue>>
+public class ComputedMap<TKey, TValue> : ReactiveMap<TKey, TValue, Computed<TValue>>
     where TKey : notnull
 {
     /// <summary>Creates an empty keyed derived-slot collection bound to <paramref name="ctx"/>.</summary>
     /// <param name="ctx">The owning context.</param>
-    public SlotMap(Context ctx)
+    public ComputedMap(Context ctx)
         : base(
             ctx,
             EntryKind.Slot,
@@ -417,5 +417,46 @@ public sealed class SlotMap<TKey, TValue> : ReactiveMap<TKey, TValue, Computed<T
     public void MaterializeAll(IEnumerable<TKey> keys, Func<TKey, TValue> factory)
     {
         foreach (var key in keys) MintWith(key, () => factory(key));
+    }
+}
+
+/// <summary>Deprecated alias for <see cref="SourceMap{TKey,TValue}"/>.</summary>
+/// <remarks>
+/// The v2 kernel renamed the node kinds to <c>Source</c> and <c>Computed</c>, and the keyed-map
+/// names followed. C# has no exportable generic type alias — a <c>using</c> alias is file-scoped —
+/// so the old name survives as an obsolete SUBCLASS. Existing <c>new CellMap&lt;K,V&gt;(ctx)</c>
+/// call sites keep compiling with a deprecation warning, and a <c>CellMap</c> is still accepted
+/// everywhere a <see cref="SourceMap{TKey,TValue}"/> is expected. The converse does not hold: a
+/// <see cref="SourceMap{TKey,TValue}"/> handed back by the library is not a <c>CellMap</c>.
+/// </remarks>
+/// <typeparam name="TKey">The key type.</typeparam>
+/// <typeparam name="TValue">The value type.</typeparam>
+[Obsolete("renamed to SourceMap")]
+public sealed class CellMap<TKey, TValue> : SourceMap<TKey, TValue>
+    where TKey : notnull
+{
+    /// <summary>Creates an empty keyed cell collection bound to <paramref name="ctx"/>.</summary>
+    /// <param name="ctx">The owning context.</param>
+    public CellMap(Context ctx)
+        : base(ctx)
+    {
+    }
+}
+
+/// <summary>Deprecated alias for <see cref="ComputedMap{TKey,TValue}"/>.</summary>
+/// <remarks>
+/// See <see cref="CellMap{TKey,TValue}"/> for why the old name is a subclass rather than an alias.
+/// </remarks>
+/// <typeparam name="TKey">The key type.</typeparam>
+/// <typeparam name="TValue">The value type.</typeparam>
+[Obsolete("renamed to ComputedMap")]
+public sealed class SlotMap<TKey, TValue> : ComputedMap<TKey, TValue>
+    where TKey : notnull
+{
+    /// <summary>Creates an empty keyed derived-slot collection bound to <paramref name="ctx"/>.</summary>
+    /// <param name="ctx">The owning context.</param>
+    public SlotMap(Context ctx)
+        : base(ctx)
+    {
     }
 }

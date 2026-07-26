@@ -9,7 +9,7 @@ namespace Lazily;
 /// <remarks>
 /// <para>
 /// The tree is a COMPOSITION of cells, not a new cell kind — so per-cell merge applies node by
-/// node, and every reactivity guarantee of <see cref="CellMap{TKey,TValue}"/> is inherited rather
+/// node, and every reactivity guarantee of <see cref="SourceMap{TKey,TValue}"/> is inherited rather
 /// than reimplemented: reading a node's value subscribes only to that node, adding or removing a
 /// child bumps the parent's membership and order planes, and moving a child bumps order alone while
 /// the child keeps its identity and its whole subtree.
@@ -34,7 +34,7 @@ public sealed class CellTree<TKey, TValue>
         ArgumentNullException.ThrowIfNull(ctx);
         Id = id;
         Value = ctx.Source(initialValue);
-        Children = new CellMap<TKey, CellTree<TKey, TValue>>(ctx);
+        Children = new SourceMap<TKey, CellTree<TKey, TValue>>(ctx);
         Ctx = ctx;
     }
 
@@ -47,7 +47,7 @@ public sealed class CellTree<TKey, TValue>
     public Source<TValue> Value { get; }
 
     /// <summary>This node's children, keyed by node id.</summary>
-    public CellMap<TKey, CellTree<TKey, TValue>> Children { get; }
+    public SourceMap<TKey, CellTree<TKey, TValue>> Children { get; }
 
     /// <summary>Reads this node's value, subscribing the caller to THIS node only.</summary>
     /// <param name="ops">The enclosing computation, when read from inside one.</param>

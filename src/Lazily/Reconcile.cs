@@ -3,7 +3,7 @@ using System.Collections.Generic;
 
 namespace Lazily;
 
-/// <summary>Where <see cref="CellMap{TKey,TValue}.Insert"/> places a new key.</summary>
+/// <summary>Where <see cref="SourceMap{TKey,TValue}.Insert"/> places a new key.</summary>
 /// <remarks>The string values are the normative wire tokens shared with the sibling bindings.</remarks>
 public enum InsertAt
 {

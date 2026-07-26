@@ -5,7 +5,7 @@ namespace Lazily.Tests;
 
 /// <summary>
 /// Replays the <c>Collection</c>-kind fixtures of the canonical <c>collections</c> corpus against
-/// <see cref="CellMap{TKey,TValue}"/>.
+/// <see cref="SourceMap{TKey,TValue}"/>.
 /// </summary>
 /// <remarks>
 /// <para>
@@ -122,7 +122,7 @@ public sealed class CollectionsConformanceTests
     private static void ReplaySteps(JsonElement fx, Action<string, object?, object?> check)
     {
         var ctx = new Context();
-        var map = new CellMap<string, int>(ctx);
+        var map = new SourceMap<string, int>(ctx);
 
         var initial = fx.GetProperty("initial");
         var order = initial.GetProperty("order").EnumerateArray().Select(x => x.GetString()!).ToArray();
@@ -212,7 +212,7 @@ public sealed class CollectionsConformanceTests
     private static void ReplayReconcile(JsonElement reconcile, JsonElement expected, Action<string, object?, object?> check)
     {
         var ctx = new Context();
-        var map = new CellMap<string, int>(ctx);
+        var map = new SourceMap<string, int>(ctx);
 
         var prior = reconcile.GetProperty("prior");
         var priorOrder = prior.GetProperty("order").EnumerateArray().Select(x => x.GetString()!).ToArray();
@@ -275,9 +275,9 @@ public sealed class CollectionsConformanceTests
         private readonly Dictionary<string, Computed<int>> _values = new(StringComparer.Ordinal);
         private readonly Dictionary<string, int> _counts = new(StringComparer.Ordinal);
         private readonly Dictionary<string, int> _baseline = new(StringComparer.Ordinal);
-        private readonly CellMap<string, int> _map;
+        private readonly SourceMap<string, int> _map;
 
-        internal PlaneProbes(Context ctx, CellMap<string, int> map, IEnumerable<string> keys)
+        internal PlaneProbes(Context ctx, SourceMap<string, int> map, IEnumerable<string> keys)
         {
             _map = map;
             _membership = ctx.Slot(c =>

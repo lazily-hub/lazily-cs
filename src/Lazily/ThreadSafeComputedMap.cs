@@ -4,7 +4,7 @@ using System.Collections.Generic;
 namespace Lazily;
 
 /// <summary>
-/// A <see cref="SlotMap{TKey,TValue}"/> serialized by a <see cref="ThreadSafeContext"/>'s lock.
+/// A <see cref="ComputedMap{TKey,TValue}"/> serialized by a <see cref="ThreadSafeContext"/>'s lock.
 /// </summary>
 /// <remarks>
 /// <para>
@@ -21,19 +21,19 @@ namespace Lazily;
 /// </remarks>
 /// <typeparam name="TKey">The key type.</typeparam>
 /// <typeparam name="TValue">The value type.</typeparam>
-public sealed class ThreadSafeSlotMap<TKey, TValue>
+public class ThreadSafeComputedMap<TKey, TValue>
     where TKey : notnull
 {
     private readonly ThreadSafeContext _ctx;
-    private readonly SlotMap<TKey, TValue> _inner;
+    private readonly ComputedMap<TKey, TValue> _inner;
 
     /// <summary>Creates an empty thread-safe derived-slot map bound to <paramref name="ctx"/>.</summary>
     /// <param name="ctx">The owning thread-safe context.</param>
-    public ThreadSafeSlotMap(ThreadSafeContext ctx)
+    public ThreadSafeComputedMap(ThreadSafeContext ctx)
     {
         ArgumentNullException.ThrowIfNull(ctx);
         _ctx = ctx;
-        _inner = ctx.WithLock(inner => new SlotMap<TKey, TValue>(inner));
+        _inner = ctx.WithLock(inner => new ComputedMap<TKey, TValue>(inner));
     }
 
     /// <summary>What kind of node this map's entries are.</summary>
@@ -87,4 +87,22 @@ public sealed class ThreadSafeSlotMap<TKey, TValue>
     /// <summary>The entry count, subscribing the caller to MEMBERSHIP.</summary>
     /// <returns>The entry count.</returns>
     public int Len() => _ctx.WithLock(_ => _inner.Len());
+}
+
+/// <summary>Deprecated alias for <see cref="ThreadSafeComputedMap{TKey,TValue}"/>.</summary>
+/// <remarks>
+/// See <see cref="CellMap{TKey,TValue}"/> for why the old name is a subclass rather than an alias.
+/// </remarks>
+/// <typeparam name="TKey">The key type.</typeparam>
+/// <typeparam name="TValue">The value type.</typeparam>
+[Obsolete("renamed to ThreadSafeComputedMap")]
+public sealed class ThreadSafeSlotMap<TKey, TValue> : ThreadSafeComputedMap<TKey, TValue>
+    where TKey : notnull
+{
+    /// <summary>Creates an empty thread-safe derived-slot map bound to <paramref name="ctx"/>.</summary>
+    /// <param name="ctx">The owning thread-safe context.</param>
+    public ThreadSafeSlotMap(ThreadSafeContext ctx)
+        : base(ctx)
+    {
+    }
 }

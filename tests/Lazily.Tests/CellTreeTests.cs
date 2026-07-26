@@ -7,7 +7,7 @@ namespace Lazily.Tests;
 /// </summary>
 /// <remarks>
 /// The shared corpus does not reach the tree — the <c>collections</c> fixtures exercise
-/// <c>CellMap</c> directly — so these tests carry the tree's own guarantee, and each names the
+/// <c>SourceMap</c> directly — so these tests carry the tree's own guarantee, and each names the
 /// mutation it goes red under. Conformance here is necessary and documented as insufficient.
 /// </remarks>
 public sealed class CellTreeTests

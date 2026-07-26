@@ -12,7 +12,7 @@ namespace Lazily;
 /// <para>
 /// A distinct type rather than a wrapper, because <see cref="AsyncContext"/> is a distinct graph
 /// with its own handles — the same reason <c>AsyncContext</c> itself is not a facade over
-/// <c>Context</c>. What it shares with <see cref="SlotMap{TKey,TValue}"/> is the CONTRACT: eager
+/// <c>Context</c>. What it shares with <see cref="ComputedMap{TKey,TValue}"/> is the CONTRACT: eager
 /// materialization is a pre-mint loop, lazy is mint-on-access, and the two are observationally
 /// identical.
 /// </para>
@@ -24,7 +24,7 @@ namespace Lazily;
 /// </remarks>
 /// <typeparam name="TKey">The key type.</typeparam>
 /// <typeparam name="TValue">The value type.</typeparam>
-public sealed class AsyncSlotMap<TKey, TValue>
+public class AsyncComputedMap<TKey, TValue>
     where TKey : notnull
 {
     private readonly AsyncContext _ctx;
@@ -35,7 +35,7 @@ public sealed class AsyncSlotMap<TKey, TValue>
 
     /// <summary>Creates an empty async derived-slot map bound to <paramref name="ctx"/>.</summary>
     /// <param name="ctx">The owning async context.</param>
-    public AsyncSlotMap(AsyncContext ctx)
+    public AsyncComputedMap(AsyncContext ctx)
     {
         ArgumentNullException.ThrowIfNull(ctx);
         _ctx = ctx;
@@ -115,5 +115,23 @@ public sealed class AsyncSlotMap<TKey, TValue>
     {
         _membershipVersion++;
         _membership.Set(_membershipVersion);
+    }
+}
+
+/// <summary>Deprecated alias for <see cref="AsyncComputedMap{TKey,TValue}"/>.</summary>
+/// <remarks>
+/// See <see cref="CellMap{TKey,TValue}"/> for why the old name is a subclass rather than an alias.
+/// </remarks>
+/// <typeparam name="TKey">The key type.</typeparam>
+/// <typeparam name="TValue">The value type.</typeparam>
+[Obsolete("renamed to AsyncComputedMap")]
+public sealed class AsyncSlotMap<TKey, TValue> : AsyncComputedMap<TKey, TValue>
+    where TKey : notnull
+{
+    /// <summary>Creates an empty async derived-slot map bound to <paramref name="ctx"/>.</summary>
+    /// <param name="ctx">The owning async context.</param>
+    public AsyncSlotMap(AsyncContext ctx)
+        : base(ctx)
+    {
     }
 }
