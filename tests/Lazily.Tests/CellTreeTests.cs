@@ -3,14 +3,14 @@ using Xunit;
 namespace Lazily.Tests;
 
 /// <summary>
-/// Native coverage for <see cref="CellTree{TKey,TValue}"/>.
+/// Native coverage for <see cref="SourceTree{TKey,TValue}"/>.
 /// </summary>
 /// <remarks>
 /// The shared corpus does not reach the tree — the <c>collections</c> fixtures exercise
 /// <c>SourceMap</c> directly — so these tests carry the tree's own guarantee, and each names the
 /// mutation it goes red under. Conformance here is necessary and documented as insufficient.
 /// </remarks>
-public sealed class CellTreeTests
+public sealed class SourceTreeTests
 {
     /// <summary>
     /// Reordering siblings keeps the moved child's identity, its value, and its whole subtree, and
@@ -26,7 +26,7 @@ public sealed class CellTreeTests
     public void MovingAChildKeepsItsIdentityAndLeavesItsSubtreeUntouched()
     {
         var ctx = new Context();
-        var root = new CellTree<string, int>(ctx, "root", 0);
+        var root = new SourceTree<string, int>(ctx, "root", 0);
         var a = root.InsertChild("a", 1);
         var b = root.InsertChild("b", 2);
         var c = root.InsertChild("c", 3);
@@ -83,7 +83,7 @@ public sealed class CellTreeTests
     public void WritingANodeDoesNotDisturbItsSiblingsOrItsParentsMembership()
     {
         var ctx = new Context();
-        var root = new CellTree<string, int>(ctx, "root", 0);
+        var root = new SourceTree<string, int>(ctx, "root", 0);
         var a = root.InsertChild("a", 1);
         var b = root.InsertChild("b", 2);
 
@@ -115,7 +115,7 @@ public sealed class CellTreeTests
     public void ChildInsertAndRemoveBumpMembershipWithoutTouchingSurvivingValues()
     {
         var ctx = new Context();
-        var root = new CellTree<string, int>(ctx, "root", 0);
+        var root = new SourceTree<string, int>(ctx, "root", 0);
         var a = root.InsertChild("a", 1);
 
         var aReads = 0;

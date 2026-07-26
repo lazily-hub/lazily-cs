@@ -22,19 +22,19 @@ namespace Lazily;
 /// </remarks>
 /// <typeparam name="TKey">The node-id type.</typeparam>
 /// <typeparam name="TValue">The per-node value type.</typeparam>
-public sealed class CellTree<TKey, TValue>
+public sealed class SourceTree<TKey, TValue>
     where TKey : notnull
 {
     /// <summary>Creates a node with <paramref name="id"/> and <paramref name="initialValue"/> and no children.</summary>
     /// <param name="ctx">The owning context.</param>
     /// <param name="id">This node's id.</param>
     /// <param name="initialValue">This node's initial value.</param>
-    public CellTree(Context ctx, TKey id, TValue initialValue)
+    public SourceTree(Context ctx, TKey id, TValue initialValue)
     {
         ArgumentNullException.ThrowIfNull(ctx);
         Id = id;
         Value = ctx.Source(initialValue);
-        Children = new SourceMap<TKey, CellTree<TKey, TValue>>(ctx);
+        Children = new SourceMap<TKey, SourceTree<TKey, TValue>>(ctx);
         Ctx = ctx;
     }
 
@@ -47,7 +47,7 @@ public sealed class CellTree<TKey, TValue>
     public Source<TValue> Value { get; }
 
     /// <summary>This node's children, keyed by node id.</summary>
-    public SourceMap<TKey, CellTree<TKey, TValue>> Children { get; }
+    public SourceMap<TKey, SourceTree<TKey, TValue>> Children { get; }
 
     /// <summary>Reads this node's value, subscribing the caller to THIS node only.</summary>
     /// <param name="ops">The enclosing computation, when read from inside one.</param>
@@ -62,10 +62,10 @@ public sealed class CellTree<TKey, TValue>
     /// <param name="id">The child's id.</param>
     /// <param name="value">The child's initial value.</param>
     /// <returns>The child node.</returns>
-    public CellTree<TKey, TValue> InsertChild(TKey id, TValue value)
+    public SourceTree<TKey, TValue> InsertChild(TKey id, TValue value)
     {
         if (Children.TryObserve(id, out var existing)) return existing;
-        var child = new CellTree<TKey, TValue>(Ctx, id, value);
+        var child = new SourceTree<TKey, TValue>(Ctx, id, value);
         Children.Entry(id, child);
         return child;
     }
@@ -73,7 +73,7 @@ public sealed class CellTree<TKey, TValue>
     /// <summary>The child with <paramref name="id"/>, or null.</summary>
     /// <param name="id">The child's id.</param>
     /// <returns>The child node, or null when absent.</returns>
-    public CellTree<TKey, TValue>? Child(TKey id) => Children.TryObserve(id, out var c) ? c : null;
+    public SourceTree<TKey, TValue>? Child(TKey id) => Children.TryObserve(id, out var c) ? c : null;
 
     /// <summary>Removes a child and its subtree.</summary>
     /// <param name="id">The child's id.</param>
