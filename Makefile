@@ -12,8 +12,13 @@ restore:
 build:
 	$(DOTNET) build --nologo
 
+# The manifest path must be ABSOLUTE. The recorder runs inside the dotnet test
+# host, whose working directory is the test project's output dir, not this one —
+# a relative path silently writes the manifest somewhere nothing reads it, and
+# the guard then fails with "missing evidence" while the suite is green.
 test:
-	$(DOTNET) test --nologo
+	@mkdir -p build && : > build/conformance-fixtures-loaded.txt
+	LAZILY_CONFORMANCE_MANIFEST=$(CURDIR)/build/conformance-fixtures-loaded.txt $(DOTNET) test --nologo
 
 format:
 	$(DOTNET) format

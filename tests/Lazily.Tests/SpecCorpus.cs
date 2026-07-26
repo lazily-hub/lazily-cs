@@ -48,6 +48,56 @@ public static class SpecCorpus
     public static JsonDocument Load(string corpus, string fixture)
     {
         ArgumentNullException.ThrowIfNull(Root);
+        Record(corpus, fixture);
         return JsonDocument.Parse(File.ReadAllText(Path.Combine(Root, corpus, fixture)));
+    }
+
+    // -- Runtime conformance manifest (#lazilyupgradeconformance) --------------
+    //
+    // This binding discovers fixtures by enumerating the corpus directory, so no
+    // fixture filename ever appears literally in its sources. A static grep over
+    // the test sources therefore reports almost the whole corpus as uncovered,
+    // which is not a measurement of anything — it is an artifact of how the loader
+    // works. Only recording the actual read says what was replayed.
+    //
+    // Every load funnels through here, which is why cs needs no per-call-site
+    // edits: the seam the other compiled bindings have to build already exists.
+    //
+    // Records to LAZILY_CONFORMANCE_MANIFEST; a no-op when unset, so a bare
+    // `dotnet test` is unaffected. Appends at process exit because the manifest is
+    // a union across however many test processes run.
+    private static readonly object ManifestGate = new();
+    private static readonly SortedSet<string> Opened = new(StringComparer.Ordinal);
+    private static bool _flushRegistered;
+
+    private static void Record(string corpus, string fixture)
+    {
+        var manifest = Environment.GetEnvironmentVariable("LAZILY_CONFORMANCE_MANIFEST");
+        if (string.IsNullOrEmpty(manifest)) return;
+        lock (ManifestGate)
+        {
+            Opened.Add(string.IsNullOrEmpty(corpus) ? fixture : corpus + "/" + fixture);
+            if (_flushRegistered) return;
+            _flushRegistered = true;
+            AppDomain.CurrentDomain.ProcessExit += (_, _) => Flush(manifest);
+        }
+    }
+
+    private static void Flush(string manifest)
+    {
+        lock (ManifestGate)
+        {
+            if (Opened.Count == 0) return;
+            try
+            {
+                File.AppendAllLines(manifest, Opened);
+            }
+            catch (IOException)
+            {
+                // A manifest we cannot write shows up downstream as missing
+                // evidence, which is the correct outcome. Never fail a suite over
+                // bookkeeping.
+            }
+        }
     }
 }
