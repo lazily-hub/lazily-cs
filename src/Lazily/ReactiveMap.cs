@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.Linq;
 
 namespace Lazily;
 
@@ -318,6 +319,68 @@ public sealed class CellMap<TKey, TValue> : ReactiveMap<TKey, TValue, Source<TVa
     /// <param name="key">The entry key.</param>
     /// <param name="value">The new value.</param>
     public void Set(TKey key, TValue value) => EntryWith(key, () => value).Set(value);
+
+    /// <summary>Inserts <paramref name="key"/> at the requested position.</summary>
+    /// <param name="key">The new key.</param>
+    /// <param name="value">Its value.</param>
+    /// <param name="at">Where to place it.</param>
+    /// <param name="index">The absolute index, for <see cref="InsertAt.Index"/>.</param>
+    /// <param name="anchor">The anchor key, for <see cref="InsertAt.Before"/> / <see cref="InsertAt.After"/>.</param>
+    /// <returns>Whether a new entry was created.</returns>
+    public bool Insert(TKey key, TValue value, InsertAt at = InsertAt.End, int index = 0, TKey? anchor = default)
+    {
+        if (IsPresent(key)) return false;
+        Entry(key, value);            // mints at the end and bumps membership
+        switch (at)
+        {
+            case InsertAt.Index: MoveTo(key, index); break;
+            case InsertAt.Before when anchor is not null: MoveBefore(key, anchor); break;
+            case InsertAt.After when anchor is not null: MoveAfter(key, anchor); break;
+            default: break;           // End: already appended
+        }
+
+        return true;
+    }
+
+    /// <summary>
+    /// Reconciles this map to <paramref name="targetOrder"/> / <paramref name="targetValues"/> by
+    /// applying the minimal op set.
+    /// </summary>
+    /// <remarks>
+    /// Keys held fixed by the longest-increasing-subsequence are not moved, so their value cells are
+    /// never invalidated by a sibling reorder — applying the minimal op set per-cell is what makes
+    /// that observable rather than merely intended.
+    /// </remarks>
+    /// <param name="targetOrder">The desired key order.</param>
+    /// <param name="targetValues">The desired values.</param>
+    /// <returns>The ops that were applied, in order.</returns>
+    public IReadOnlyList<DiffOp<TKey, TValue>> Reconcile(
+        IReadOnlyList<TKey> targetOrder,
+        IReadOnlyDictionary<TKey, TValue> targetValues)
+    {
+        ArgumentNullException.ThrowIfNull(targetOrder);
+        ArgumentNullException.ThrowIfNull(targetValues);
+
+        var prior = PresentKeys()
+            .Select(k => new KeyValuePair<TKey, TValue>(k, TryGetHandle(k, out var h) ? h.Peek() : default!))
+            .ToList();
+        var target = targetOrder.Select(k => new KeyValuePair<TKey, TValue>(k, targetValues[k])).ToList();
+
+        var ops = Lazily.Reconcile.Diff(prior, target);
+        foreach (var op in ops)
+        {
+            switch (op)
+            {
+                case DiffOpInsert<TKey, TValue> ins: Insert(ins.Key, ins.Value, InsertAt.Index, ins.Index); break;
+                case DiffOpRemove<TKey, TValue> rem: Remove(rem.Key); break;
+                case DiffOpMove<TKey, TValue> mv: MoveTo(mv.Key, mv.To); break;
+                case DiffOpUpdate<TKey, TValue> upd: Set(upd.Key, upd.Value); break;
+                default: break;
+            }
+        }
+
+        return ops;
+    }
 }
 
 /// <summary>A keyed map of DERIVED SLOTS — the subject of the materialization corpus.</summary>
