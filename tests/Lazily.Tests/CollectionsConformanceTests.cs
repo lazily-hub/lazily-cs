@@ -39,11 +39,11 @@ public sealed class CollectionsConformanceTests
     private static readonly Dictionary<string, string> Unsupported = new(StringComparer.Ordinal)
     {
         ["mergecell_algebra.json"] = "MergeCell collection surface — merge algebra ships, the keyed collection over it does not",
-        ["queuecell_bounded_backpressure.json"] = "QueueCell",
-        ["queuecell_closure_lifecycle.json"] = "QueueCell",
-        ["queuecell_mpsc_multi_writer.json"] = "QueueCell",
-        ["queuecell_popped_head_observation.json"] = "QueueCell",
-        ["queuecell_spsc_push_pop.json"] = "QueueCell",
+        ["queuecell_bounded_backpressure.json"] = "QueueCell — replayed by QueueCellConformanceTests; this runner dispatches map ops and cannot execute push/pop/close/batch",
+        ["queuecell_closure_lifecycle.json"] = "QueueCell — replayed by QueueCellConformanceTests; this runner dispatches map ops and cannot execute push/pop/close/batch",
+        ["queuecell_mpsc_multi_writer.json"] = "QueueCell — replayed by QueueCellConformanceTests; this runner dispatches map ops and cannot execute push/pop/close/batch",
+        ["queuecell_popped_head_observation.json"] = "QueueCell — replayed by QueueCellConformanceTests; this runner dispatches map ops and cannot execute push/pop/close/batch",
+        ["queuecell_spsc_push_pop.json"] = "QueueCell — replayed by QueueCellConformanceTests; this runner dispatches map ops and cannot execute push/pop/close/batch",
         ["seqcrdt_convergence.json"] = "SeqCrdt",
         ["textcrdt_convergence.json"] = "TextCrdt",
         ["textcrdt_delta_sync.json"] = "TextCrdt",
