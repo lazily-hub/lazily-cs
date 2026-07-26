@@ -53,10 +53,11 @@ public class ReactiveMap<TKey, TValue, THandle>
     private readonly Func<THandle, TValue> _observe;
     private readonly Action<THandle> _clear;
 
-    private readonly Dictionary<TKey, THandle> _entries = [];
-
-    /// <summary>The authoritative key list, in first-materialization order.</summary>
-    private readonly List<TKey> _order = [];
+    /// <summary>
+    /// Present set + key order + the move algebra. Graph-agnostic and shared with
+    /// the thread-safe and async flavors; see <see cref="KeyedOrder{TKey,THandle}"/>.
+    /// </summary>
+    private readonly KeyedOrder<TKey, THandle> _keyed = new();
 
     /// <summary>Bumped only when the SET of keys changes (add / remove).</summary>
     private readonly Source<int> _membership;
@@ -117,10 +118,10 @@ public class ReactiveMap<TKey, TValue, THandle>
     /// <returns>The entry handle.</returns>
     private protected THandle MintWith(TKey key, Func<TValue> compute)
     {
-        if (_entries.TryGetValue(key, out var existing)) return existing; // warm: already allocated
+        if (_keyed.TryGet(key, out var existing)) return existing; // warm: already allocated
         var handle = _mint(_ctx, compute);
-        _entries[key] = handle;
-        _order.Add(key);
+        var mutation = _keyed.Insert(key, handle, out handle);
+        if (!mutation.Changed()) return handle;
         BumpMembership();
         return handle;
     }
@@ -139,7 +140,7 @@ public class ReactiveMap<TKey, TValue, THandle>
     /// <returns>The entry's value.</returns>
     public TValue GetOrInsertWith(TKey key, Func<TKey, TValue> factory)
     {
-        if (_entries.TryGetValue(key, out var warm)) return _observe(warm);
+        if (_keyed.TryGet(key, out var warm)) return _observe(warm);
         var handle = MintWith(key, () => factory(key));
         return _observe(handle);
     }
@@ -148,7 +149,7 @@ public class ReactiveMap<TKey, TValue, THandle>
     /// <param name="key">The entry key.</param>
     /// <param name="handle">The entry handle, when present.</param>
     /// <returns>Whether the entry is materialized.</returns>
-    public bool TryGetHandle(TKey key, out THandle handle) => _entries.TryGetValue(key, out handle!);
+    public bool TryGetHandle(TKey key, out THandle handle) => _keyed.TryGet(key, out handle);
 
     /// <summary>Reads the value at <paramref name="key"/> if materialized, subscribing the caller to that entry.</summary>
     /// <param name="key">The entry key.</param>
@@ -156,7 +157,7 @@ public class ReactiveMap<TKey, TValue, THandle>
     /// <returns>Whether the entry is materialized.</returns>
     public bool TryObserve(TKey key, out TValue value)
     {
-        if (_entries.TryGetValue(key, out var handle))
+        if (_keyed.TryGet(key, out var handle))
         {
             value = _observe(handle);
             return true;
@@ -174,9 +175,7 @@ public class ReactiveMap<TKey, TValue, THandle>
     /// <returns>Whether an entry was removed.</returns>
     public bool Remove(TKey key)
     {
-        if (!_entries.TryGetValue(key, out var handle)) return false;
-        _entries.Remove(key);
-        _order.Remove(key);
+        if (!_keyed.Remove(key, out var handle).Changed()) return false;
         _clear(handle);
         BumpMembership();
         return true;
@@ -188,20 +187,20 @@ public class ReactiveMap<TKey, TValue, THandle>
     public IReadOnlyList<TKey> Keys(IComputeOps? ops = null)
     {
         _ = ops is null ? _orderSignal.Get() : _orderSignal.Get(ops);
-        return [.. _order];
+        return _keyed.Keys();
     }
 
     /// <summary>The materialized key list, WITHOUT subscribing the caller to anything.</summary>
     /// <returns>The materialized keys in order.</returns>
-    public IReadOnlyList<TKey> PresentKeys() => [.. _order];
+    public IReadOnlyList<TKey> PresentKeys() => _keyed.Keys();
 
     /// <summary>How many entries are materialized. Non-reactive.</summary>
-    public int PresentCount => _order.Count;
+    public int PresentCount => _keyed.Length;
 
     /// <summary>Whether <paramref name="key"/> is materialized. Non-reactive.</summary>
     /// <param name="key">The entry key.</param>
     /// <returns>Whether the entry exists.</returns>
-    public bool IsPresent(TKey key) => _entries.ContainsKey(key);
+    public bool IsPresent(TKey key) => _keyed.Contains(key);
 
     /// <summary>The entry count. Subscribes the caller to the MEMBERSHIP plane only.</summary>
     /// <param name="ops">The enclosing computation, when read from inside one.</param>
@@ -209,7 +208,7 @@ public class ReactiveMap<TKey, TValue, THandle>
     public int Len(IComputeOps? ops = null)
     {
         _ = ops is null ? _membership.Get() : _membership.Get(ops);
-        return _order.Count;
+        return _keyed.Length;
     }
 
     /// <summary>Whether the map holds <paramref name="key"/>. Subscribes the caller to MEMBERSHIP only.</summary>
@@ -219,7 +218,7 @@ public class ReactiveMap<TKey, TValue, THandle>
     public bool ContainsKey(TKey key, IComputeOps? ops = null)
     {
         _ = ops is null ? _membership.Get() : _membership.Get(ops);
-        return _entries.ContainsKey(key);
+        return _keyed.Contains(key);
     }
 
     /// <summary>The position of <paramref name="key"/> in the order, or <c>false</c>. Non-reactive.</summary>
@@ -228,7 +227,7 @@ public class ReactiveMap<TKey, TValue, THandle>
     /// <returns>Whether the key is present.</returns>
     public bool TryPosition(TKey key, out int index)
     {
-        index = _order.IndexOf(key);
+        index = _keyed.Position(key);
         return index >= 0;
     }
 
@@ -241,42 +240,33 @@ public class ReactiveMap<TKey, TValue, THandle>
     /// <param name="key">The entry to move.</param>
     /// <param name="index">The target position, clamped into range.</param>
     /// <returns>Whether the order changed.</returns>
-    public bool MoveTo(TKey key, int index)
-    {
-        var from = _order.IndexOf(key);
-        if (from < 0) return false;
-        var to = Math.Clamp(index, 0, _order.Count - 1);
-        if (from == to) return false;
-        _order.RemoveAt(from);
-        _order.Insert(to, key);
-        BumpOrder();
-        return true;
-    }
+    public bool MoveTo(TKey key, int index) => ApplyMove(_keyed.MoveTo(key, index));
 
     /// <summary>Moves <paramref name="key"/> immediately before <paramref name="anchor"/>.</summary>
     /// <param name="key">The entry to move.</param>
     /// <param name="anchor">The entry to move ahead of.</param>
-    /// <returns>Whether the order changed.</returns>
-    public bool MoveBefore(TKey key, TKey anchor)
-    {
-        if (EqualityComparer<TKey>.Default.Equals(key, anchor)) return false;
-        var anchorAt = _order.IndexOf(anchor);
-        var from = _order.IndexOf(key);
-        if (anchorAt < 0 || from < 0) return false;
-        return MoveTo(key, from < anchorAt ? anchorAt - 1 : anchorAt);
-    }
+    /// <returns>Whether the move applied.</returns>
+    public bool MoveBefore(TKey key, TKey anchor) => ApplyMove(_keyed.MoveBefore(key, anchor));
 
     /// <summary>Moves <paramref name="key"/> immediately after <paramref name="anchor"/>.</summary>
     /// <param name="key">The entry to move.</param>
     /// <param name="anchor">The entry to move behind.</param>
-    /// <returns>Whether the order changed.</returns>
-    public bool MoveAfter(TKey key, TKey anchor)
+    /// <returns>Whether the move applied.</returns>
+    public bool MoveAfter(TKey key, TKey anchor) => ApplyMove(_keyed.MoveAfter(key, anchor));
+
+    /// <summary>
+    /// Bumps the order signal only when the order actually changed. A no-op move
+    /// still reports success — it names a present key — but must invalidate no
+    /// reader. This map used to report <c>false</c> for a no-op, which every
+    /// sibling binding reports as <c>true</c>.
+    /// </summary>
+    /// <param name="outcome">What the move did.</param>
+    /// <returns>Whether the move applied.</returns>
+    private bool ApplyMove(MapMove outcome)
     {
-        if (EqualityComparer<TKey>.Default.Equals(key, anchor)) return false;
-        var anchorAt = _order.IndexOf(anchor);
-        var from = _order.IndexOf(key);
-        if (anchorAt < 0 || from < 0) return false;
-        return MoveTo(key, from < anchorAt ? anchorAt : anchorAt + 1);
+        if (!outcome.Applied()) return false;
+        if (outcome.Changed()) BumpOrder();
+        return true;
     }
 }
 

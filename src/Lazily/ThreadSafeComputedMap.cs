@@ -87,4 +87,69 @@ public sealed class ThreadSafeComputedMap<TKey, TValue>
     /// <summary>The entry count, subscribing the caller to MEMBERSHIP.</summary>
     /// <returns>The entry count.</returns>
     public int Len() => _ctx.WithLock(_ => _inner.Len());
+
+    // -- Core surface: ordering, atomic move, reactive membership --
+    //
+    // These bind every flavor. The move algebra touches no entry handle and
+    // awaits nothing, so it is neither thread- nor async-coloured. This map is a
+    // delegating shell over a real ComputedMap, and the thread-safe context
+    // projects onto the same graph, so closing its gap really is delegation —
+    // there was never a missing primitive, only a missing surface.
+
+    /// <summary>
+    /// The reactive key list, in current order. Subscribes the caller to ORDER
+    /// changes (add/remove and move/reorder), not to per-entry value changes.
+    /// </summary>
+    /// <param name="ops">The caller's read surface; a compute registers the edge.</param>
+    /// <returns>The keys in current order.</returns>
+    public IReadOnlyList<TKey> Keys(IComputeOps? ops = null) =>
+        _ctx.WithLock(_ => _inner.Keys(ops));
+
+    /// <summary>Whether <paramref name="key"/> is a member. Reactive on membership.</summary>
+    /// <param name="key">The entry key.</param>
+    /// <param name="ops">The caller's read surface.</param>
+    /// <returns>Whether the key is present.</returns>
+    public bool ContainsKey(TKey key, IComputeOps? ops = null) =>
+        _ctx.WithLock(_ => _inner.ContainsKey(key, ops));
+
+    /// <summary>The current 0-based position of <paramref name="key"/>. Non-reactive.</summary>
+    /// <param name="key">The entry key.</param>
+    /// <param name="index">The position when present.</param>
+    /// <returns>Whether the key is present.</returns>
+    public bool TryPosition(TKey key, out int index)
+    {
+        var found = false;
+        var at = -1;
+        _ctx.WithLock(_ =>
+        {
+            found = _inner.TryPosition(key, out at);
+            return 0;
+        });
+        index = at;
+        return found;
+    }
+
+    /// <summary>
+    /// Atomically moves <paramref name="key"/> to <paramref name="index"/>
+    /// (<c>#lzcellmove</c>). The entry keeps the same node, its dependents, and
+    /// its lineage; only the order signal is bumped.
+    /// </summary>
+    /// <param name="key">The entry to move.</param>
+    /// <param name="index">The target position, clamped into range.</param>
+    /// <returns>Whether the move applied.</returns>
+    public bool MoveTo(TKey key, int index) => _ctx.WithLock(_ => _inner.MoveTo(key, index));
+
+    /// <summary>Atomically moves <paramref name="key"/> before <paramref name="anchor"/>.</summary>
+    /// <param name="key">The entry to move.</param>
+    /// <param name="anchor">The entry to move ahead of.</param>
+    /// <returns>Whether the move applied.</returns>
+    public bool MoveBefore(TKey key, TKey anchor) =>
+        _ctx.WithLock(_ => _inner.MoveBefore(key, anchor));
+
+    /// <summary>Atomically moves <paramref name="key"/> after <paramref name="anchor"/>.</summary>
+    /// <param name="key">The entry to move.</param>
+    /// <param name="anchor">The entry to move behind.</param>
+    /// <returns>Whether the move applied.</returns>
+    public bool MoveAfter(TKey key, TKey anchor) =>
+        _ctx.WithLock(_ => _inner.MoveAfter(key, anchor));
 }
