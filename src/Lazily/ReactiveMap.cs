@@ -18,10 +18,10 @@ namespace Lazily;
 public enum EntryKind
 {
     /// <summary>Input cells — always materialized when the entry is minted.</summary>
-    Cell,
+    Source,
 
     /// <summary>Derived slots — materialized eagerly by a pre-mint loop, or lazily on first read.</summary>
-    Slot,
+    Computed,
 }
 
 /// <summary>
@@ -291,7 +291,7 @@ public sealed class SourceMap<TKey, TValue> : ReactiveMap<TKey, TValue, Source<T
     public SourceMap(Context ctx)
         : base(
             ctx,
-            EntryKind.Cell,
+            EntryKind.Source,
             static (c, compute) => c.Source(compute()),
             static h => h.Get(),
             // Invalidate the orphaned cell's dependents on remove: any reader that read this entry
@@ -399,7 +399,7 @@ public sealed class ComputedMap<TKey, TValue> : ReactiveMap<TKey, TValue, Comput
     public ComputedMap(Context ctx)
         : base(
             ctx,
-            EntryKind.Slot,
+            EntryKind.Computed,
             static (c, compute) => c.Slot(_ => compute()),
             static h => h.Get(),
             static h => h.Dispose())

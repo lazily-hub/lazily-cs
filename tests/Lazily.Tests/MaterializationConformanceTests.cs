@@ -96,8 +96,8 @@ public sealed class MaterializationConformanceTests
 
             // ---- EAGER: a pre-mint loop over every slot key. --------------------------------
             using var eager = NewModel(model);
-            foreach (var e in entries.Where(e => e.Kind == EntryKind.Cell)) eager.SeedCell(e.Key, e.Value);
-            eager.MaterializeAll(entries.Where(e => e.Kind == EntryKind.Slot).Select(e => e.Key), k => canonical[k]);
+            foreach (var e in entries.Where(e => e.Kind == EntryKind.Source)) eager.SeedCell(e.Key, e.Value);
+            eager.MaterializeAll(entries.Where(e => e.Kind == EntryKind.Computed).Select(e => e.Key), k => canonical[k]);
 
             Check(
                 "eager_present",
@@ -109,7 +109,7 @@ public sealed class MaterializationConformanceTests
 
             // Cell entries are materialized at BUILD under every strategy — that is the
             // orthogonality the entry-kind fixture pins. Slot entries stay absent until read.
-            foreach (var e in entries.Where(e => e.Kind == EntryKind.Cell)) lazy.SeedCell(e.Key, e.Value);
+            foreach (var e in entries.Where(e => e.Kind == EntryKind.Source)) lazy.SeedCell(e.Key, e.Value);
 
             if (expected.TryGetProperty("lazy_present_at_build", out var atBuild))
             {
@@ -192,8 +192,7 @@ public sealed class MaterializationConformanceTests
         {
             foreach (var e in declared.EnumerateObject())
             {
-                var kind = e.Value.GetProperty("kind").GetString() == "cell" ? EntryKind.Cell : EntryKind.Slot;
-                entries.Add((e.Name, kind, e.Value.GetProperty("val").GetInt32()));
+                entries.Add((e.Name, ParseKind(e.Value.GetProperty("kind").GetString()), e.Value.GetProperty("val").GetInt32()));
             }
 
             return entries;
@@ -201,11 +200,51 @@ public sealed class MaterializationConformanceTests
 
         foreach (var e in spec.GetProperty("val").EnumerateObject())
         {
-            entries.Add((e.Name, EntryKind.Slot, e.Value.GetInt32()));
+            entries.Add((e.Name, EntryKind.Computed, e.Value.GetInt32()));
         }
 
         return entries;
     }
+
+    /// <summary>
+    /// Pins the kind parse itself: both corpus spellings map to the same entry kinds, and an
+    /// unrecognized one throws instead of defaulting.
+    /// </summary>
+    /// <remarks>
+    /// The corpus on disk exercises only <c>"cell"</c> / <c>"slot"</c> today, so the v2 spellings
+    /// and the rejection path would otherwise be unexecuted code that reports green.
+    /// </remarks>
+    [Fact]
+    public void ParsesBothEntryKindSpellingsAndRejectsAnyOther()
+    {
+        Assert.Equal(EntryKind.Source, ParseKind("cell"));
+        Assert.Equal(EntryKind.Source, ParseKind("source"));
+        Assert.Equal(EntryKind.Computed, ParseKind("slot"));
+        Assert.Equal(EntryKind.Computed, ParseKind("computed"));
+
+        Assert.Throws<InvalidOperationException>(() => ParseKind("signal"));
+        Assert.Throws<InvalidOperationException>(() => ParseKind(null));
+    }
+
+    /// <summary>
+    /// Maps a fixture's <c>kind</c> string to an <see cref="EntryKind"/>, accepting the pre-v2
+    /// spelling and the v2 one.
+    /// </summary>
+    /// <remarks>
+    /// The corpus still says <c>"cell"</c> / <c>"slot"</c>; the v2 kernel rename will flip it to
+    /// <c>"source"</c> / <c>"computed"</c>. Both are accepted so the flip lands in lazily-spec
+    /// without breaking this binding first. Anything else is a hard error rather than a default:
+    /// the previous ternary treated every unrecognized kind as a slot, which would have replayed a
+    /// renamed corpus green while silently seeding nothing.
+    /// </remarks>
+    /// <param name="kind">The fixture's raw kind string.</param>
+    /// <returns>The entry kind it denotes.</returns>
+    private static EntryKind ParseKind(string? kind) => kind switch
+    {
+        "cell" or "source" => EntryKind.Source,
+        "slot" or "computed" => EntryKind.Computed,
+        _ => throw new InvalidOperationException($"unknown entry kind {kind ?? "<null>"}"),
+    };
 
     /// <summary>One execution model's keyed map, as the corpus needs to drive it.</summary>
     /// <remarks>

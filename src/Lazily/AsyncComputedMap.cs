@@ -43,7 +43,7 @@ public sealed class AsyncComputedMap<TKey, TValue>
     }
 
     /// <summary>What kind of node this map's entries are.</summary>
-    public EntryKind Kind => EntryKind.Slot;
+    public EntryKind Kind => EntryKind.Computed;
 
     /// <summary>The materialized key list, in first-materialization order. Non-reactive.</summary>
     /// <returns>The materialized keys.</returns>

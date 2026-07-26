@@ -37,7 +37,7 @@ public sealed class ThreadSafeComputedMap<TKey, TValue>
     }
 
     /// <summary>What kind of node this map's entries are.</summary>
-    public EntryKind Kind => EntryKind.Slot;
+    public EntryKind Kind => EntryKind.Computed;
 
     /// <summary>EAGER materialization: pre-mints a slot for every key.</summary>
     /// <param name="keys">The keys to materialize.</param>
