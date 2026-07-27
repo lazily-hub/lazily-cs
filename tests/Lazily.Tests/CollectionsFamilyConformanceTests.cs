@@ -10,18 +10,16 @@ namespace Lazily.Tests;
 /// <remarks>
 /// <para>
 /// <see cref="CollectionsConformanceTests"/> already replays the ordering
-/// fixtures, but only against the single-threaded <c>SourceMap</c>. That is the
-/// blind spot this file closes: <c>ThreadSafeComputedMap</c> and
-/// <c>AsyncComputedMap</c> had no ordering surface at all. The coverage matrix
-/// read OK because one flavor passed.
+/// fixtures against the single-threaded <c>SourceMap</c>. This suite extends
+/// those laws to every supported execution flavor instead of treating one
+/// passing flavor as family-wide coverage.
 /// </para>
 /// <para>
-/// The value-mutating fixtures need a settable map, and this binding still has
-/// no thread-safe or async SourceMap — that absence is its own tracked parity
-/// work, not something this contract can paper over. So the fixtures drive the
-/// single-threaded SourceMap, and the two derived-slot flavors are driven
-/// directly against the same laws. Skipping them entirely is how they ended up
-/// unordered in the first place.
+/// <c>ThreadSafeSourceMap</c> and <c>AsyncSourceMap</c> join the source-map
+/// feature group only because they now expose real graph-backed entry,
+/// membership, and order planes. The focused source-flavor test below pins
+/// those planes directly. A future flavor that lacks one stays staged rather
+/// than entering through a runner-local dictionary or lock.
 /// </para>
 /// <para>
 /// Invalidation is measured by RECOMPUTE COUNT inside the reader's own compute
@@ -131,21 +129,21 @@ public sealed class CollectionsFamilyConformanceTests
                 {
                     case "set_value":
                     case "insert":
-                    {
-                        var key = op.GetProperty("key").GetString()!;
-                        map.Set(key, op.GetProperty("value").GetInt32());
-
-                        // `at` says where the new key lands; minting appends, so
-                        // "end" is already right. An unrecognised form must fail,
-                        // not silently append.
-                        if (op.TryGetProperty("at", out var at))
                         {
-                            if (at.ValueKind == JsonValueKind.Number) map.MoveTo(key, at.GetInt32());
-                            else Assert.Equal("end", at.GetString());
-                        }
+                            var key = op.GetProperty("key").GetString()!;
+                            map.Set(key, op.GetProperty("value").GetInt32());
 
-                        break;
-                    }
+                            // `at` says where the new key lands; minting appends, so
+                            // "end" is already right. An unrecognised form must fail,
+                            // not silently append.
+                            if (op.TryGetProperty("at", out var at))
+                            {
+                                if (at.ValueKind == JsonValueKind.Number) map.MoveTo(key, at.GetInt32());
+                                else Assert.Equal("end", at.GetString());
+                            }
+
+                            break;
+                        }
 
                     case "remove":
                         map.Remove(op.GetProperty("key").GetString()!);
@@ -243,6 +241,146 @@ public sealed class CollectionsFamilyConformanceTests
             }
 
             Assert.True(matrices > 0, $"{fixtureName}: asserted no invalidation matrix");
+        }
+    }
+
+    /// <summary>
+    /// Every supported source-map peer carries independent value, membership,
+    /// and order reader planes.
+    /// </summary>
+    [Fact]
+    public async Task SourceFlavorsCarryExactReaderPlanesAsync()
+    {
+        {
+            var ctx = new ThreadSafeContext();
+            var map = new ThreadSafeSourceMap<string, int>(ctx);
+            map.Set("a", 1);
+            map.Set("b", 2);
+            map.Set("c", 3);
+
+            var valueRuns = 0;
+            var value = ctx.WithLock(inner => inner.Computed(ops =>
+            {
+                valueRuns++;
+                return map.TryGetHandle("a", out var handle) ? ops.Get(handle) : -1;
+            }));
+            var lenRuns = 0;
+            var len = ctx.WithLock(inner => inner.Computed(ops =>
+            {
+                lenRuns++;
+                return map.Len(ops);
+            }));
+            var orderRuns = 0;
+            var order = ctx.WithLock(inner => inner.Computed(ops =>
+            {
+                orderRuns++;
+                return OrderDigest(map.Keys(ops));
+            }));
+            int Read(Computed<int> reader) => ctx.WithLock(inner => inner.Get(reader));
+
+            Assert.Equal(1, Read(value));
+            Assert.Equal(3, Read(len));
+            Read(order);
+            Assert.Equal((1, 1, 1), (valueRuns, lenRuns, orderRuns));
+            Assert.True(map.TryGetHandle("a", out var stable));
+
+            map.Set("a", 10);
+            Assert.Equal(10, Read(value));
+            Read(len);
+            Read(order);
+            Assert.Equal((2, 1, 1), (valueRuns, lenRuns, orderRuns));
+
+            Assert.True(map.MoveBefore("a", "c"));
+            Read(value);
+            Read(len);
+            Read(order);
+            Assert.Equal((2, 1, 2), (valueRuns, lenRuns, orderRuns));
+
+            map.Set("d", 4);
+            Read(value);
+            Assert.Equal(4, Read(len));
+            Read(order);
+            Assert.Equal((2, 2, 3), (valueRuns, lenRuns, orderRuns));
+
+            var removedRuns = 0;
+            var removed = ctx.WithLock(inner => inner.Computed(ops =>
+            {
+                removedRuns++;
+                return map.TryGetHandle("b", out var handle) ? ops.Get(handle) : -1;
+            }));
+            Assert.Equal(2, Read(removed));
+            Assert.Equal(1, removedRuns);
+            Assert.True(map.Remove("b"));
+            Read(value);
+            Assert.Equal(3, Read(len));
+            Read(order);
+            Assert.Equal((2, 3, 4), (valueRuns, lenRuns, orderRuns));
+            Assert.Equal(-1, Read(removed));
+            Assert.Equal(2, removedRuns);
+            Assert.True(map.TryGetHandle("a", out var after));
+            Assert.Same(stable, after);
+        }
+
+        {
+            await using var ctx = new AsyncContext();
+            var map = new AsyncSourceMap<string, int>(ctx);
+            map.Set("a", 1);
+            map.Set("b", 2);
+            map.Set("c", 3);
+
+            var valueRuns = 0;
+            var value = ctx.Computed(compute =>
+            {
+                valueRuns++;
+                return Task.FromResult(
+                    map.TryObserve("a", out var observed, compute) ? observed : -1);
+            });
+            var lenRuns = 0;
+            var len = ctx.Computed(compute =>
+            {
+                lenRuns++;
+                return Task.FromResult(map.Len(compute));
+            });
+            var orderRuns = 0;
+            var order = ctx.Computed(compute =>
+            {
+                orderRuns++;
+                return Task.FromResult(OrderDigest(map.Keys(compute)));
+            });
+
+            Assert.Equal(1, await value.GetAsync());
+            Assert.Equal(3, await len.GetAsync());
+            await order.GetAsync();
+            Assert.Equal((1, 1, 1), (valueRuns, lenRuns, orderRuns));
+            Assert.True(map.TryGetHandle("a", out var stable));
+
+            map.Set("a", 10);
+            Assert.Equal(10, await value.GetAsync());
+            await len.GetAsync();
+            await order.GetAsync();
+            Assert.Equal((2, 1, 1), (valueRuns, lenRuns, orderRuns));
+
+            Assert.True(map.MoveBefore("a", "c"));
+            await value.GetAsync();
+            await len.GetAsync();
+            await order.GetAsync();
+            Assert.Equal((2, 1, 2), (valueRuns, lenRuns, orderRuns));
+
+            map.Set("d", 4);
+            await value.GetAsync();
+            Assert.Equal(4, await len.GetAsync());
+            await order.GetAsync();
+            Assert.Equal((2, 2, 3), (valueRuns, lenRuns, orderRuns));
+
+            Assert.True(map.TryGetHandle("b", out var doomed));
+            Assert.True(map.Remove("b"));
+            await value.GetAsync();
+            Assert.Equal(3, await len.GetAsync());
+            await order.GetAsync();
+            Assert.Equal((2, 3, 4), (valueRuns, lenRuns, orderRuns));
+            Assert.Throws<DisposedNodeException>(() => doomed.Peek());
+            Assert.True(map.TryGetHandle("a", out var after));
+            Assert.Same(stable, after);
         }
     }
 

@@ -297,33 +297,26 @@ public sealed class MaterializationConformanceTests
     private sealed class ThreadSafeMapModel : IMapModel
     {
         private readonly ThreadSafeContext _ctx = new();
-        private readonly SourceMap<string, int> _cells;
+        private readonly ThreadSafeSourceMap<string, int> _cells;
         private readonly ThreadSafeComputedMap<string, int> _slots;
 
         internal ThreadSafeMapModel()
         {
-            _cells = _ctx.WithLock(inner => new SourceMap<string, int>(inner));
+            _cells = new ThreadSafeSourceMap<string, int>(_ctx);
             _slots = new ThreadSafeComputedMap<string, int>(_ctx);
         }
 
-        public int PresentCount => _ctx.WithLock(_ => _cells.PresentCount) + _slots.PresentCount;
+        public int PresentCount => _cells.PresentCount + _slots.PresentCount;
 
-        public void SeedCell(string key, int value) => _ctx.WithLock(_ => _cells.Entry(key, value));
+        public void SeedCell(string key, int value) => _cells.Entry(key, value);
 
         public void MaterializeAll(IEnumerable<string> keys, Func<string, int> factory) =>
             _slots.MaterializeAll(keys, factory);
 
-        public int GetOrInsert(string key, Func<string, int> factory)
-        {
-            var (found, value) = _ctx.WithLock(_ =>
-            {
-                var ok = _cells.TryObserve(key, out var v);
-                return (ok, v);
-            });
-            return found ? value : _slots.GetOrInsertWith(key, factory);
-        }
+        public int GetOrInsert(string key, Func<string, int> factory) =>
+        _cells.TryObserve(key, out var value) ? value : _slots.GetOrInsertWith(key, factory);
 
-        public bool IsPresent(string key) => _ctx.WithLock(_ => _cells.IsPresent(key)) || _slots.IsPresent(key);
+        public bool IsPresent(string key) => _cells.IsPresent(key) || _slots.IsPresent(key);
 
         public void Dispose()
         {
@@ -333,24 +326,28 @@ public sealed class MaterializationConformanceTests
     private sealed class AsyncMapModel : IMapModel
     {
         private readonly AsyncContext _ctx = new();
-        private readonly Dictionary<string, int> _cells = new(StringComparer.Ordinal);
+        private readonly AsyncSourceMap<string, int> _cells;
         private readonly AsyncComputedMap<string, int> _slots;
 
-        internal AsyncMapModel() => _slots = new AsyncComputedMap<string, int>(_ctx);
+        internal AsyncMapModel()
+        {
+            _cells = new AsyncSourceMap<string, int>(_ctx);
+            _slots = new AsyncComputedMap<string, int>(_ctx);
+        }
 
-        public int PresentCount => _cells.Count + _slots.PresentCount;
+        public int PresentCount => _cells.PresentCount + _slots.PresentCount;
 
-        public void SeedCell(string key, int value) => _cells[key] = value;
+        public void SeedCell(string key, int value) => _cells.Entry(key, value);
 
         public void MaterializeAll(IEnumerable<string> keys, Func<string, int> factory) =>
             _slots.MaterializeAll(keys, factory);
 
         public int GetOrInsert(string key, Func<string, int> factory) =>
-            _cells.TryGetValue(key, out var v)
-                ? v
-                : _slots.GetOrInsertWithAsync(key, factory).GetAwaiter().GetResult();
+        _cells.TryObserve(key, out var v)
+        ? v
+        : _slots.GetOrInsertWithAsync(key, factory).GetAwaiter().GetResult();
 
-        public bool IsPresent(string key) => _cells.ContainsKey(key) || _slots.IsPresent(key);
+        public bool IsPresent(string key) => _cells.IsPresent(key) || _slots.IsPresent(key);
 
         public void Dispose() => _ctx.DisposeAsync().AsTask().GetAwaiter().GetResult();
     }
