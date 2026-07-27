@@ -71,8 +71,8 @@ public sealed class SignalingRoom
         string connection,
         ClientSignalingFrame frame)
     {
-        ArgumentException.ThrowIfNullOrWhiteSpace(connection);
-        ArgumentNullException.ThrowIfNull(frame);
+        Guard.NotNullOrWhiteSpace(connection, nameof(connection));
+        Guard.NotNull(frame, nameof(frame));
 
         return frame switch
         {
@@ -115,7 +115,7 @@ public sealed class SignalingRoom
             ];
         }
 
-        var roster = _connectionByPeer.Keys.Order().ToArray();
+        var roster = _connectionByPeer.Keys.OrderBy(peer => peer).ToArray();
         _connectionByPeer.Add(join.Peer, connection);
         _peerByConnection.Add(connection, join.Peer);
 
@@ -227,7 +227,7 @@ public static class SignalingWire
     /// <summary>Encodes one client frame in its canonical direction-specific shape.</summary>
     public static string Serialize(ClientSignalingFrame frame)
     {
-        ArgumentNullException.ThrowIfNull(frame);
+        Guard.NotNull(frame, nameof(frame));
         return Write(
             writer =>
             {
@@ -276,7 +276,7 @@ public static class SignalingWire
     /// <summary>Encodes one authoritative server frame in its canonical shape.</summary>
     public static string Serialize(ServerSignalingFrame frame)
     {
-        ArgumentNullException.ThrowIfNull(frame);
+        Guard.NotNull(frame, nameof(frame));
         return Write(
             writer =>
             {

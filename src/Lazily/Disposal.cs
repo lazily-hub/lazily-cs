@@ -73,8 +73,8 @@ public static class Disposal
     /// <param name="node">The node to measure.</param>
     public static int DependentCount(this Context ctx, ReactiveNode node)
     {
-        ArgumentNullException.ThrowIfNull(ctx);
-        ArgumentNullException.ThrowIfNull(node);
+        Guard.NotNull(ctx, nameof(ctx));
+        Guard.NotNull(node, nameof(node));
         return node.Disposed ? 0 : node.Dependents.Count;
     }
 
@@ -87,8 +87,8 @@ public static class Disposal
     /// <param name="node">The node to measure.</param>
     public static int DependencyCount(this Context ctx, ReactiveNode node)
     {
-        ArgumentNullException.ThrowIfNull(ctx);
-        ArgumentNullException.ThrowIfNull(node);
+        Guard.NotNull(ctx, nameof(ctx));
+        Guard.NotNull(node, nameof(node));
         return node.Disposed ? 0 : node.Dependencies.Count;
     }
 
@@ -97,8 +97,8 @@ public static class Disposal
     /// <param name="node">The node to test.</param>
     public static bool IsDisposed(this Context ctx, ReactiveNode node)
     {
-        ArgumentNullException.ThrowIfNull(ctx);
-        ArgumentNullException.ThrowIfNull(node);
+        Guard.NotNull(ctx, nameof(ctx));
+        Guard.NotNull(node, nameof(node));
         return node.Disposed;
     }
 
@@ -106,7 +106,7 @@ public static class Disposal
     /// <param name="ctx">The owning scope.</param>
     public static TeardownScope Scope(this Context ctx)
     {
-        ArgumentNullException.ThrowIfNull(ctx);
+        Guard.NotNull(ctx, nameof(ctx));
         return new TeardownScope(ctx);
     }
 
@@ -118,8 +118,8 @@ public static class Disposal
     /// <param name="fn">The body.</param>
     public static void WithScope(this Context ctx, Action<TeardownScope> fn)
     {
-        ArgumentNullException.ThrowIfNull(ctx);
-        ArgumentNullException.ThrowIfNull(fn);
+        Guard.NotNull(ctx, nameof(ctx));
+        Guard.NotNull(fn, nameof(fn));
         var s = ctx.Scope();
         try
         {
@@ -213,7 +213,7 @@ public sealed class TeardownScope
     /// <param name="node">The node to own.</param>
     public TNode Own<TNode>(TNode node) where TNode : ReactiveNode
     {
-        ArgumentNullException.ThrowIfNull(node);
+        Guard.NotNull(node, nameof(node));
         if (!_closed) _owned.Add(node);
         return node;
     }

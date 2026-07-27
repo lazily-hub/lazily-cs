@@ -54,7 +54,7 @@ public sealed class TimerCell : ITimelineSource
     /// <summary>Creates a timer that fires once at or after <paramref name="fireAt"/>.</summary>
     public TimerCell(Context context, long fireAt)
     {
-        ArgumentNullException.ThrowIfNull(context);
+        Guard.NotNull(context, nameof(context));
         _fireAt = LogicalTime.Require(fireAt, nameof(fireAt));
         FiredCell = context.Source(false);
     }
@@ -90,7 +90,7 @@ public sealed class IntervalCell : ITimelineSource
     /// <summary>Creates an interval with boundaries at period, 2×period, and so on.</summary>
     public IntervalCell(Context context, long period)
     {
-        ArgumentNullException.ThrowIfNull(context);
+        Guard.NotNull(context, nameof(context));
         _period = LogicalTime.NormalizePeriod(period, nameof(period));
         _next = _period;
         CountCell = context.Source(0L);
@@ -127,13 +127,13 @@ public sealed class CronCell : ITimelineSource
     /// <summary>Creates a pattern schedule, normalizing, sorting, and deduplicating offsets.</summary>
     public CronCell(Context context, long cycle, IEnumerable<long> offsets)
     {
-        ArgumentNullException.ThrowIfNull(context);
-        ArgumentNullException.ThrowIfNull(offsets);
+        Guard.NotNull(context, nameof(context));
+        Guard.NotNull(offsets, nameof(offsets));
         _cycle = LogicalTime.NormalizePeriod(cycle, nameof(cycle));
         _offsets = offsets
             .Select(offset => LogicalTime.Require(offset, nameof(offsets)) % _cycle)
             .Distinct()
-            .Order()
+            .OrderBy(offset => offset)
             .ToArray();
         CountCell = context.Source(0L);
     }
@@ -209,8 +209,8 @@ public sealed class DeadlineCell<T> : ITimelineSource
     /// <summary>Creates a live value that expires at <paramref name="deadline"/>.</summary>
     public DeadlineCell(Context context, T value, long deadline)
     {
-        ArgumentNullException.ThrowIfNull(context);
-        ArgumentNullException.ThrowIfNull(value);
+        Guard.NotNull(context, nameof(context));
+        Guard.NotNull(value, nameof(value));
         _value = value;
         _deadline = LogicalTime.Require(deadline, nameof(deadline));
         ExpiredCell = context.Source(false);

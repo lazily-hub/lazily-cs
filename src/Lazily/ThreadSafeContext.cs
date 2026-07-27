@@ -33,7 +33,7 @@ namespace Lazily;
 public sealed class ThreadSafeContext
 {
     private readonly Context _ctx = new();
-    private readonly System.Threading.Lock _gate = new();
+    private readonly object _gate = new();
 
     /// <summary>Creates a lock-backed reactive context.</summary>
     public ThreadSafeContext() { }
@@ -50,7 +50,7 @@ public sealed class ThreadSafeContext
     public Context Inner => _ctx;
 
     /// <summary>Whether the calling thread currently holds this context's lock.</summary>
-    public bool IsHeldByCurrentThread => _gate.IsHeldByCurrentThread;
+    public bool IsHeldByCurrentThread => Monitor.IsEntered(_gate);
 
     /// <summary>
     /// Runs <paramref name="fn"/> while holding the lock, giving it exclusive, race-free access
@@ -59,7 +59,7 @@ public sealed class ThreadSafeContext
     /// <param name="fn">The critical section.</param>
     public void WithLock(Action<Context> fn)
     {
-        ArgumentNullException.ThrowIfNull(fn);
+        Guard.NotNull(fn, nameof(fn));
         lock (_gate) fn(_ctx);
     }
 
@@ -71,7 +71,7 @@ public sealed class ThreadSafeContext
     /// <param name="fn">The critical section.</param>
     public TResult WithLock<TResult>(Func<Context, TResult> fn)
     {
-        ArgumentNullException.ThrowIfNull(fn);
+        Guard.NotNull(fn, nameof(fn));
         lock (_gate) return fn(_ctx);
     }
 
@@ -83,7 +83,7 @@ public sealed class ThreadSafeContext
     /// <param name="fn">The batch body.</param>
     public void Batch(Action fn)
     {
-        ArgumentNullException.ThrowIfNull(fn);
+        Guard.NotNull(fn, nameof(fn));
         lock (_gate) _ctx.Batch(fn);
     }
 
@@ -97,7 +97,7 @@ public sealed class ThreadSafeContext
     /// <param name="value">The value to store.</param>
     public void Set<T>(Source<T> cell, T value)
     {
-        ArgumentNullException.ThrowIfNull(cell);
+        Guard.NotNull(cell, nameof(cell));
         lock (_gate) cell.Set(value);
     }
 
@@ -109,7 +109,7 @@ public sealed class ThreadSafeContext
     /// <param name="op">The operand.</param>
     public void Merge<T>(Source<T> cell, T op)
     {
-        ArgumentNullException.ThrowIfNull(cell);
+        Guard.NotNull(cell, nameof(cell));
         lock (_gate) cell.Merge(op);
     }
 }
@@ -156,8 +156,8 @@ public static class ThreadSafeKernel
     public static (IReadOnlyDictionary<object, NodeEntry> Nodes, IReadOnlyList<object> Changed) ApplyBatch(
         IReadOnlyDictionary<object, NodeEntry> nodes, IReadOnlyList<BatchWrite> batch)
     {
-        ArgumentNullException.ThrowIfNull(nodes);
-        ArgumentNullException.ThrowIfNull(batch);
+        Guard.NotNull(nodes, nameof(nodes));
+        Guard.NotNull(batch, nameof(batch));
         var next = new Dictionary<object, NodeEntry>(nodes);
         var changed = new List<object>();
         var seen = new HashSet<object>();
@@ -191,7 +191,7 @@ public static class ThreadSafeKernel
         IReadOnlyDictionary<object, IReadOnlyList<object>> dependents,
         IReadOnlyList<BatchWrite> batch)
     {
-        ArgumentNullException.ThrowIfNull(dependents);
+        Guard.NotNull(dependents, nameof(dependents));
         var (applied, changed) = ApplyBatch(nodes, batch);
         var next = new Dictionary<object, NodeEntry>(applied);
         var inFrontier = new HashSet<object>();

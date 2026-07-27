@@ -5,7 +5,7 @@
 // select which overflow behaviour is sound downstream. A Source generalizes a plain cell —
 // cell ≡ Source(KeepLatest) — a source whose write is a merge.
 
-using System.Numerics;
+using System.Linq.Expressions;
 
 namespace Lazily;
 
@@ -43,13 +43,13 @@ public static class MergePolicy
 
     /// <summary>The additive commutative monoid (<c>old + op</c>). Not idempotent.</summary>
     /// <typeparam name="T">A number type.</typeparam>
-    public static MergePolicy<T> Sum<T>() where T : INumber<T> => new(
-        "Sum", static (a, b) => a + b, Commutative: true, Idempotent: false, Conflates: true);
+    public static MergePolicy<T> Sum<T>() => new(
+        "Sum", NumericPolicy<T>.Add, Commutative: true, Idempotent: false, Conflates: true);
 
     /// <summary>The max semilattice. Associative, commutative, idempotent.</summary>
     /// <typeparam name="T">A comparable number type.</typeparam>
-    public static MergePolicy<T> Max<T>() where T : INumber<T> => new(
-        "Max", static (a, b) => b > a ? b : a, Commutative: true, Idempotent: true, Conflates: true);
+    public static MergePolicy<T> Max<T>() => new(
+        "Max", NumericPolicy<T>.Max, Commutative: true, Idempotent: true, Conflates: true);
 
     /// <summary>The grow-only set-union semilattice.</summary>
     /// <typeparam name="TElement">The set element type.</typeparam>
@@ -57,7 +57,7 @@ public static class MergePolicy
         "SetUnion",
         static (old, op) =>
         {
-            var outSet = new HashSet<TElement>(old);
+            var outSet = new CompatSet<TElement>(old);
             outSet.UnionWith(op);
             return outSet;
         },
@@ -82,4 +82,21 @@ public static class MergePolicy
         Commutative: false,
         Idempotent: false,
         Conflates: false);
+}
+
+internal static class NumericPolicy<T>
+{
+    private static readonly Func<T, T, T> AddOperator = CreateAdd();
+
+    internal static T Add(T left, T right) => AddOperator(left, right);
+
+    private static Func<T, T, T> CreateAdd()
+    {
+        var left = Expression.Parameter(typeof(T), "left");
+        var right = Expression.Parameter(typeof(T), "right");
+        return Expression.Lambda<Func<T, T, T>>(Expression.Add(left, right), left, right).Compile();
+    }
+
+    internal static T Max(T left, T right) =>
+        Comparer<T>.Default.Compare(right, left) > 0 ? right : left;
 }

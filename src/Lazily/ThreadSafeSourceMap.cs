@@ -25,7 +25,7 @@ where TKey : notnull
     /// <param name="ctx">The owning thread-safe context.</param>
     public ThreadSafeSourceMap(ThreadSafeContext ctx)
     {
-        ArgumentNullException.ThrowIfNull(ctx);
+        Guard.NotNull(ctx, nameof(ctx));
         _ctx = ctx;
         _inner = ctx.WithLock(inner => new SourceMap<TKey, TValue>(inner));
     }

@@ -21,7 +21,7 @@ public static class Reactive
     /// </param>
     public static Source<T> Source<T>(this Context ctx, T initial, IEqualityComparer<T>? comparer = null)
     {
-        ArgumentNullException.ThrowIfNull(ctx);
+        Guard.NotNull(ctx, nameof(ctx));
         return new Source<T>(ctx, initial, MergePolicy.KeepLatest<T>(), comparer);
     }
 
@@ -39,8 +39,8 @@ public static class Reactive
     public static Source<T> Source<T>(
         this Context ctx, T initial, MergePolicy<T> policy, IEqualityComparer<T>? comparer = null)
     {
-        ArgumentNullException.ThrowIfNull(ctx);
-        ArgumentNullException.ThrowIfNull(policy);
+        Guard.NotNull(ctx, nameof(ctx));
+        Guard.NotNull(policy, nameof(policy));
         return new Source<T>(ctx, initial, policy, comparer);
     }
 
@@ -55,8 +55,8 @@ public static class Reactive
     /// <param name="name">An optional debug name.</param>
     public static Computed<T> Slot<T>(this Context ctx, Func<Compute, T> compute, string? name = null)
     {
-        ArgumentNullException.ThrowIfNull(ctx);
-        ArgumentNullException.ThrowIfNull(compute);
+        Guard.NotNull(ctx, nameof(ctx));
+        Guard.NotNull(compute, nameof(compute));
         return new Computed<T>(ctx, compute, equals: null, name);
     }
 
@@ -78,8 +78,8 @@ public static class Reactive
         IEqualityComparer<T>? comparer = null,
         string? name = null)
     {
-        ArgumentNullException.ThrowIfNull(ctx);
-        ArgumentNullException.ThrowIfNull(compute);
+        Guard.NotNull(ctx, nameof(ctx));
+        Guard.NotNull(compute, nameof(compute));
         var cmp = comparer ?? EqualityComparer<T>.Default;
         return new Computed<T>(ctx, compute, cmp.Equals, name);
     }
@@ -110,9 +110,9 @@ public static class Reactive
         Func<T, T, bool> changed,
         string? name = null)
     {
-        ArgumentNullException.ThrowIfNull(ctx);
-        ArgumentNullException.ThrowIfNull(compute);
-        ArgumentNullException.ThrowIfNull(changed);
+        Guard.NotNull(ctx, nameof(ctx));
+        Guard.NotNull(compute, nameof(compute));
+        Guard.NotNull(changed, nameof(changed));
         return new Computed<T>(ctx, compute, (prev, next) => !changed(prev, next), name);
     }
 
@@ -121,7 +121,7 @@ public static class Reactive
     /// <param name="run">The effect body; it may return a cleanup callback.</param>
     public static Effect Effect(this Context ctx, EffectRun run)
     {
-        ArgumentNullException.ThrowIfNull(ctx);
+        Guard.NotNull(ctx, nameof(ctx));
         return new Effect(ctx, run);
     }
 
@@ -140,8 +140,8 @@ public static class Reactive
     /// <param name="handle">The handle to read.</param>
     public static T Get<T>(this IComputeOps ops, ITrackable<T> handle)
     {
-        ArgumentNullException.ThrowIfNull(ops);
-        ArgumentNullException.ThrowIfNull(handle);
+        Guard.NotNull(ops, nameof(ops));
+        Guard.NotNull(handle, nameof(handle));
         return handle.GetVia(ops.TrackNode);
     }
 }

@@ -93,7 +93,7 @@ public sealed class MembershipCell
     /// <summary>Creates an empty membership view.</summary>
     public MembershipCell(Context context, MembershipConfig? config = null)
     {
-        ArgumentNullException.ThrowIfNull(context);
+        Guard.NotNull(context, nameof(context));
         _config = config ?? new MembershipConfig();
         if (_config.SuspectTimeout < 0)
             throw new ArgumentOutOfRangeException(nameof(config), "suspect timeout must be non-negative");
@@ -192,7 +192,7 @@ public sealed class MembershipCell
         IReadOnlyList<long> alive = [.. _peers
             .Where(pair => pair.Value.State == PeerState.Alive)
             .Select(pair => pair.Key)
-            .Order()];
+            .OrderBy(peer => peer)];
         PeerSetCell.Set(alive);
     }
 }

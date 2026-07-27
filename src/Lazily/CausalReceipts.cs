@@ -76,7 +76,7 @@ public sealed record CausalReceipts
     /// <summary>Copies a receipt sequence into an immutable batch boundary.</summary>
     public CausalReceipts(IEnumerable<CausalReceipt> receipts)
     {
-        ArgumentNullException.ThrowIfNull(receipts);
+        Guard.NotNull(receipts, nameof(receipts));
         Receipts = receipts.ToArray();
     }
 
@@ -130,7 +130,7 @@ public sealed class ReceiptProjection
     /// <summary>Fold one receipt into the current projection.</summary>
     public ReceiptApplyStatus Observe(ulong? currentGeneration, CausalReceipt receipt)
     {
-        ArgumentNullException.ThrowIfNull(receipt);
+        Guard.NotNull(receipt, nameof(receipt));
 
         if (_receiptsById.ContainsKey(receipt.ReceiptId)
             || _staleReceiptIds.Contains(receipt.ReceiptId))
@@ -223,7 +223,7 @@ public static class CausalReceiptWire
     /// <summary>Serializes a batch in the exact externally tagged schema shape.</summary>
     public static string Serialize(CausalReceipts message)
     {
-        ArgumentNullException.ThrowIfNull(message);
+        Guard.NotNull(message, nameof(message));
         using var stream = new MemoryStream();
         using (var writer = new Utf8JsonWriter(stream))
         {

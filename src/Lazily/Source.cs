@@ -52,7 +52,7 @@ public sealed class Source<T> : ReactiveNode, ITrackable<T>, IDisposable
     /// <exception cref="DisposedNodeException">This node has been disposed.</exception>
     public T Get(IComputeOps ops)
     {
-        ArgumentNullException.ThrowIfNull(ops);
+        Guard.NotNull(ops, nameof(ops));
         return GetVia(ops.TrackNode);
     }
 

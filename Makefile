@@ -1,6 +1,6 @@
 # lazily-cs — build, test, and verification targets.
 
-.PHONY: all restore build test format format-check conformance pack check clean conformance-coverage
+.PHONY: all restore build test format format-check conformance pack package-check check clean conformance-coverage
 
 DOTNET ?= dotnet
 
@@ -35,8 +35,11 @@ conformance:
 pack:
 	$(DOTNET) pack src/Lazily/Lazily.csproj -c Release --nologo
 
+package-check:
+	./scripts/check-package.sh
+
 # Full local gate — run before committing.
-check: build test conformance-coverage
+check: build test conformance-coverage package-check
 	@echo "lazily-cs: check OK"
 
 clean:

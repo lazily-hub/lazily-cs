@@ -31,7 +31,7 @@ public sealed class SourceTree<TKey, TValue>
     /// <param name="initialValue">This node's initial value.</param>
     public SourceTree(Context ctx, TKey id, TValue initialValue)
     {
-        ArgumentNullException.ThrowIfNull(ctx);
+        Guard.NotNull(ctx, nameof(ctx));
         Id = id;
         Value = ctx.Source(initialValue);
         Children = new SourceMap<TKey, SourceTree<TKey, TValue>>(ctx);

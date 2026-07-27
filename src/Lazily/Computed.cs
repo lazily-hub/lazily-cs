@@ -69,7 +69,7 @@ public sealed class Computed<T> : ReactiveNode, ITrackable<T>, ICacheable, IDisp
     /// <exception cref="DisposedNodeException">This node has been disposed.</exception>
     public T Get(IComputeOps ops)
     {
-        ArgumentNullException.ThrowIfNull(ops);
+        Guard.NotNull(ops, nameof(ops));
         return GetVia(ops.TrackNode);
     }
 

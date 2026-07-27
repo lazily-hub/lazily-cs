@@ -77,7 +77,7 @@ public sealed class ChartDef
     /// <param name="states">Every state, keyed by id, in document order.</param>
     public ChartDef(string root, IReadOnlyList<KeyValuePair<string, StateDef>> states)
     {
-        ArgumentNullException.ThrowIfNull(states);
+        Guard.NotNull(states, nameof(states));
         Root = root;
         States = states.ToDictionary(kv => kv.Key, kv => kv.Value, StringComparer.Ordinal);
 
@@ -223,18 +223,18 @@ public sealed class StateChart
 {
     private readonly Dictionary<string, Recording> _history = new(StringComparer.Ordinal);
     private readonly Source<string> _config;
-    private HashSet<string> _configStates;
+    private CompatSet<string> _configStates;
 
     /// <summary>Creates a chart that enters its initial configuration by descending from the root.</summary>
     /// <param name="ctx">The owning context.</param>
     /// <param name="def">The chart definition.</param>
     public StateChart(Context ctx, ChartDef def)
     {
-        ArgumentNullException.ThrowIfNull(ctx);
-        ArgumentNullException.ThrowIfNull(def);
+        Guard.NotNull(ctx, nameof(ctx));
+        Guard.NotNull(def, nameof(def));
         Def = def;
 
-        var enter = new HashSet<string>(StringComparer.Ordinal);
+        var enter = new CompatSet<string>(StringComparer.Ordinal);
         var actions = new List<string>();
         EnterSubtree(def.Root, enter, actions);
         _configStates = enter;
@@ -265,7 +265,7 @@ public sealed class StateChart
     /// <param name="ops">The enclosing computation, when read from inside one.</param>
     /// <returns>The active leaves.</returns>
     public IReadOnlyList<string> ActiveLeaves(IComputeOps? ops = null) =>
-        [.. Configuration(ops).Where(Def.IsLeaf).Order(StringComparer.Ordinal)];
+        [.. Configuration(ops).Where(Def.IsLeaf).OrderBy(state => state, StringComparer.Ordinal)];
 
     /// <summary>The hierarchical "state-in" predicate.</summary>
     /// <param name="id">The state id to test.</param>
@@ -288,7 +288,7 @@ public sealed class StateChart
 
         // 1. Enabled transitions: per active leaf, the innermost passing match on its chain.
         var candidates = new List<(string Source, Transition Trans, string Leaf)>();
-        foreach (var leaf in config.Where(def.IsLeaf).Order(StringComparer.Ordinal))
+        foreach (var leaf in config.Where(def.IsLeaf).OrderBy(state => state, StringComparer.Ordinal))
         {
             foreach (var anc in def.AncestorsInclusive(leaf))
             {
@@ -365,7 +365,7 @@ public sealed class StateChart
             if (def.States.TryGetValue(s, out var sd)) actions.AddRange(sd.Entry);
         }
 
-        var next = new HashSet<string>(config, StringComparer.Ordinal);
+        var next = new CompatSet<string>(config, StringComparer.Ordinal);
         next.ExceptWith(exitUnion);
         next.UnionWith(enterUnion.Where(s => !def.IsHistory(s)));
         _configStates = next;
@@ -381,7 +381,7 @@ public sealed class StateChart
     }
 
     private static string ConfigKey(IEnumerable<string> set) =>
-        string.Join("|", set.Order(StringComparer.Ordinal));
+        string.Join("|", set.OrderBy(state => state, StringComparer.Ordinal));
 
     private (HashSet<string> Exit, HashSet<string> Enter) ComputeExitEnter(
         string source,

@@ -22,7 +22,7 @@ public sealed class HealthCell
     /// <summary>Creates an initially healthy aggregate.</summary>
     public HealthCell(Context context)
     {
-        ArgumentNullException.ThrowIfNull(context);
+        Guard.NotNull(context, nameof(context));
         HealthStateCell = context.Source(HealthState.Healthy);
     }
 
@@ -35,7 +35,7 @@ public sealed class HealthCell
     /// <summary>Sets one named liveness probe.</summary>
     public void Set(string name, bool up, bool critical)
     {
-        ArgumentException.ThrowIfNullOrEmpty(name);
+        Guard.NotNullOrEmpty(name, nameof(name));
         _probes[name] = (up, critical);
         HealthStateCell.Set(Evaluate());
     }
@@ -60,7 +60,7 @@ public sealed class ReadinessCell
     /// <summary>Creates an initially ready aggregate.</summary>
     public ReadinessCell(Context context)
     {
-        ArgumentNullException.ThrowIfNull(context);
+        Guard.NotNull(context, nameof(context));
         ReadyCell = context.Source(true);
     }
 
@@ -73,7 +73,7 @@ public sealed class ReadinessCell
     /// <summary>Sets one named readiness condition.</summary>
     public void Set(string name, bool ready)
     {
-        ArgumentException.ThrowIfNullOrEmpty(name);
+        Guard.NotNullOrEmpty(name, nameof(name));
         _conditions[name] = ready;
         ReadyCell.Set(_conditions.Values.All(value => value));
     }
@@ -89,7 +89,7 @@ public sealed class DiscoveryCell
     /// <summary>Creates an empty discovery map.</summary>
     public DiscoveryCell(Context context)
     {
-        ArgumentNullException.ThrowIfNull(context);
+        Guard.NotNull(context, nameof(context));
         DiscoveryMapCell = context.Source<IReadOnlyDictionary<string, string>>(
             new SortedDictionary<string, string>(StringComparer.Ordinal),
             DictionaryEqualityComparer<string, string>.Instance);
@@ -104,8 +104,8 @@ public sealed class DiscoveryCell
     /// <summary>Registers an endpoint owned by a peer.</summary>
     public void Register(string service, string endpoint, long peer)
     {
-        ArgumentException.ThrowIfNullOrEmpty(service);
-        ArgumentException.ThrowIfNullOrEmpty(endpoint);
+        Guard.NotNullOrEmpty(service, nameof(service));
+        Guard.NotNullOrEmpty(endpoint, nameof(endpoint));
         _entries[service] = new Entry(endpoint, peer);
         Refresh();
     }
@@ -113,7 +113,7 @@ public sealed class DiscoveryCell
     /// <summary>Deregisters a service.</summary>
     public void Deregister(string service)
     {
-        ArgumentException.ThrowIfNullOrEmpty(service);
+        Guard.NotNullOrEmpty(service, nameof(service));
         _entries.Remove(service);
         Refresh();
     }
@@ -134,7 +134,7 @@ public sealed class DiscoveryCell
     /// <summary>Resolves one service, or returns null when absent.</summary>
     public string? Resolve(string service)
     {
-        ArgumentException.ThrowIfNullOrEmpty(service);
+        Guard.NotNullOrEmpty(service, nameof(service));
         return _entries.TryGetValue(service, out var entry) ? entry.Endpoint : null;
     }
 
@@ -172,7 +172,7 @@ public sealed class ServiceRegistry
     /// <summary>Creates an empty registry.</summary>
     public ServiceRegistry(Context context)
     {
-        ArgumentNullException.ThrowIfNull(context);
+        Guard.NotNull(context, nameof(context));
         ProjectionCell = context.Source<IReadOnlyDictionary<string, string>>(
             new SortedDictionary<string, string>(StringComparer.Ordinal),
             DictionaryEqualityComparer<string, string>.Instance);
@@ -190,8 +190,8 @@ public sealed class ServiceRegistry
     /// <summary>Appends a registration and updates the projection.</summary>
     public void Register(string service, string endpoint)
     {
-        ArgumentException.ThrowIfNullOrEmpty(service);
-        ArgumentException.ThrowIfNullOrEmpty(endpoint);
+        Guard.NotNullOrEmpty(service, nameof(service));
+        Guard.NotNullOrEmpty(endpoint, nameof(endpoint));
         var operation = new ServiceRegistryOperation(
             ServiceRegistryOperationKind.Register,
             service,
@@ -204,7 +204,7 @@ public sealed class ServiceRegistry
     /// <summary>Appends a deregistration and updates the projection.</summary>
     public void Deregister(string service)
     {
-        ArgumentException.ThrowIfNullOrEmpty(service);
+        Guard.NotNullOrEmpty(service, nameof(service));
         var operation = new ServiceRegistryOperation(
             ServiceRegistryOperationKind.Deregister,
             service);

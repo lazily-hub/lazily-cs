@@ -64,7 +64,7 @@ public sealed class BackpressurePolicy
         ulong lowWater,
         RelayOverflow overflow)
     {
-        ArgumentNullException.ThrowIfNull(ctx);
+        Guard.NotNull(ctx, nameof(ctx));
         if (highWater == 0)
             throw new ArgumentOutOfRangeException(
                 nameof(highWater),
@@ -145,9 +145,9 @@ public sealed class RelayCell<T>
         Func<T, ulong>? spillSize = null,
         bool spillDeduplicatesReplay = false)
     {
-        ArgumentNullException.ThrowIfNull(ctx);
-        ArgumentNullException.ThrowIfNull(policy);
-        ArgumentNullException.ThrowIfNull(merge);
+        Guard.NotNull(ctx, nameof(ctx));
+        Guard.NotNull(policy, nameof(policy));
+        Guard.NotNull(merge, nameof(merge));
         ValidatePolicy(
             policy,
             merge,
@@ -309,7 +309,7 @@ public sealed class RelayCell<T>
     /// </summary>
     public bool TryReconfigure(MergePolicy<T> merge)
     {
-        ArgumentNullException.ThrowIfNull(merge);
+        Guard.NotNull(merge, nameof(merge));
         if (_head.Peek().Present) return false;
         ValidatePolicy(
             _policy,

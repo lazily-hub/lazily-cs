@@ -31,7 +31,7 @@ public sealed class ThreadSafeComputedMap<TKey, TValue>
     /// <param name="ctx">The owning thread-safe context.</param>
     public ThreadSafeComputedMap(ThreadSafeContext ctx)
     {
-        ArgumentNullException.ThrowIfNull(ctx);
+        Guard.NotNull(ctx, nameof(ctx));
         _ctx = ctx;
         _inner = ctx.WithLock(inner => new ComputedMap<TKey, TValue>(inner));
     }

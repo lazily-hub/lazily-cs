@@ -29,7 +29,7 @@ public sealed class CircuitBreakerCell
         int failureThreshold,
         long resetTimeout)
     {
-        ArgumentNullException.ThrowIfNull(context);
+        Guard.NotNull(context, nameof(context));
         _window = Math.Max(1, window);
         _failureThreshold = Math.Max(1, failureThreshold);
         _resetTimeout = LogicalTime.Require(resetTimeout, nameof(resetTimeout));
@@ -95,7 +95,7 @@ public sealed class RetryPolicyCell
     /// <summary>Creates a saturating exponential-backoff policy.</summary>
     public RetryPolicyCell(Context context, long baseDelay, long cap)
     {
-        ArgumentNullException.ThrowIfNull(context);
+        Guard.NotNull(context, nameof(context));
         _baseDelay = LogicalTime.Require(baseDelay, nameof(baseDelay));
         _cap = LogicalTime.Require(cap, nameof(cap));
         DelayCell = context.Source(0L);
@@ -141,7 +141,7 @@ public sealed class BulkheadCell
     /// <summary>Creates a bulkhead with <paramref name="capacity"/> concurrent permits.</summary>
     public BulkheadCell(Context context, int capacity)
     {
-        ArgumentNullException.ThrowIfNull(context);
+        Guard.NotNull(context, nameof(context));
         if (capacity < 0) throw new ArgumentOutOfRangeException(nameof(capacity));
         _capacity = capacity;
         InUseCell = context.Source(0);
@@ -179,7 +179,7 @@ public sealed class TimeoutCell
     /// <summary>Creates an unarmed timeout.</summary>
     public TimeoutCell(Context context)
     {
-        ArgumentNullException.ThrowIfNull(context);
+        Guard.NotNull(context, nameof(context));
         IsTimedOutCell = context.Source(false);
     }
 

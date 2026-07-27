@@ -140,7 +140,7 @@ public sealed class LwwRegister<T> : IRegisterCrdt<LwwRegister<T>, T>
     /// <inheritdoc />
     public bool MergeFrom(LwwRegister<T> other)
     {
-        ArgumentNullException.ThrowIfNull(other);
+        Guard.NotNull(other, nameof(other));
         if (other.Stamp.CompareTo(Stamp) <= 0) return false;
 
         var changed = !_comparer.Equals(Value, other.Value);
@@ -199,7 +199,7 @@ public sealed class MvRegister<T>
     /// <inheritdoc />
     public bool MergeFrom(MvRegister<T> other)
     {
-        ArgumentNullException.ThrowIfNull(other);
+        Guard.NotNull(other, nameof(other));
         var before = Values;
         _entries.AddRange(other._entries.Select(entry => entry.Copy()));
         Normalize();
@@ -359,7 +359,7 @@ public sealed class PnCounter : IRegisterCrdt<PnCounter, long>
     /// <inheritdoc />
     public bool MergeFrom(PnCounter other)
     {
-        ArgumentNullException.ThrowIfNull(other);
+        Guard.NotNull(other, nameof(other));
         var before = Value;
         MergeMax(_increments, other._increments);
         MergeMax(_decrements, other._decrements);
@@ -403,8 +403,8 @@ public sealed class ReplicatedCell<TCrdt, TValue>
         TCrdt crdt,
         IEqualityComparer<TValue>? comparer = null)
     {
-        ArgumentNullException.ThrowIfNull(context);
-        ArgumentNullException.ThrowIfNull(crdt);
+        Guard.NotNull(context, nameof(context));
+        Guard.NotNull(crdt, nameof(crdt));
         _comparer = comparer ?? EqualityComparer<TValue>.Default;
         Crdt = crdt;
         Handle = context.Source(crdt.Value, _comparer);
@@ -422,7 +422,7 @@ public sealed class ReplicatedCell<TCrdt, TValue>
     /// <summary>Merges a remote replica and updates the source only on an observable change.</summary>
     public bool MergeRemote(TCrdt remote)
     {
-        ArgumentNullException.ThrowIfNull(remote);
+        Guard.NotNull(remote, nameof(remote));
         if (!Crdt.MergeFrom(remote)) return false;
 
         Handle.Set(Crdt.Value);
@@ -432,7 +432,7 @@ public sealed class ReplicatedCell<TCrdt, TValue>
     /// <summary>Applies a local mutation and updates the source only on an observable change.</summary>
     public bool Update(Action<TCrdt> mutate)
     {
-        ArgumentNullException.ThrowIfNull(mutate);
+        Guard.NotNull(mutate, nameof(mutate));
         var before = Crdt.Value;
         mutate(Crdt);
         var after = Crdt.Value;

@@ -45,8 +45,8 @@ public sealed class Effect : ReactiveNode
     public Effect(Context ctx, EffectRun run)
         : base(ctx)
     {
-        ArgumentNullException.ThrowIfNull(ctx);
-        ArgumentNullException.ThrowIfNull(run);
+        Guard.NotNull(ctx, nameof(ctx));
+        Guard.NotNull(run, nameof(run));
         _run = run;
         _active = true;
         Rerun();

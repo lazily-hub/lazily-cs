@@ -26,8 +26,8 @@ public sealed class TumblingCountWindow<T>
     /// <summary>Creates a count-based tumbling window.</summary>
     public TumblingCountWindow(Context context, long size, MergePolicy<T> policy)
     {
-        ArgumentNullException.ThrowIfNull(context);
-        ArgumentNullException.ThrowIfNull(policy);
+        Guard.NotNull(context, nameof(context));
+        Guard.NotNull(policy, nameof(policy));
         _size = LogicalTime.NormalizePeriod(size, nameof(size));
         _policy = policy;
         OutputCell = context.Source(Optional<T>.None);
@@ -42,7 +42,7 @@ public sealed class TumblingCountWindow<T>
     /// <summary>Accumulates a value and emits on the configured count boundary.</summary>
     public Optional<T> Push(T value)
     {
-        ArgumentNullException.ThrowIfNull(value);
+        Guard.NotNull(value, nameof(value));
         _accumulator = WindowFold.Merge(_accumulator, value, _policy);
         _count = checked(_count + 1);
         if (_count < _size) return Optional<T>.None;
@@ -64,8 +64,8 @@ public sealed class TumblingTimeWindow<T>
     /// <summary>Creates a time-based tumbling window.</summary>
     public TumblingTimeWindow(Context context, long period, MergePolicy<T> policy)
     {
-        ArgumentNullException.ThrowIfNull(context);
-        ArgumentNullException.ThrowIfNull(policy);
+        Guard.NotNull(context, nameof(context));
+        Guard.NotNull(policy, nameof(policy));
         _period = LogicalTime.NormalizePeriod(period, nameof(period));
         _policy = policy;
         _next = _period;
@@ -82,7 +82,7 @@ public sealed class TumblingTimeWindow<T>
     public void Push(long now, T value)
     {
         LogicalTime.Require(now, nameof(now));
-        ArgumentNullException.ThrowIfNull(value);
+        Guard.NotNull(value, nameof(value));
         _accumulator = WindowFold.Merge(_accumulator, value, _policy);
     }
 
@@ -111,8 +111,8 @@ public sealed class SlidingWindow<T>
     /// <summary>Creates a sliding count window.</summary>
     public SlidingWindow(Context context, int size, long slide, MergePolicy<T> policy)
     {
-        ArgumentNullException.ThrowIfNull(context);
-        ArgumentNullException.ThrowIfNull(policy);
+        Guard.NotNull(context, nameof(context));
+        Guard.NotNull(policy, nameof(policy));
         if (size < 0) throw new ArgumentOutOfRangeException(nameof(size));
         _size = Math.Max(1, size);
         _slide = LogicalTime.NormalizePeriod(slide, nameof(slide));
@@ -129,7 +129,7 @@ public sealed class SlidingWindow<T>
     /// <summary>Retains the newest value and emits the current fold on each slide boundary.</summary>
     public Optional<T> Push(T value)
     {
-        ArgumentNullException.ThrowIfNull(value);
+        Guard.NotNull(value, nameof(value));
         _values.Enqueue(value);
         while (_values.Count > _size) _ = _values.Dequeue();
         _sinceEmission = checked(_sinceEmission + 1);
@@ -150,8 +150,8 @@ public sealed class SessionWindow<T>
     /// <summary>Creates a session window.</summary>
     public SessionWindow(Context context, long gap, MergePolicy<T> policy)
     {
-        ArgumentNullException.ThrowIfNull(context);
-        ArgumentNullException.ThrowIfNull(policy);
+        Guard.NotNull(context, nameof(context));
+        Guard.NotNull(policy, nameof(policy));
         _gap = LogicalTime.Require(gap, nameof(gap));
         _policy = policy;
         OutputCell = context.Source(Optional<T>.None);
@@ -167,7 +167,7 @@ public sealed class SessionWindow<T>
     public Optional<T> Push(long now, T value)
     {
         LogicalTime.Require(now, nameof(now));
-        ArgumentNullException.ThrowIfNull(value);
+        Guard.NotNull(value, nameof(value));
         var idleBreak = _lastInput is not null
             && now - _lastInput.Value > _gap
             && _accumulator.HasValue;

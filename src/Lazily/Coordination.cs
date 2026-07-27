@@ -55,7 +55,7 @@ public sealed class LeaseCell
     /// <summary>Creates an initially free lease.</summary>
     public LeaseCell(Context context)
     {
-        ArgumentNullException.ThrowIfNull(context);
+        Guard.NotNull(context, nameof(context));
         HolderCell = context.Source(Optional<long>.None);
     }
 
@@ -149,7 +149,7 @@ public sealed class LeaderCell
     /// <summary>Creates a leader view from peer <paramref name="me"/>'s perspective.</summary>
     public LeaderCell(Context context, long me)
     {
-        ArgumentNullException.ThrowIfNull(context);
+        Guard.NotNull(context, nameof(context));
         _me = me;
         CurrentLeaderCell = context.Source(Optional<long>.None);
     }
@@ -214,7 +214,7 @@ public sealed class LockCell
     /// <summary>Creates an initially unlocked mutex.</summary>
     public LockCell(Context context)
     {
-        ArgumentNullException.ThrowIfNull(context);
+        Guard.NotNull(context, nameof(context));
         IsLockedCell = context.Source(false);
     }
 
@@ -273,7 +273,7 @@ public sealed class SemaphoreCell
     /// <summary>Creates a semaphore with <paramref name="capacity"/> permits.</summary>
     public SemaphoreCell(Context context, int capacity)
     {
-        ArgumentNullException.ThrowIfNull(context);
+        Guard.NotNull(context, nameof(context));
         if (capacity < 0) throw new ArgumentOutOfRangeException(nameof(capacity));
         _capacity = capacity;
         PermitsAvailableCell = context.Source(capacity);
@@ -313,7 +313,7 @@ public sealed class BarrierCell
     /// <summary>Creates a barrier requiring <paramref name="required"/> distinct arrivals.</summary>
     public BarrierCell(Context context, int required)
     {
-        ArgumentNullException.ThrowIfNull(context);
+        Guard.NotNull(context, nameof(context));
         if (required < 0) throw new ArgumentOutOfRangeException(nameof(required));
         _required = required;
         IsOpenCell = context.Source(required == 0);

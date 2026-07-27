@@ -74,7 +74,7 @@ public sealed class SemTree<TValue, TDerived>
         TreeNodeSpec<TValue> rootSpec,
         FoldFn<TValue, TDerived> fold)
     {
-        ArgumentNullException.ThrowIfNull(rootSpec);
+        Guard.NotNull(rootSpec, nameof(rootSpec));
         var tree = new SemTree<TValue, TDerived>(ctx, fold) { RootId = rootSpec.Id };
         tree.BuildNode(rootSpec);
         return tree;
@@ -88,7 +88,7 @@ public sealed class SemTree<TValue, TDerived>
         var childOrder = new List<string>();
         var order = spec.Order.Count > 0
             ? spec.Order
-            : [.. spec.Children.Keys.Order(StringComparer.Ordinal)];
+            : [.. spec.Children.Keys.OrderBy(key => key, StringComparer.Ordinal)];
         foreach (var childKey in order)
         {
             if (!spec.Children.TryGetValue(childKey, out var childSpec)) continue;

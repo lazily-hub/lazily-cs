@@ -87,7 +87,7 @@ public sealed class QueueCell<T>
     /// <exception cref="System.ArgumentOutOfRangeException">When <paramref name="capacity"/> is not positive.</exception>
     public QueueCell(Context ctx, int? capacity)
     {
-        System.ArgumentNullException.ThrowIfNull(ctx);
+        Guard.NotNull(ctx, nameof(ctx));
         if (capacity is <= 0)
         {
             throw new System.ArgumentOutOfRangeException(

@@ -44,7 +44,7 @@ public sealed class DurableOutbox<TStore>
     /// <summary>Loads an outbox over <paramref name="store"/>'s durable cursor.</summary>
     public DurableOutbox(TStore store)
     {
-        ArgumentNullException.ThrowIfNull(store);
+        Guard.NotNull(store, nameof(store));
         Store = store;
         _ackedThrough = store.LoadCursor();
     }
@@ -65,7 +65,7 @@ public sealed class DurableOutbox<TStore>
     /// <summary>Serializes and durably stores a message before transport send.</summary>
     public void Append(ulong epoch, IpcMessage message)
     {
-        ArgumentNullException.ThrowIfNull(message);
+        Guard.NotNull(message, nameof(message));
         Store.Put(epoch, Encoding.UTF8.GetBytes(IpcWire.Serialize(message)));
     }
 
@@ -155,7 +155,7 @@ public sealed class FileOutboxStore : IOutboxStore
     /// <summary>Opens or creates an append-only outbox journal.</summary>
     public FileOutboxStore(string path)
     {
-        ArgumentException.ThrowIfNullOrWhiteSpace(path);
+        Guard.NotNullOrWhiteSpace(path, nameof(path));
         _path = System.IO.Path.GetFullPath(path);
         var parent = System.IO.Path.GetDirectoryName(_path);
         if (parent is not null) Directory.CreateDirectory(parent);

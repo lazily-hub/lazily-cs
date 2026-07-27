@@ -161,14 +161,14 @@ public static class IpcWire
     /// <summary>Serializes one message in the lazily-spec wire shape.</summary>
     public static string Serialize(IpcMessage message)
     {
-        ArgumentNullException.ThrowIfNull(message);
+        Guard.NotNull(message, nameof(message));
         return JsonSerializer.Serialize(message, Options);
     }
 
     /// <summary>Deserializes one externally tagged lazily-spec message.</summary>
     public static IpcMessage Deserialize(string json)
     {
-        ArgumentException.ThrowIfNullOrWhiteSpace(json);
+        Guard.NotNullOrWhiteSpace(json, nameof(json));
         return JsonSerializer.Deserialize<IpcMessage>(json, Options)
             ?? throw new JsonException("IPC message decoded to null.");
     }

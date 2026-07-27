@@ -92,7 +92,7 @@ public readonly record struct Match(MatchKind Kind, int OldIndex, double Similar
     public override string ToString() =>
         Kind is MatchKind.Inserted
             ? "Inserted"
-            : string.Create(CultureInfo.InvariantCulture, $"{Kind}:{OldIndex}");
+            : FormattableString.Invariant($"{Kind}:{OldIndex}");
 }
 
 /// <summary>The alignment of a new block sequence against an old one.</summary>
@@ -177,8 +177,8 @@ public static partial class StableId
     /// <returns>The alignment.</returns>
     public static Alignment Align(IReadOnlyList<Block> oldBlocks, IReadOnlyList<Block> newBlocks)
     {
-        ArgumentNullException.ThrowIfNull(oldBlocks);
-        ArgumentNullException.ThrowIfNull(newBlocks);
+        Guard.NotNull(oldBlocks, nameof(oldBlocks));
+        Guard.NotNull(newBlocks, nameof(newBlocks));
 
         var oldKeys = oldBlocks.Select(KeyOf).ToArray();
         var newKeys = newBlocks.Select(KeyOf).ToArray();
@@ -246,7 +246,7 @@ public static partial class StableId
         IReadOnlyList<Block> oldBlocks,
         IReadOnlyList<Block> newBlocks)
     {
-        ArgumentNullException.ThrowIfNull(newBlocks);
+        Guard.NotNull(newBlocks, nameof(newBlocks));
         var alignment = Align(oldBlocks, newBlocks);
         return [.. newBlocks.Select((b, ni) =>
         {
@@ -272,12 +272,11 @@ public static partial class StableId
             }
 
             (prev, cur) = (cur, prev);
-            Array.Clear(cur);
+            Array.Clear(cur, 0, cur.Length);
         }
 
         return prev[b.Count];
     }
 
-    [GeneratedRegex(@"\s+")]
-    private static partial Regex Whitespace();
+    private static Regex Whitespace() => new(@"\s+", RegexOptions.Compiled);
 }

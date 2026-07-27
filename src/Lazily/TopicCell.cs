@@ -40,8 +40,8 @@ public sealed record TopicSnapshot<T>
         IEnumerable<T> elements,
         IReadOnlyDictionary<string, TopicSubscriptionSnapshot> subscriptions)
     {
-        ArgumentNullException.ThrowIfNull(elements);
-        ArgumentNullException.ThrowIfNull(subscriptions);
+        Guard.NotNull(elements, nameof(elements));
+        Guard.NotNull(subscriptions, nameof(subscriptions));
         BaseOffset = baseOffset;
         Elements = elements.ToArray();
         Subscriptions = new ReadOnlyDictionary<string, TopicSubscriptionSnapshot>(
@@ -109,8 +109,8 @@ public sealed class TopicCell<T>
     /// <summary>Recreates a topic from a durable/live-state snapshot.</summary>
     public TopicCell(Context ctx, TopicSnapshot<T> initial)
     {
-        ArgumentNullException.ThrowIfNull(ctx);
-        ArgumentNullException.ThrowIfNull(initial);
+        Guard.NotNull(ctx, nameof(ctx));
+        Guard.NotNull(initial, nameof(initial));
         if (initial.BaseOffset < 0)
             throw new ArgumentOutOfRangeException(
                 nameof(initial),
@@ -123,8 +123,8 @@ public sealed class TopicCell<T>
         var end = EndOffset;
         foreach (var (id, snapshot) in initial.Subscriptions)
         {
-            ArgumentException.ThrowIfNullOrEmpty(id);
-            ArgumentNullException.ThrowIfNull(snapshot);
+            Guard.NotNullOrEmpty(id, nameof(id));
+            Guard.NotNull(snapshot, nameof(snapshot));
             if (snapshot.Cursor < _baseOffset || snapshot.Cursor > end)
                 throw new ArgumentOutOfRangeException(
                     nameof(initial),
@@ -154,7 +154,7 @@ public sealed class TopicCell<T>
     /// </summary>
     public TopicSubscribeOutcome Subscribe(string id, TopicDurability durability)
     {
-        ArgumentException.ThrowIfNullOrEmpty(id);
+        Guard.NotNullOrEmpty(id, nameof(id));
         if (_subscriptions.TryGetValue(id, out var existing))
         {
             if (existing.Connected) return TopicSubscribeOutcome.AlreadyConnected;
@@ -176,7 +176,7 @@ public sealed class TopicCell<T>
     /// </summary>
     public bool Disconnect(string id)
     {
-        ArgumentException.ThrowIfNullOrEmpty(id);
+        Guard.NotNullOrEmpty(id, nameof(id));
         if (!_subscriptions.TryGetValue(id, out var subscription) || !subscription.Connected)
             return false;
 
@@ -211,7 +211,7 @@ public sealed class TopicCell<T>
     /// <summary>Reactive unread suffix for one connected subscriber.</summary>
     public IReadOnlyList<T> ReadStream(string id)
     {
-        ArgumentException.ThrowIfNullOrEmpty(id);
+        Guard.NotNullOrEmpty(id, nameof(id));
         return _readers.TryGetValue(id, out var reader)
             ? reader.Get()
             : Array.Empty<T>();
@@ -220,8 +220,8 @@ public sealed class TopicCell<T>
     /// <summary>Reactive unread suffix read through a compute view.</summary>
     public IReadOnlyList<T> ReadStream(string id, IComputeOps ops)
     {
-        ArgumentException.ThrowIfNullOrEmpty(id);
-        ArgumentNullException.ThrowIfNull(ops);
+        Guard.NotNullOrEmpty(id, nameof(id));
+        Guard.NotNull(ops, nameof(ops));
         return _readers.TryGetValue(id, out var reader)
             ? reader.Get(ops)
             : Array.Empty<T>();
@@ -233,7 +233,7 @@ public sealed class TopicCell<T>
     /// <summary>Advances only the named subscriber and returns the element it passed.</summary>
     public T? Advance(string id)
     {
-        ArgumentException.ThrowIfNullOrEmpty(id);
+        Guard.NotNullOrEmpty(id, nameof(id));
         if (!_subscriptions.TryGetValue(id, out var subscription) ||
             !subscription.Connected ||
             subscription.Cursor >= EndOffset)
@@ -267,12 +267,12 @@ public sealed class TopicCell<T>
 
     /// <summary>Subscriber identities in stable ordinal order.</summary>
     public IReadOnlyList<string> SubscriptionIds() =>
-        _subscriptions.Keys.Order(StringComparer.Ordinal).ToArray();
+        _subscriptions.Keys.OrderBy(id => id, StringComparer.Ordinal).ToArray();
 
     /// <summary>Non-reactive state for one stable subscriber.</summary>
     public TopicSubscriptionSnapshot? SubscriptionState(string id)
     {
-        ArgumentException.ThrowIfNullOrEmpty(id);
+        Guard.NotNullOrEmpty(id, nameof(id));
         return _subscriptions.TryGetValue(id, out var subscription)
             ? new TopicSubscriptionSnapshot(
                 subscription.Cursor,
@@ -284,7 +284,7 @@ public sealed class TopicCell<T>
     /// <summary>Handle to one subscriber's demand-driven unread suffix.</summary>
     public Computed<IReadOnlyList<T>>? ReaderHandle(string id)
     {
-        ArgumentException.ThrowIfNullOrEmpty(id);
+        Guard.NotNullOrEmpty(id, nameof(id));
         return _readers.GetValueOrDefault(id);
     }
 

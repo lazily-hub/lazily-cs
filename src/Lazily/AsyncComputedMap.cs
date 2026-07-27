@@ -44,7 +44,7 @@ public sealed class AsyncComputedMap<TKey, TValue>
     /// <param name="ctx">The owning async context.</param>
     public AsyncComputedMap(AsyncContext ctx)
     {
-        ArgumentNullException.ThrowIfNull(ctx);
+        Guard.NotNull(ctx, nameof(ctx));
         _ctx = ctx;
         _membership = ctx.Source(0);
         _orderSignal = ctx.Source(0);
@@ -82,7 +82,7 @@ public sealed class AsyncComputedMap<TKey, TValue>
     /// <param name="factory">The canonical value producer for a key.</param>
     public void MaterializeAll(IEnumerable<TKey> keys, Func<TKey, TValue> factory)
     {
-        ArgumentNullException.ThrowIfNull(keys);
+        Guard.NotNull(keys, nameof(keys));
         foreach (var key in keys) Mint(key, factory);
     }
 

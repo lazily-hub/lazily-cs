@@ -26,7 +26,7 @@ where TKey : notnull
     /// <param name="ctx">The owning async context.</param>
     public AsyncSourceMap(AsyncContext ctx)
     {
-        ArgumentNullException.ThrowIfNull(ctx);
+        Guard.NotNull(ctx, nameof(ctx));
         _ctx = ctx;
         _membership = ctx.Source(0);
         _orderSignal = ctx.Source(0);
@@ -41,7 +41,7 @@ where TKey : notnull
     /// <returns>The stable entry source.</returns>
     public AsyncSource<TValue> EntryWith(TKey key, Func<TValue> defaultValue)
     {
-        ArgumentNullException.ThrowIfNull(defaultValue);
+        Guard.NotNull(defaultValue, nameof(defaultValue));
         if (_keyed.TryGet(key, out var existing)) return existing;
         var source = _ctx.Source(defaultValue());
         if (!_keyed.Insert(key, source, out source).Changed()) return source;

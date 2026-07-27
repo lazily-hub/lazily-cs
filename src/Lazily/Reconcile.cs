@@ -85,8 +85,8 @@ public static class Reconcile
         IReadOnlyList<KeyValuePair<TKey, TValue>> target)
         where TKey : notnull
     {
-        ArgumentNullException.ThrowIfNull(prior);
-        ArgumentNullException.ThrowIfNull(target);
+        Guard.NotNull(prior, nameof(prior));
+        Guard.NotNull(target, nameof(target));
 
         var priorIndex = new Dictionary<TKey, int>();
         var priorValue = new Dictionary<TKey, TValue>();

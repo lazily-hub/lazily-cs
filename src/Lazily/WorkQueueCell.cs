@@ -63,7 +63,7 @@ public sealed class WorkQueueCell<T>
     /// <summary>Creates an empty local-authority work queue.</summary>
     public WorkQueueCell(Context ctx, long visibilityTimeout, int maxDeliveries)
     {
-        ArgumentNullException.ThrowIfNull(ctx);
+        Guard.NotNull(ctx, nameof(ctx));
         if (visibilityTimeout <= 0)
             throw new ArgumentOutOfRangeException(
                 nameof(visibilityTimeout),
@@ -117,7 +117,7 @@ public sealed class WorkQueueCell<T>
     /// <summary>Claim the oldest pending item for a worker, or null when empty.</summary>
     public WorkQueueDelivery<T>? Claim(string worker, long now)
     {
-        ArgumentNullException.ThrowIfNull(worker);
+        Guard.NotNull(worker, nameof(worker));
         if (_pending.Count == 0) return null;
 
         var wasLast = _pending.Count == 1;
@@ -138,7 +138,7 @@ public sealed class WorkQueueCell<T>
     /// <summary>Settle a matching live delivery. Wrong-worker and duplicate acks are no-ops.</summary>
     public bool Ack(string worker, long deliveryId)
     {
-        ArgumentNullException.ThrowIfNull(worker);
+        Guard.NotNull(worker, nameof(worker));
         if (!_inFlight.TryGetValue(deliveryId, out var delivery) ||
             !StringComparer.Ordinal.Equals(delivery.Worker, worker))
             return false;
@@ -151,7 +151,7 @@ public sealed class WorkQueueCell<T>
     /// <summary>Reject a live delivery, requeueing it or dead-lettering at the attempt limit.</summary>
     public bool Nack(string worker, long deliveryId)
     {
-        ArgumentNullException.ThrowIfNull(worker);
+        Guard.NotNull(worker, nameof(worker));
         if (!_inFlight.TryGetValue(deliveryId, out var delivery) ||
             !StringComparer.Ordinal.Equals(delivery.Worker, worker))
             return false;

@@ -36,7 +36,7 @@ public sealed class SpillStore<T>
     /// <summary>Creates a spill store with a positive operation-count page size.</summary>
     public SpillStore(SpillMode mode, ulong pageSize, MergePolicy<T> merge)
     {
-        ArgumentNullException.ThrowIfNull(merge);
+        Guard.NotNull(merge, nameof(merge));
         if (pageSize == 0)
             throw new ArgumentOutOfRangeException(
                 nameof(pageSize),

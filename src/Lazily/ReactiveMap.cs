@@ -348,8 +348,8 @@ public sealed class SourceMap<TKey, TValue> : ReactiveMap<TKey, TValue, Source<T
         IReadOnlyList<TKey> targetOrder,
         IReadOnlyDictionary<TKey, TValue> targetValues)
     {
-        ArgumentNullException.ThrowIfNull(targetOrder);
-        ArgumentNullException.ThrowIfNull(targetValues);
+        Guard.NotNull(targetOrder, nameof(targetOrder));
+        Guard.NotNull(targetValues, nameof(targetValues));
 
         var prior = PresentKeys()
             .Select(k => new KeyValuePair<TKey, TValue>(k, TryGetHandle(k, out var h) ? h.Peek() : default!))

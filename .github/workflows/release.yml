@@ -1,0 +1,80 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - "v*.*.*"
+  workflow_dispatch:
+    inputs:
+      version:
+        description: "NuGet package version (without a leading v)"
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+jobs:
+  nuget:
+    name: Pack and publish NuGet
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: "10.0.x"
+
+      - name: Resolve package version
+        id: version
+        shell: bash
+        env:
+          INPUT_VERSION: ${{ inputs.version }}
+        run: |
+          version="$INPUT_VERSION"
+          if [ -z "$version" ]; then
+            version="${GITHUB_REF_NAME#v}"
+          fi
+          if [[ ! "$version" =~ ^[0-9]+\.[0-9]+\.[0-9]+([-.][0-9A-Za-z.-]+)?$ ]]; then
+            echo "::error::invalid package version: $version"
+            exit 1
+          fi
+          echo "value=$version" >> "$GITHUB_OUTPUT"
+
+      - name: Restore
+        run: dotnet restore
+
+      - name: Build all target frameworks
+        run: dotnet build --configuration Release --no-restore --nologo -warnaserror
+
+      - name: Test
+        run: dotnet test --configuration Release --no-build --nologo
+
+      - name: Pack
+        run: >
+          dotnet pack src/Lazily/Lazily.csproj
+          --configuration Release
+          --no-build
+          --nologo
+          --output artifacts
+          -p:PackageVersion=${{ steps.version.outputs.value }}
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: Lazily-${{ steps.version.outputs.value }}
+          path: artifacts/*.nupkg
+          if-no-files-found: error
+
+      - name: Require NuGet API key
+        env:
+          NUGET_API_KEY: ${{ secrets.NUGET_API_KEY }}
+        run: test -n "$NUGET_API_KEY" || { echo "::error::NUGET_API_KEY is not configured"; exit 1; }
+
+      - name: Publish to NuGet
+        env:
+          NUGET_API_KEY: ${{ secrets.NUGET_API_KEY }}
+        run: >
+          dotnet nuget push artifacts/*.nupkg
+          --api-key "$NUGET_API_KEY"
+          --source https://api.nuget.org/v3/index.json
+          --skip-duplicate

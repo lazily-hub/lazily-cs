@@ -20,7 +20,7 @@ public readonly record struct HlcStamp(long Micros, long Counter, int Peer) : IC
     /// <summary>The wire form, for logging and divergence messages.</summary>
     /// <returns>The wire form.</returns>
     public override string ToString() =>
-        string.Create(CultureInfo.InvariantCulture, $"{Micros}.{Counter}@{Peer}");
+        FormattableString.Invariant($"{Micros}.{Counter}@{Peer}");
 }
 
 /// <summary>A keyed last-writer-wins op for one family entry.</summary>
@@ -71,7 +71,7 @@ public sealed class FamilySync<TValue>
     /// <param name="peerId">This replica's peer id, the final stamp tiebreak.</param>
     public FamilySync(Context ctx, int peerId)
     {
-        ArgumentNullException.ThrowIfNull(ctx);
+        Guard.NotNull(ctx, nameof(ctx));
         _ctx = ctx;
         PeerId = peerId;
         _membershipEpoch = ctx.Source(0);
@@ -182,7 +182,7 @@ public sealed class FamilySync<TValue>
     /// <returns>The derived count.</returns>
     public Computed<int> Aggregate(string ns, Func<TValue, bool> predicate)
     {
-        ArgumentNullException.ThrowIfNull(predicate);
+        Guard.NotNull(predicate, nameof(predicate));
         return _ctx.Computed(c =>
         {
             _ = _membershipEpoch.Get(c);

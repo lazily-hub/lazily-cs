@@ -27,7 +27,7 @@ public readonly struct Optional<T> : IEquatable<Optional<T>>
     /// <summary>Constructs a present optional.</summary>
     public static Optional<T> Some(T value)
     {
-        ArgumentNullException.ThrowIfNull(value);
+        Guard.NotNull(value, nameof(value));
         return new Optional<T>(value);
     }
 

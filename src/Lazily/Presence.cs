@@ -19,7 +19,7 @@ public sealed class EphemeralCell<T>
     /// <summary>Creates an empty ephemeral value.</summary>
     public EphemeralCell(Context context)
     {
-        ArgumentNullException.ThrowIfNull(context);
+        Guard.NotNull(context, nameof(context));
         ValueCell = context.Source(Optional<T>.None);
     }
 
@@ -35,7 +35,7 @@ public sealed class EphemeralCell<T>
     /// <summary>Sets a value with a time-to-live.</summary>
     public void Set(T value, long now, long ttl)
     {
-        ArgumentNullException.ThrowIfNull(value);
+        Guard.NotNull(value, nameof(value));
         LogicalTime.Require(now, nameof(now));
         LogicalTime.Require(ttl, nameof(ttl));
         _value = Optional<T>.Some(value);
@@ -62,7 +62,7 @@ public abstract class EphemeralMapCell<T>
     /// <summary>Creates an empty per-peer map with a fixed time-to-live.</summary>
     protected EphemeralMapCell(Context context, long ttl)
     {
-        ArgumentNullException.ThrowIfNull(context);
+        Guard.NotNull(context, nameof(context));
         TimeToLive = LogicalTime.Require(ttl, nameof(ttl));
         PresentCell = context.Source<IReadOnlyDictionary<long, T>>(
             new SortedDictionary<long, T>(),
@@ -81,7 +81,7 @@ public abstract class EphemeralMapCell<T>
     /// <summary>Writes one peer value and refreshes the live projection.</summary>
     protected void SetValue(long peer, T value, long now)
     {
-        ArgumentNullException.ThrowIfNull(value);
+        Guard.NotNull(value, nameof(value));
         LogicalTime.Require(now, nameof(now));
         _entries[peer] = new Entry(value, LogicalTime.Add(now, TimeToLive));
         Refresh(now);

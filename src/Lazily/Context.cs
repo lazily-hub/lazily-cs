@@ -143,7 +143,7 @@ public sealed class Context : IComputeOps
     /// </summary>
     public void Batch(Action fn)
     {
-        ArgumentNullException.ThrowIfNull(fn);
+        Guard.NotNull(fn, nameof(fn));
         _batchDepth++;
         try
         {
@@ -220,7 +220,7 @@ public sealed class Context : IComputeOps
         get => _drainBudget;
         set
         {
-            ArgumentOutOfRangeException.ThrowIfLessThan(value, 1);
+            if (value < 1) throw new ArgumentOutOfRangeException(nameof(value));
             _drainBudget = value;
         }
     }

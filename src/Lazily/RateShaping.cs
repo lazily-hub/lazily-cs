@@ -20,7 +20,7 @@ public sealed class DebounceCell<T>
     /// <summary>Creates a debounce operator.</summary>
     public DebounceCell(Context context, long quiet)
     {
-        ArgumentNullException.ThrowIfNull(context);
+        Guard.NotNull(context, nameof(context));
         _quiet = LogicalTime.Require(quiet, nameof(quiet));
         OutputCell = context.Source(Optional<T>.None);
     }
@@ -35,7 +35,7 @@ public sealed class DebounceCell<T>
     public void Input(long now, T value)
     {
         LogicalTime.Require(now, nameof(now));
-        ArgumentNullException.ThrowIfNull(value);
+        Guard.NotNull(value, nameof(value));
         _pending = Optional<T>.Some(value);
         _fireAt = LogicalTime.Add(now, _quiet);
         _armed = true;
@@ -75,7 +75,7 @@ public sealed class ThrottleCell<T>
     /// <summary>Creates a leading- or trailing-edge throttle.</summary>
     public ThrottleCell(Context context, ThrottleEdge edge, long window)
     {
-        ArgumentNullException.ThrowIfNull(context);
+        Guard.NotNull(context, nameof(context));
         _edge = edge;
         _window = LogicalTime.Require(window, nameof(window));
         OutputCell = context.Source(Optional<T>.None);
@@ -91,7 +91,7 @@ public sealed class ThrottleCell<T>
     public Optional<T> Input(long now, T value)
     {
         LogicalTime.Require(now, nameof(now));
-        ArgumentNullException.ThrowIfNull(value);
+        Guard.NotNull(value, nameof(value));
         if (_edge == ThrottleEdge.Leading)
         {
             if (_windowEnd is not null && now < _windowEnd) return Optional<T>.None;
@@ -150,7 +150,7 @@ public sealed class SampleCell<T>
     /// <summary>Creates a sampler.</summary>
     public SampleCell(Context context, SampleMode mode)
     {
-        ArgumentNullException.ThrowIfNull(context);
+        Guard.NotNull(context, nameof(context));
         _kind = mode.Kind;
         _value = LogicalTime.NormalizePeriod(mode.Value, nameof(mode));
         _next = _kind == SampleModeKind.Time ? _value : 0;
@@ -166,7 +166,7 @@ public sealed class SampleCell<T>
     /// <summary>Processes one input, emitting only in count mode on an Nth boundary.</summary>
     public Optional<T> Input(T value)
     {
-        ArgumentNullException.ThrowIfNull(value);
+        Guard.NotNull(value, nameof(value));
         if (_kind == SampleModeKind.Time)
         {
             _held = Optional<T>.Some(value);
@@ -226,8 +226,8 @@ public sealed class ProbabilisticSampleCell<T>
     /// <summary>Creates a probabilistic sampler with a clamped rate.</summary>
     public ProbabilisticSampleCell(Context context, double rate, ISampleRandom random)
     {
-        ArgumentNullException.ThrowIfNull(context);
-        ArgumentNullException.ThrowIfNull(random);
+        Guard.NotNull(context, nameof(context));
+        Guard.NotNull(random, nameof(random));
         if (double.IsNaN(rate)) throw new ArgumentOutOfRangeException(nameof(rate));
         _rate = Math.Clamp(rate, 0d, 1d);
         _random = random;
@@ -246,7 +246,7 @@ public sealed class ProbabilisticSampleCell<T>
     /// <summary>Samples an input against an explicit conformance draw.</summary>
     public Optional<T> InputWithDraw(T value, double draw)
     {
-        ArgumentNullException.ThrowIfNull(value);
+        Guard.NotNull(value, nameof(value));
         if (double.IsNaN(draw) || draw < 0d || draw >= 1d)
             throw new ArgumentOutOfRangeException(nameof(draw), draw, "sample draw must be in [0, 1)");
         return draw < _rate

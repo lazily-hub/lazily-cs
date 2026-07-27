@@ -157,7 +157,7 @@ public sealed class AsyncCompute
     /// <exception cref="DisposedNodeException">The source has been disposed.</exception>
     public T Track<T>(AsyncSource<T> source)
     {
-        ArgumentNullException.ThrowIfNull(source);
+        Guard.NotNull(source, nameof(source));
         return _ctx.TrackSource<T>(_owner, source.Node, Token);
     }
 
@@ -169,7 +169,7 @@ public sealed class AsyncCompute
     /// <param name="computed">The slot to await.</param>
     public Task<T> TrackAsync<T>(AsyncComputed<T> computed)
     {
-        ArgumentNullException.ThrowIfNull(computed);
+        Guard.NotNull(computed, nameof(computed));
         _ctx.TrackEdge(_owner, computed.Node, Token);
         return computed.GetAsync(Token);
     }
@@ -351,7 +351,7 @@ public sealed class AsyncEffectHandle
 /// </remarks>
 public sealed class AsyncContext : IAsyncDisposable
 {
-    private readonly System.Threading.Lock _gate = new();
+    private readonly object _gate = new();
 
     private bool _disposed;
     private int _batchDepth;
@@ -408,7 +408,7 @@ public sealed class AsyncContext : IAsyncDisposable
     /// <param name="compute">The async compute body; it reads through the view it is handed.</param>
     public AsyncComputed<T> Slot<T>(Func<AsyncCompute, Task<T>> compute)
     {
-        ArgumentNullException.ThrowIfNull(compute);
+        Guard.NotNull(compute, nameof(compute));
         return NewSlot(compute, equals: null);
     }
 
@@ -421,7 +421,7 @@ public sealed class AsyncContext : IAsyncDisposable
     /// <param name="comparer">The guard's equality. Defaults to <see cref="EqualityComparer{T}.Default"/>.</param>
     public AsyncComputed<T> Computed<T>(Func<AsyncCompute, Task<T>> compute, IEqualityComparer<T>? comparer = null)
     {
-        ArgumentNullException.ThrowIfNull(compute);
+        Guard.NotNull(compute, nameof(compute));
         var cmp = comparer ?? EqualityComparer<T>.Default;
         return NewSlot(compute, (a, b) => cmp.Equals((T)a!, (T)b!));
     }
@@ -446,7 +446,7 @@ public sealed class AsyncContext : IAsyncDisposable
     /// <param name="body">The effect body, returning an optional async cleanup.</param>
     public AsyncEffectHandle Effect(Func<AsyncCompute, Task<Func<Task>?>> body)
     {
-        ArgumentNullException.ThrowIfNull(body);
+        Guard.NotNull(body, nameof(body));
         var node = new AsyncEffectNode { Body = body };
         var handle = new AsyncEffectHandle(this, node);
         lock (_gate)
@@ -847,7 +847,7 @@ public sealed class AsyncContext : IAsyncDisposable
     /// <param name="run">The batch body.</param>
     public void Batch(Action run)
     {
-        ArgumentNullException.ThrowIfNull(run);
+        Guard.NotNull(run, nameof(run));
         lock (_gate) _batchDepth++;
         try
         {
@@ -930,7 +930,7 @@ public sealed class AsyncContext : IAsyncDisposable
     /// <param name="node">The node to measure.</param>
     public int DependentCount(AsyncNode node)
     {
-        ArgumentNullException.ThrowIfNull(node);
+        Guard.NotNull(node, nameof(node));
         lock (_gate) return node.Disposed ? 0 : node.Dependents.Count;
     }
 
@@ -941,7 +941,7 @@ public sealed class AsyncContext : IAsyncDisposable
     /// <param name="node">The node to measure.</param>
     public int DependencyCount(AsyncNode node)
     {
-        ArgumentNullException.ThrowIfNull(node);
+        Guard.NotNull(node, nameof(node));
         lock (_gate) return node.Disposed ? 0 : node.Dependencies.Count;
     }
 
@@ -949,7 +949,7 @@ public sealed class AsyncContext : IAsyncDisposable
     /// <param name="node">The node to test.</param>
     public bool IsDisposed(AsyncNode node)
     {
-        ArgumentNullException.ThrowIfNull(node);
+        Guard.NotNull(node, nameof(node));
         lock (_gate) return node.Disposed;
     }
 
@@ -1005,8 +1005,8 @@ public sealed class AsyncTeardownScope
     /// <param name="node">The source to own.</param>
     public AsyncSource<T> Own<T>(AsyncSource<T> node)
     {
-        ArgumentNullException.ThrowIfNull(node);
-        if (!_closed) _owned.Add(() => { node.Dispose(); return ValueTask.CompletedTask; });
+        Guard.NotNull(node, nameof(node));
+        if (!_closed) _owned.Add(() => { node.Dispose(); return default; });
         return node;
     }
 
@@ -1015,8 +1015,8 @@ public sealed class AsyncTeardownScope
     /// <param name="node">The slot to own.</param>
     public AsyncComputed<T> Own<T>(AsyncComputed<T> node)
     {
-        ArgumentNullException.ThrowIfNull(node);
-        if (!_closed) _owned.Add(() => { node.Dispose(); return ValueTask.CompletedTask; });
+        Guard.NotNull(node, nameof(node));
+        if (!_closed) _owned.Add(() => { node.Dispose(); return default; });
         return node;
     }
 
@@ -1024,7 +1024,7 @@ public sealed class AsyncTeardownScope
     /// <param name="node">The effect to own.</param>
     public AsyncEffectHandle Own(AsyncEffectHandle node)
     {
-        ArgumentNullException.ThrowIfNull(node);
+        Guard.NotNull(node, nameof(node));
         if (!_closed) _owned.Add(node.DisposeAsync);
         return node;
     }
