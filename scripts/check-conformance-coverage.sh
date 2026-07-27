@@ -68,7 +68,6 @@ KNOWN_UNCOVERED=(
   "rateshape/sample_time.json"
   "rateshape/throttle_leading.json"
   "rateshape/throttle_trailing.json"
-  "receipts/causal_receipts.json"
   "reliable-sync/coalesce_bounds_outbox.json"
   "reliable-sync/idempotent_redelivery.json"
 "reliable-sync/liveness_lease_eviction.json"
