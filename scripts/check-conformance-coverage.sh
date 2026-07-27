@@ -82,8 +82,6 @@ KNOWN_UNCOVERED=(
   "service/health.json"
   "service/readiness.json"
 "service/service_registry.json"
-"signaling/anti_spoof_session.json"
-"signaling/frames.json"
 "temporal/cron_pattern.json"
   "temporal/deadline_expiry.json"
   "temporal/interval_periodic.json"
