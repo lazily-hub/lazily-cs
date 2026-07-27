@@ -44,9 +44,6 @@ public sealed class CollectionsConformanceTests
         ["queuecell_mpsc_multi_writer.json"] = "QueueCell — replayed by QueueCellConformanceTests; this runner dispatches map ops and cannot execute push/pop/close/batch",
         ["queuecell_popped_head_observation.json"] = "QueueCell — replayed by QueueCellConformanceTests; this runner dispatches map ops and cannot execute push/pop/close/batch",
         ["queuecell_spsc_push_pop.json"] = "QueueCell — replayed by QueueCellConformanceTests; this runner dispatches map ops and cannot execute push/pop/close/batch",
-        ["seqcrdt_convergence.json"] = "SeqCrdt",
-        ["textcrdt_convergence.json"] = "TextCrdt",
-        ["textcrdt_delta_sync.json"] = "TextCrdt",
         ["topiccell_broadcast_cursor_isolation.json"] = "TopicCell",
         ["topiccell_durable_replay_gc.json"] = "TopicCell",
         ["topiccell_ephemeral_lifecycle.json"] = "TopicCell",
@@ -67,7 +64,10 @@ public sealed class CollectionsConformanceTests
     private static readonly Dictionary<string, string> HandledElsewhere = new(StringComparer.Ordinal)
     {
         ["semtree_incremental.json"] = nameof(SemTreeConformanceTests),
+        ["seqcrdt_convergence.json"] = nameof(CrdtConformanceTests),
         ["stableid_alignment.json"] = nameof(StableIdConformanceTests),
+        ["textcrdt_convergence.json"] = nameof(CrdtConformanceTests),
+        ["textcrdt_delta_sync.json"] = nameof(CrdtConformanceTests),
     };
 
     /// <summary>Assertions this binding does not satisfy, keyed <c>fixture#step:key</c>.</summary>
