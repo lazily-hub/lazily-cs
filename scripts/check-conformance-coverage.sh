@@ -38,8 +38,6 @@ KNOWN_UNCOVERED=(
   "collections/topiccell_durable_replay_gc.json"
   "collections/topiccell_ephemeral_lifecycle.json"
   "collections/topiccell_offline_tail_bounds.json"
-  "collections/workqueue_competing_delivery.json"
-  "collections/workqueue_lease_deadletter.json"
   "coordination/leader.json"
   "coordination/lease.json"
   "coordination/lock.json"
