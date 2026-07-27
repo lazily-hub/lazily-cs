@@ -104,11 +104,15 @@ public sealed class RelayCell<T>
 
     private readonly Context _ctx;
     private readonly BackpressurePolicy _policy;
+    private readonly SpillStore<T>? _spillStore;
+    private readonly Func<T, ulong> _spillSize;
+    private readonly bool _spillDeduplicatesReplay;
     private MergePolicy<T> _merge;
     private readonly Source<Head> _head;
     private readonly Source<ulong> _pending;
     private readonly Source<ulong> _dropped;
     private readonly Source<ulong> _conflated;
+    private readonly Source<ulong> _spilled;
     private readonly Computed<ulong> _depth;
     private readonly Computed<bool> _isFull;
     private readonly Computed<bool> _isEmpty;
@@ -119,19 +123,49 @@ public sealed class RelayCell<T>
         Context ctx,
         BackpressurePolicy policy,
         MergePolicy<T> merge)
+        : this(
+            ctx,
+            policy,
+            merge,
+            spillStore: null,
+            spillSize: null,
+            spillDeduplicatesReplay: false)
+    {
+    }
+
+    /// <summary>
+    /// Creates a relay with an optional durable spill tail. Non-idempotent merge policies require
+    /// the caller to assert that the storage/egress path deduplicates replay identities.
+    /// </summary>
+    public RelayCell(
+        Context ctx,
+        BackpressurePolicy policy,
+        MergePolicy<T> merge,
+        SpillStore<T>? spillStore,
+        Func<T, ulong>? spillSize = null,
+        bool spillDeduplicatesReplay = false)
     {
         ArgumentNullException.ThrowIfNull(ctx);
         ArgumentNullException.ThrowIfNull(policy);
         ArgumentNullException.ThrowIfNull(merge);
-        ValidatePolicy(policy, merge, construction: true);
+        ValidatePolicy(
+            policy,
+            merge,
+            spillStore is not null,
+            spillDeduplicatesReplay,
+            construction: true);
 
         _ctx = ctx;
         _policy = policy;
+        _spillStore = spillStore;
+        _spillSize = spillSize ?? (static _ => 1);
+        _spillDeduplicatesReplay = spillDeduplicatesReplay;
         _merge = merge;
         _head = ctx.Source(new Head(default, Present: false));
         _pending = ctx.Source(0UL);
         _dropped = ctx.Source(0UL);
         _conflated = ctx.Source(0UL);
+        _spilled = ctx.Source(0UL);
         _depth = ctx.Computed(cx => cx.Get(_pending));
         _isFull = ctx.Computed(cx => cx.Get(_depth) >= cx.Get(policy.HighWater));
         _isEmpty = ctx.Computed(cx => !cx.Get(_head).Present);
@@ -168,6 +202,12 @@ public sealed class RelayCell<T>
     /// <summary>Tracked conflation count.</summary>
     public ulong Conflated(IComputeOps ops) => _conflated.Get(ops);
 
+    /// <summary>Number of full hot windows paged to the durable spill tail.</summary>
+    public ulong Spilled() => _spilled.Get();
+
+    /// <summary>Tracked spilled-window count.</summary>
+    public ulong Spilled(IComputeOps ops) => _spilled.Get(ops);
+
     /// <summary>Whether the hot window is empty, allowing its merge policy to change safely.</summary>
     public bool CanReconfigure() => _canReconfigure.Get();
 
@@ -181,7 +221,9 @@ public sealed class RelayCell<T>
         return overflow switch
         {
             RelayOverflow.Conflate => _merge.Conflates,
-            RelayOverflow.Spill => false,
+            RelayOverflow.Spill =>
+                _spillStore is not null &&
+                (_merge.Idempotent || _spillDeduplicatesReplay),
             _ => true,
         };
     }
@@ -211,8 +253,18 @@ public sealed class RelayCell<T>
                 case RelayOverflow.Conflate:
                     break;
                 case RelayOverflow.Spill:
-                    throw new NotSupportedException(
-                        "Spill overflow requires the staged SpillStore integration");
+                    var current = _head.Peek();
+                    if (!current.Present)
+                        throw new InvalidOperationException(
+                            "a full relay must have a hot value to spill");
+                    _ctx.Batch(() =>
+                    {
+                        _spillStore!.Spill(current.Value!, _spillSize(current.Value!));
+                        _head.Set(new Head(operation, Present: true));
+                        _pending.Set(1);
+                        _spilled.Set(checked(_spilled.Peek() + 1));
+                    });
+                    return RelayIngressOutcome.Conflated;
                 default:
                     throw new InvalidOperationException("unknown relay overflow policy");
             }
@@ -259,9 +311,25 @@ public sealed class RelayCell<T>
     {
         ArgumentNullException.ThrowIfNull(merge);
         if (_head.Peek().Present) return false;
-        ValidatePolicy(_policy, merge, construction: false);
+        ValidatePolicy(
+            _policy,
+            merge,
+            _spillStore is not null,
+            _spillDeduplicatesReplay,
+            construction: false);
         _merge = merge;
         return true;
+    }
+
+    /// <summary>
+    /// Reconstructs the cold spill tail followed by the current hot head into an initial state.
+    /// </summary>
+    public T Reconstruct(T initial)
+    {
+        var head = _head.Peek();
+        if (_spillStore is not null)
+            return _spillStore.Reconstruct(initial, head.Value, head.Present);
+        return head.Present ? _merge.Merge(initial, head.Value!) : initial;
     }
 
     private bool IsFullUntracked() => _pending.Peek() >= _policy.HighWater.Peek();
@@ -278,21 +346,28 @@ public sealed class RelayCell<T>
         if (!OverflowIsLegal())
             throw new InvalidOperationException(
                 _policy.Overflow.Peek() == RelayOverflow.Spill
-                    ? "Spill overflow requires the staged SpillStore integration"
+                    ? "Spill overflow requires a SpillStore and idempotent or deduplicated replay"
                     : "Conflate overflow requires a conflating merge policy");
     }
 
     private static void ValidatePolicy(
         BackpressurePolicy policy,
         MergePolicy<T> merge,
+        bool hasSpillStore,
+        bool spillDeduplicatesReplay,
         bool construction)
     {
         if (policy.Dimension.Peek() != BoundDimension.Count)
             throw new NotSupportedException(
                 "this RelayCell implementation currently meters only Count");
-        if (policy.Overflow.Peek() == RelayOverflow.Spill)
-            throw new NotSupportedException(
-                "Spill overflow requires the staged SpillStore integration");
+        if (policy.Overflow.Peek() == RelayOverflow.Spill && !hasSpillStore)
+            throw new NotSupportedException("Spill overflow requires a SpillStore");
+        if (policy.Overflow.Peek() == RelayOverflow.Spill &&
+            !merge.Idempotent &&
+            !spillDeduplicatesReplay)
+            throw new ArgumentException(
+                "Spill overflow requires an idempotent merge or deduplicated replay",
+                construction ? nameof(merge) : null);
         if (policy.Overflow.Peek() == RelayOverflow.Conflate && !merge.Conflates)
             throw new ArgumentException(
                 "Conflate overflow requires a conflating merge policy",
