@@ -125,11 +125,11 @@ public sealed class QueueCellConformanceTests
                         break;
                     case "pop":
                     case "try_pop":
-                    {
-                        var popped = queue.TryPop();
-                        returned = popped.IsValue ? popped.Value : popped.Status.ToString();
-                        break;
-                    }
+                        {
+                            var popped = queue.TryPop();
+                            returned = popped.IsValue ? popped.Value : popped.Status.ToString();
+                            break;
+                        }
                     case "close":
                         queue.Close();
                         break;
