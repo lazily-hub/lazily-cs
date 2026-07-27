@@ -98,7 +98,7 @@ public sealed class RelayCellTests
     }
 
     [Fact]
-    public void RejectsUnsupportedOrAlgebraicallyUnsoundPolicyPairs()
+    public void RejectsUnconfiguredOrAlgebraicallyUnsoundPolicyPairs()
     {
         var ctx = new Context();
         var conflate = new BackpressurePolicy(
