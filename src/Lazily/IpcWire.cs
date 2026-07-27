@@ -646,7 +646,7 @@ internal sealed class IpcMessageJsonConverter : JsonConverter<IpcMessage>
         writer.WriteNumber("generation", blob.Generation);
         writer.WriteNumber("epoch", blob.Epoch);
         writer.WriteNumber("checksum", blob.Checksum);
-        if (blob.Backend is not null)
+        if (blob.Backend is not null and not BlobBackendKind.Shm)
         {
             writer.WriteString(
                 "backend",

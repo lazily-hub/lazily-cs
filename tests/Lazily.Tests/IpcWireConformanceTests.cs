@@ -156,6 +156,21 @@ public sealed class IpcWireConformanceTests
         var arrowJson = IpcWire.Serialize(arrow);
         Assert.Contains("\"backend\":\"arrow\"", arrowJson, StringComparison.Ordinal);
         AssertSchemaValid("delta.json", arrowJson, "Arrow SharedBlob");
+
+        var explicitShm = arrow with
+        {
+            Ops =
+            [
+                new DeltaOp.SlotValue(
+                    1,
+                    new IpcValue.SharedBlob(
+                        new ShmBlobRef(4, 8, 1, 2, 99, BlobBackendKind.Shm))),
+            ],
+        };
+        Assert.DoesNotContain(
+            "\"backend\"",
+            IpcWire.Serialize(explicitShm),
+            StringComparison.Ordinal);
     }
 
     [Fact]

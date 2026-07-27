@@ -29,7 +29,6 @@ fi
 KNOWN_UNCOVERED=(
   "agent-doc/delta_agent_doc_state.json"
   "agent-doc/snapshot_agent_doc_state.json"
-  "arena_blob.json"
   "collections/mergecell_algebra.json"
 "distributed/anti_entropy_converge.json"
   "message-passing/accepted_then_applied_receipt.json"
