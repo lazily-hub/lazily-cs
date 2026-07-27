@@ -1,0 +1,260 @@
+using System.Text;
+using System.Text.Json;
+using System.Text.Json.Serialization;
+
+namespace Lazily;
+
+/// <summary>One serialized outbox frame stored at an epoch.</summary>
+public sealed record StoredOutboxEntry(ulong Epoch, byte[] Frame);
+
+/// <summary>
+/// Dumb ordered byte storage. The shared <see cref="DurableOutbox{TStore}"/> owns serialization,
+/// cursor monotonicity, pruning, and replay ordering.
+/// </summary>
+public interface IOutboxStore
+{
+    /// <summary>Stores or replaces the frame at <paramref name="epoch"/>.</summary>
+    void Put(ulong epoch, ReadOnlySpan<byte> frame);
+
+    /// <summary>Prunes every frame at or below <paramref name="epoch"/>.</summary>
+    void DeleteThrough(ulong epoch);
+
+    /// <summary>Returns stored frames above <paramref name="cursor"/> in ascending epoch order.</summary>
+    IReadOnlyList<StoredOutboxEntry> ScanAfter(ulong cursor);
+
+    /// <summary>Loads the highest durably acknowledged epoch.</summary>
+    ulong LoadCursor();
+
+    /// <summary>Persists a monotonic acknowledgement cursor.</summary>
+    void SaveCursor(ulong epoch);
+}
+
+/// <summary>One decoded frame ready for at-least-once replay.</summary>
+public sealed record OutboxEntry(ulong Epoch, IpcMessage Message);
+
+/// <summary>
+/// Storage-independent append-before-send outbox with monotonic acknowledgement and replay.
+/// </summary>
+/// <typeparam name="TStore">The ordered byte-store adapter.</typeparam>
+public sealed class DurableOutbox<TStore>
+    where TStore : IOutboxStore
+{
+    private ulong _ackedThrough;
+
+    /// <summary>Loads an outbox over <paramref name="store"/>'s durable cursor.</summary>
+    public DurableOutbox(TStore store)
+    {
+        ArgumentNullException.ThrowIfNull(store);
+        Store = store;
+        _ackedThrough = store.LoadCursor();
+    }
+
+    /// <summary>The underlying byte store.</summary>
+    public TStore Store { get; }
+
+    /// <summary>The highest locally observed or durably persisted acknowledgement.</summary>
+    public ulong AckedThrough
+    {
+        get
+        {
+            _ackedThrough = Math.Max(_ackedThrough, Store.LoadCursor());
+            return _ackedThrough;
+        }
+    }
+
+    /// <summary>Serializes and durably stores a message before transport send.</summary>
+    public void Append(ulong epoch, IpcMessage message)
+    {
+        ArgumentNullException.ThrowIfNull(message);
+        Store.Put(epoch, Encoding.UTF8.GetBytes(IpcWire.Serialize(message)));
+    }
+
+    /// <summary>Advances the monotonic cursor and prunes the acknowledged prefix.</summary>
+    public void AckThrough(ulong epoch)
+    {
+        var target = Math.Max(epoch, AckedThrough);
+        if (target > _ackedThrough)
+        {
+            Store.SaveCursor(target);
+            _ackedThrough = target;
+        }
+
+        Store.DeleteThrough(target);
+    }
+
+    /// <summary>
+    /// Replays decoded frames after both the caller's cursor and the durable acknowledgement.
+    /// </summary>
+    public IReadOnlyList<OutboxEntry> ReplayFrom(ulong cursor) =>
+        Store.ScanAfter(Math.Max(cursor, AckedThrough))
+            .Select(
+                entry =>
+                    new OutboxEntry(
+                        entry.Epoch,
+                        IpcWire.Deserialize(Encoding.UTF8.GetString(entry.Frame))))
+            .ToArray();
+
+    /// <summary>Lists the unacknowledged suffix in ascending order.</summary>
+    public IReadOnlyList<ulong> RetainedEpochs =>
+        Store.ScanAfter(AckedThrough).Select(entry => entry.Epoch).ToArray();
+}
+
+/// <summary>An ordered process-local outbox byte store.</summary>
+public sealed class InMemoryOutboxStore : IOutboxStore
+{
+    private readonly SortedDictionary<ulong, byte[]> _entries = [];
+    private ulong _cursor;
+
+    /// <inheritdoc />
+    public void Put(ulong epoch, ReadOnlySpan<byte> frame)
+    {
+        _entries[epoch] = frame.ToArray();
+    }
+
+    /// <inheritdoc />
+    public void DeleteThrough(ulong epoch)
+    {
+        foreach (var stored in _entries.Keys.TakeWhile(stored => stored <= epoch).ToArray())
+        {
+            _entries.Remove(stored);
+        }
+    }
+
+    /// <inheritdoc />
+    public IReadOnlyList<StoredOutboxEntry> ScanAfter(ulong cursor) =>
+        _entries
+            .Where(entry => entry.Key > cursor)
+            .Select(entry => new StoredOutboxEntry(entry.Key, [.. entry.Value]))
+            .ToArray();
+
+    /// <inheritdoc />
+    public ulong LoadCursor() => _cursor;
+
+    /// <inheritdoc />
+    public void SaveCursor(ulong epoch)
+    {
+        _cursor = Math.Max(_cursor, epoch);
+    }
+}
+
+/// <summary>
+/// Fsync-backed append-only outbox journal. Cursor and deletion records fold by maximum, so a stale
+/// handle cannot regress acknowledgement or resurrect a pruned prefix.
+/// </summary>
+public sealed class FileOutboxStore : IOutboxStore
+{
+    private static readonly JsonSerializerOptions JournalJson = new()
+    {
+        PropertyNamingPolicy = JsonNamingPolicy.SnakeCaseLower,
+        DefaultIgnoreCondition = JsonIgnoreCondition.WhenWritingNull,
+    };
+
+    private readonly object _gate = new();
+    private readonly string _path;
+
+    /// <summary>Opens or creates an append-only outbox journal.</summary>
+    public FileOutboxStore(string path)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(path);
+        _path = System.IO.Path.GetFullPath(path);
+        var parent = System.IO.Path.GetDirectoryName(_path);
+        if (parent is not null) Directory.CreateDirectory(parent);
+        using var stream = new FileStream(
+            _path,
+            FileMode.OpenOrCreate,
+            FileAccess.Write,
+            FileShare.ReadWrite);
+    }
+
+    /// <summary>The journal path.</summary>
+    public string Path => _path;
+
+    /// <inheritdoc />
+    public void Put(ulong epoch, ReadOnlySpan<byte> frame) =>
+        AppendRecord(new JournalRecord("put", epoch, frame.ToArray()));
+
+    /// <inheritdoc />
+    public void DeleteThrough(ulong epoch) =>
+        AppendRecord(new JournalRecord("delete", epoch, null));
+
+    /// <inheritdoc />
+    public IReadOnlyList<StoredOutboxEntry> ScanAfter(ulong cursor)
+    {
+        var entries = new SortedDictionary<ulong, byte[]>();
+        var deletedThrough = 0UL;
+        foreach (var record in ReadRecords())
+        {
+            switch (record.Op)
+            {
+                case "put" when record.Frame is not null:
+                    entries[record.Epoch] = record.Frame;
+                    break;
+                case "delete":
+                    deletedThrough = Math.Max(deletedThrough, record.Epoch);
+                    break;
+            }
+        }
+
+        cursor = Math.Max(cursor, deletedThrough);
+        return entries
+            .Where(entry => entry.Key > cursor)
+            .Select(entry => new StoredOutboxEntry(entry.Key, [.. entry.Value]))
+            .ToArray();
+    }
+
+    /// <inheritdoc />
+    public ulong LoadCursor() =>
+        ReadRecords()
+            .Where(record => record.Op == "cursor")
+            .Aggregate(0UL, (cursor, record) => Math.Max(cursor, record.Epoch));
+
+    /// <inheritdoc />
+    public void SaveCursor(ulong epoch) =>
+        AppendRecord(new JournalRecord("cursor", epoch, null));
+
+    private void AppendRecord(JournalRecord record)
+    {
+        var bytes = Encoding.UTF8.GetBytes(JsonSerializer.Serialize(record, JournalJson) + "\n");
+        lock (_gate)
+        {
+            using var stream = new FileStream(
+                _path,
+                FileMode.Append,
+                FileAccess.Write,
+                FileShare.ReadWrite);
+            stream.Write(bytes);
+            stream.Flush(flushToDisk: true);
+        }
+    }
+
+    private IReadOnlyList<JournalRecord> ReadRecords()
+    {
+        lock (_gate)
+        {
+            using var stream = new FileStream(
+                _path,
+                FileMode.Open,
+                FileAccess.Read,
+                FileShare.ReadWrite);
+            using var reader = new StreamReader(stream, Encoding.UTF8);
+            var records = new List<JournalRecord>();
+            while (reader.ReadLine() is { } line)
+            {
+                try
+                {
+                    var record = JsonSerializer.Deserialize<JournalRecord>(line, JournalJson);
+                    if (record is not null) records.Add(record);
+                }
+                catch (JsonException)
+                {
+                    // A crash can leave one incomplete trailing record. Earlier fsynced records
+                    // remain authoritative and replayable.
+                }
+            }
+
+            return records;
+        }
+    }
+
+    private sealed record JournalRecord(string Op, ulong Epoch, byte[]? Frame);
+}
