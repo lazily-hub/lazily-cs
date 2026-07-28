@@ -48,6 +48,12 @@ jobs:
       - name: Build all target frameworks
         run: dotnet build --configuration Release --no-restore --nologo -warnaserror
 
+      - name: Fetch canonical lazily-spec conformance fixtures
+        run: git clone --depth 1 https://github.com/lazily-hub/lazily-spec.git ../lazily-spec
+
+      - name: Guard — canonical fixtures present
+        run: test -d ../lazily-spec/conformance || { echo "::error::../lazily-spec/conformance missing"; exit 1; }
+
       - name: Test
         run: dotnet test --configuration Release --no-build --nologo
 
