@@ -23,22 +23,9 @@ if [ ! -d "$SPEC_DIR" ]; then
   exit 0
 fi
 
-# Fixtures deliberately not covered by this binding yet. Each entry is a claim that
-# someone looked; shrinking this list is the work. Adding to it silently is how the
-# guard rots, so keep a reason with any new entry.
-KNOWN_UNCOVERED=(
-  "agent-doc/delta_agent_doc_state.json"
-  "agent-doc/snapshot_agent_doc_state.json"
-  "collections/mergecell_algebra.json"
-  "message-passing/accepted_then_applied_receipt.json"
-  "message-passing/cancel_preempts_nonterminal.json"
-  "message-passing/editor_route_submit.json"
-  "message-passing/reconnect_command_projection.json"
-  "message-passing/rpc_call_waits_for_terminal.json"
-  "message-passing/stale_generation_ignored.json"
-  "message-passing/sync_tmux_layout_submit.json"
-  "message-passing/terminal_conflict_fail_closed.json"
-)
+# Fixtures deliberately not covered by this binding yet. Keep this explicit even
+# while empty: any future entry is a reviewed finding, never a silent skip.
+KNOWN_UNCOVERED=()
 
 MANIFEST="${LAZILY_CONFORMANCE_MANIFEST:-build/conformance-fixtures-loaded.txt}"
 TEST_DIRS=("tests")
@@ -78,7 +65,7 @@ while IFS= read -r fixture; do
     continue
   fi
   excused=0
-  for known in "${KNOWN_UNCOVERED[@]:-}"; do
+  for known in "${KNOWN_UNCOVERED[@]}"; do
     if [ "$known" = "$fixture" ]; then excused=1; break; fi
   done
   if [ "$excused" -eq 0 ]; then
@@ -92,7 +79,7 @@ done < <(cd "$SPEC_DIR" && find . -name '*.json' | sed 's|^\./||' | sort)
 
 # A stale allowlist is its own drift: an entry naming a fixture that no longer
 # exists means the corpus moved and nobody updated the excuse.
-for known in "${KNOWN_UNCOVERED[@]:-}"; do
+for known in "${KNOWN_UNCOVERED[@]}"; do
   if [ ! -f "$SPEC_DIR/$known" ]; then
     echo "ERROR: KNOWN_UNCOVERED lists '$known', which is not in the canonical corpus." >&2
     missing=$((missing + 1))

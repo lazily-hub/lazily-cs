@@ -38,18 +38,6 @@ public sealed class CollectionsConformanceTests
     /// </remarks>
     private static readonly Dictionary<string, string> Unsupported = new(StringComparer.Ordinal)
     {
-        ["mergecell_algebra.json"] = "MergeCell collection surface — merge algebra ships, the keyed collection over it does not",
-        ["queuecell_bounded_backpressure.json"] = "QueueCell — replayed by QueueCellConformanceTests; this runner dispatches map ops and cannot execute push/pop/close/batch",
-        ["queuecell_closure_lifecycle.json"] = "QueueCell — replayed by QueueCellConformanceTests; this runner dispatches map ops and cannot execute push/pop/close/batch",
-        ["queuecell_mpsc_multi_writer.json"] = "QueueCell — replayed by QueueCellConformanceTests; this runner dispatches map ops and cannot execute push/pop/close/batch",
-        ["queuecell_popped_head_observation.json"] = "QueueCell — replayed by QueueCellConformanceTests; this runner dispatches map ops and cannot execute push/pop/close/batch",
-        ["queuecell_spsc_push_pop.json"] = "QueueCell — replayed by QueueCellConformanceTests; this runner dispatches map ops and cannot execute push/pop/close/batch",
-        ["topiccell_broadcast_cursor_isolation.json"] = "TopicCell",
-        ["topiccell_durable_replay_gc.json"] = "TopicCell",
-        ["topiccell_ephemeral_lifecycle.json"] = "TopicCell",
-        ["topiccell_offline_tail_bounds.json"] = "TopicCell",
-        ["workqueue_competing_delivery.json"] = "WorkQueueCell",
-        ["workqueue_lease_deadletter.json"] = "WorkQueueCell",
     };
 
     /// <summary>
@@ -63,11 +51,23 @@ public sealed class CollectionsConformanceTests
     /// </remarks>
     private static readonly Dictionary<string, string> HandledElsewhere = new(StringComparer.Ordinal)
     {
+        ["mergecell_algebra.json"] = nameof(MergeCellConformanceTests),
+        ["queuecell_bounded_backpressure.json"] = nameof(QueueCellConformanceTests),
+        ["queuecell_closure_lifecycle.json"] = nameof(QueueCellConformanceTests),
+        ["queuecell_mpsc_multi_writer.json"] = nameof(QueueCellConformanceTests),
+        ["queuecell_popped_head_observation.json"] = nameof(QueueCellConformanceTests),
+        ["queuecell_spsc_push_pop.json"] = nameof(QueueCellConformanceTests),
         ["semtree_incremental.json"] = nameof(SemTreeConformanceTests),
         ["seqcrdt_convergence.json"] = nameof(CrdtConformanceTests),
         ["stableid_alignment.json"] = nameof(StableIdConformanceTests),
         ["textcrdt_convergence.json"] = nameof(CrdtConformanceTests),
         ["textcrdt_delta_sync.json"] = nameof(CrdtConformanceTests),
+        ["topiccell_broadcast_cursor_isolation.json"] = nameof(TopicCellConformanceTests),
+        ["topiccell_durable_replay_gc.json"] = nameof(TopicCellConformanceTests),
+        ["topiccell_ephemeral_lifecycle.json"] = nameof(TopicCellConformanceTests),
+        ["topiccell_offline_tail_bounds.json"] = nameof(TopicCellConformanceTests),
+        ["workqueue_competing_delivery.json"] = nameof(WorkQueueConformanceTests),
+        ["workqueue_lease_deadletter.json"] = nameof(WorkQueueConformanceTests),
     };
 
     /// <summary>Assertions this binding does not satisfy, keyed <c>fixture#step:key</c>.</summary>

@@ -1,3 +1,4 @@
+using System.Text;
 using System.Text.Json;
 using System.Text.Json.Serialization;
 
@@ -166,6 +167,7 @@ public sealed record CrdtOp(
 /// <summary>Exact JSON codec for the externally tagged IPC family.</summary>
 public static class IpcWire
 {
+    private static readonly IpcMessageJsonConverter Converter = new();
     private static readonly JsonSerializerOptions Options = new()
     {
         WriteIndented = false,
@@ -175,15 +177,24 @@ public static class IpcWire
     public static string Serialize(IpcMessage message)
     {
         Guard.NotNull(message, nameof(message));
-        return JsonSerializer.Serialize(message, Options);
+        using var stream = new MemoryStream();
+        using (var writer = new Utf8JsonWriter(stream))
+        {
+            Converter.Write(writer, message, Options);
+        }
+
+        return Encoding.UTF8.GetString(stream.ToArray());
     }
 
     /// <summary>Deserializes one externally tagged lazily-spec message.</summary>
     public static IpcMessage Deserialize(string json)
     {
         Guard.NotNullOrWhiteSpace(json, nameof(json));
-        return JsonSerializer.Deserialize<IpcMessage>(json, Options)
-            ?? throw new JsonException("IPC message decoded to null.");
+        var reader = new Utf8JsonReader(Encoding.UTF8.GetBytes(json));
+        if (!reader.Read()) throw new JsonException("IPC message is empty.");
+        var message = Converter.Read(ref reader, typeof(IpcMessage), Options);
+        if (reader.Read()) throw new JsonException("IPC message has trailing content.");
+        return message;
     }
 }
 
@@ -398,7 +409,7 @@ frontier);
         };
     }
 
-    private static IpcValue ReadIpcValue(JsonElement envelope)
+    internal static IpcValue ReadIpcValue(JsonElement envelope)
     {
         RequireObject(envelope, "IpcValue");
         var property = SingleProperty(envelope, "IpcValue");
@@ -654,7 +665,7 @@ frontier);
         }
     }
 
-    private static void WriteIpcValue(Utf8JsonWriter writer, IpcValue value)
+    internal static void WriteIpcValue(Utf8JsonWriter writer, IpcValue value)
     {
         writer.WriteStartObject();
         switch (value)
