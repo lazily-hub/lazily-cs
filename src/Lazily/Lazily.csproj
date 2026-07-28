@@ -16,7 +16,7 @@
 
   <PropertyGroup>
     <PackageId>Lazily</PackageId>
-    <Version>0.2.0</Version>
+    <Version>0.3.0</Version>
     <Authors>lazily-hub</Authors>
     <Description>Lazy reactive primitives for C#/.NET — Sources, Computeds, and Effects with automatic dependency tracking, plus the lazily-spec wire protocol.</Description>
     <PackageLicenseExpression>MIT</PackageLicenseExpression>
