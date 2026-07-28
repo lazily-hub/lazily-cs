@@ -8,6 +8,11 @@ This is the ninth binding in the lazily family. The reactive kernel is a direct 
 reference semantics, and it replays the shared cross-language conformance corpus rather than
 asserting behaviour it invented locally.
 
+The `Lazily.InteropPeer` console project is the production-backed adapter for the
+cross-binding network suite. It advertises `distributed_crdt` with the JSON
+codec, routes semantic operations through `CrdtPlaneRuntime` and `IpcWire`, and
+leaves transport links unadvertised until executable channel adapters exist.
+
 > **Status: active and spec-conformant.** The binding replays all 124 canonical fixtures.
 > Feature-specific peers remain staged until that execution flavor exists; the generated matrix
 > below is the honest, single-source record of what can join each peer group.

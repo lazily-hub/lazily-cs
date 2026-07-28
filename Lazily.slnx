@@ -1,5 +1,6 @@
 <Solution>
   <Folder Name="/src/">
+    <Project Path="src/Lazily.InteropPeer/Lazily.InteropPeer.csproj" />
     <Project Path="src/Lazily/Lazily.csproj" />
     <Project Path="src/Lazily.Native/Lazily.Native.csproj" />
   </Folder>

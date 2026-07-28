@@ -1,6 +1,6 @@
 # lazily-cs — build, test, and verification targets.
 
-.PHONY: all restore build test format format-check conformance pack package-check ffi-check check clean conformance-coverage
+.PHONY: all restore build test format format-check conformance pack package-check ffi-check interop-peer-check check clean conformance-coverage
 
 DOTNET ?= dotnet
 
@@ -41,8 +41,11 @@ package-check:
 ffi-check:
 	./scripts/check-ffi.sh
 
+interop-peer-check:
+	$(DOTNET) run --project src/Lazily.InteropPeer/Lazily.InteropPeer.csproj --no-build -- --self-check
+
 # Full local gate — run before committing.
-check: build test conformance-coverage package-check ffi-check
+check: build test conformance-coverage package-check ffi-check interop-peer-check
 	@echo "lazily-cs: check OK"
 
 clean:
