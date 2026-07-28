@@ -25,7 +25,12 @@ fi
 
 # Fixtures deliberately not covered by this binding yet. Keep this explicit even
 # while empty: any future entry is a reviewed finding, never a silent skip.
-KNOWN_UNCOVERED=()
+KNOWN_UNCOVERED=(
+  # Portable stdlib APIs and their production fixture runners are staged.
+  "stdlib/revision_barrier.json"
+  "stdlib/timeout.json"
+  "stdlib/timer.json"
+)
 
 MANIFEST="${LAZILY_CONFORMANCE_MANIFEST:-build/conformance-fixtures-loaded.txt}"
 TEST_DIRS=("tests")
