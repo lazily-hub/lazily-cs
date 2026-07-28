@@ -27,17 +27,58 @@ public interface IOutboxStore
 
     /// <summary>Persists a monotonic acknowledgement cursor.</summary>
     void SaveCursor(ulong epoch);
+
+    /// <summary>Deletes every frame above <paramref name="cursor"/>.</summary>
+    void DeleteAfter(ulong cursor);
+
+    /// <summary>
+    /// Atomically replaces every frame above <paramref name="cursor"/> with one frame at
+    /// <paramref name="epoch"/>.
+    /// </summary>
+    void ReplaceAfter(ulong cursor, ulong epoch, ReadOnlySpan<byte> frame);
 }
 
 /// <summary>One decoded frame ready for at-least-once replay.</summary>
 public sealed record OutboxEntry(ulong Epoch, IpcMessage Message);
+
+/// <summary>The storage-independent reliable-sync outbox surface used by the driver.</summary>
+public interface IDurableOutbox
+{
+    /// <summary>The highest durably acknowledged epoch.</summary>
+    ulong AckedThrough { get; }
+
+    /// <summary>Stores a message before transport send.</summary>
+    void Append(ulong epoch, IpcMessage message);
+
+    /// <summary>Advances retention through an acknowledged epoch.</summary>
+    void AckThrough(ulong epoch);
+
+    /// <summary>Returns retained frames above a cursor in epoch order.</summary>
+    IReadOnlyList<OutboxEntry> ReplayFrom(ulong cursor);
+
+    /// <summary>Lists all unacknowledged epochs.</summary>
+    IReadOnlyList<ulong> RetainedEpochs { get; }
+
+    /// <summary>The unacknowledged queue depth.</summary>
+    int RetainedDepth { get; }
+
+    /// <summary>Collapses the unacknowledged state suffix to one covering snapshot.</summary>
+    bool CoalesceToSnapshot(ulong epoch, SnapshotMessage snapshot);
+
+    /// <summary>Fuses a contiguous same-direction queue-op suffix into one multi-epoch delta.</summary>
+    bool FuseQueueDeltaBatch();
+
+    /// <summary>Reclaims all unacknowledged frames after peer eviction.</summary>
+    void ReclaimUnacked();
+}
 
 /// <summary>
 /// Storage-independent append-before-send outbox with monotonic acknowledgement and replay.
 /// </summary>
 /// <typeparam name="TStore">The ordered byte-store adapter.</typeparam>
 public sealed class DurableOutbox<TStore>
-    where TStore : IOutboxStore
+ : IDurableOutbox
+where TStore : IOutboxStore
 {
     private ulong _ackedThrough;
 
@@ -96,7 +137,64 @@ public sealed class DurableOutbox<TStore>
 
     /// <summary>Lists the unacknowledged suffix in ascending order.</summary>
     public IReadOnlyList<ulong> RetainedEpochs =>
-        Store.ScanAfter(AckedThrough).Select(entry => entry.Epoch).ToArray();
+    Store.ScanAfter(AckedThrough).Select(entry => entry.Epoch).ToArray();
+
+    /// <inheritdoc />
+    public int RetainedDepth => RetainedEpochs.Count;
+
+    /// <inheritdoc />
+    public bool CoalesceToSnapshot(ulong epoch, SnapshotMessage snapshot)
+    {
+        Guard.NotNull(snapshot, nameof(snapshot));
+        if (snapshot.Epoch != epoch || epoch <= AckedThrough) return false;
+        Store.ReplaceAfter(
+        AckedThrough,
+        epoch,
+        Encoding.UTF8.GetBytes(IpcWire.Serialize(snapshot)));
+        return true;
+    }
+
+    /// <inheritdoc />
+    public bool FuseQueueDeltaBatch()
+    {
+        var retained = ReplayFrom(AckedThrough);
+        if (retained.Count < 2
+        || retained.Any(entry => entry.Message is not DeltaMessage))
+        {
+            return false;
+        }
+
+        var deltas = retained.Select(entry => (DeltaMessage)entry.Message).ToArray();
+        for (var index = 1; index < deltas.Length; index++)
+        {
+            if (deltas[index].BaseEpoch != deltas[index - 1].Epoch) return false;
+        }
+
+        var operations = deltas.SelectMany(delta => delta.Ops).ToArray();
+        if (operations.Length == 0 || QueueSignature(operations[0]) is not { } signature)
+        {
+            return false;
+        }
+
+        if (operations.Any(operation => QueueSignature(operation) != signature)) return false;
+        var fused = new DeltaMessage(deltas[0].BaseEpoch, deltas[^1].Epoch, operations);
+        Store.ReplaceAfter(
+        AckedThrough,
+        fused.Epoch,
+        Encoding.UTF8.GetBytes(IpcWire.Serialize(fused)));
+        return true;
+    }
+
+    /// <inheritdoc />
+    public void ReclaimUnacked() => Store.DeleteAfter(AckedThrough);
+
+    private static (Type Type, ulong Node)? QueueSignature(DeltaOp operation) =>
+    operation switch
+    {
+        DeltaOp.QueuePush push => (typeof(DeltaOp.QueuePush), push.Node),
+        DeltaOp.QueuePop pop => (typeof(DeltaOp.QueuePop), pop.Node),
+        _ => null,
+    };
 }
 
 /// <summary>An ordered process-local outbox byte store.</summary>
@@ -134,6 +232,22 @@ public sealed class InMemoryOutboxStore : IOutboxStore
     public void SaveCursor(ulong epoch)
     {
         _cursor = Math.Max(_cursor, epoch);
+    }
+
+    /// <inheritdoc />
+    public void DeleteAfter(ulong cursor)
+    {
+        foreach (var stored in _entries.Keys.Where(stored => stored > cursor).ToArray())
+        {
+            _entries.Remove(stored);
+        }
+    }
+
+    /// <inheritdoc />
+    public void ReplaceAfter(ulong cursor, ulong epoch, ReadOnlySpan<byte> frame)
+    {
+        DeleteAfter(cursor);
+        Put(epoch, frame);
     }
 }
 
@@ -192,6 +306,19 @@ public sealed class FileOutboxStore : IOutboxStore
                 case "delete":
                     deletedThrough = Math.Max(deletedThrough, record.Epoch);
                     break;
+                case "delete_after":
+                    foreach (var epoch in entries.Keys.Where(epoch => epoch > record.Epoch).ToArray())
+                    {
+                        entries.Remove(epoch);
+                    }
+                    break;
+                case "replace_after" when record.Frame is not null && record.Cursor is not null:
+                    foreach (var epoch in entries.Keys.Where(epoch => epoch > record.Cursor.Value).ToArray())
+                    {
+                        entries.Remove(epoch);
+                    }
+                    entries[record.Epoch] = record.Frame;
+                    break;
             }
         }
 
@@ -210,7 +337,15 @@ public sealed class FileOutboxStore : IOutboxStore
 
     /// <inheritdoc />
     public void SaveCursor(ulong epoch) =>
-        AppendRecord(new JournalRecord("cursor", epoch, null));
+    AppendRecord(new JournalRecord("cursor", epoch, null));
+
+    /// <inheritdoc />
+    public void DeleteAfter(ulong cursor) =>
+    AppendRecord(new JournalRecord("delete_after", cursor, null));
+
+    /// <inheritdoc />
+    public void ReplaceAfter(ulong cursor, ulong epoch, ReadOnlySpan<byte> frame) =>
+    AppendRecord(new JournalRecord("replace_after", epoch, frame.ToArray(), cursor));
 
     private void AppendRecord(JournalRecord record)
     {
@@ -256,5 +391,9 @@ public sealed class FileOutboxStore : IOutboxStore
         }
     }
 
-    private sealed record JournalRecord(string Op, ulong Epoch, byte[]? Frame);
+    private sealed record JournalRecord(
+    string Op,
+    ulong Epoch,
+    byte[]? Frame,
+    ulong? Cursor = null);
 }

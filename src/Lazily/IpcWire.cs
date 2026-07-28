@@ -3,7 +3,7 @@ using System.Text.Json.Serialization;
 
 namespace Lazily;
 
-/// <summary>The schema-defined Snapshot/Delta/CrdtSync IPC message family.</summary>
+/// <summary>The schema-defined state, CRDT, and reliable-sync control message family.</summary>
 [JsonConverter(typeof(IpcMessageJsonConverter))]
 public abstract record IpcMessage;
 
@@ -22,8 +22,14 @@ public sealed record DeltaMessage(
 
 /// <summary>A state-based CRDT anti-entropy frame.</summary>
 public sealed record CrdtSyncMessage(
-    IReadOnlyList<CrdtOp> Ops,
-    IReadOnlyList<StampFrontierEntry>? Frontier = null) : IpcMessage;
+IReadOnlyList<CrdtOp> Ops,
+IReadOnlyList<StampFrontierEntry>? Frontier = null) : IpcMessage;
+
+/// <summary>Requests a full snapshot covering the receiver's current epoch.</summary>
+public sealed record ResyncRequestMessage(ulong FromEpoch) : IpcMessage;
+
+/// <summary>Proves that a receiver has fully applied frames through an epoch.</summary>
+public sealed record OutboxAckMessage(ulong ThroughEpoch) : IpcMessage;
 
 /// <summary>Full wire state for one node.</summary>
 public sealed record NodeSnapshot(ulong Node, string TypeTag, NodeState State, string? Key = null);
@@ -116,7 +122,14 @@ public abstract record DeltaOp
 
 /// <summary>The schema's unsigned wire mirror of <see cref="HlcStamp"/>.</summary>
 public sealed record WireStamp(ulong WallTime, ulong Logical, ulong Peer)
+: IComparable<WireStamp>
 {
+    /// <summary>Orders stamps by wall time, logical counter, then peer.</summary>
+    public int CompareTo(WireStamp? other) =>
+    other is null
+    ? 1
+    : (WallTime, Logical, Peer).CompareTo((other.WallTime, other.Logical, other.Peer));
+
     /// <summary>Converts a runtime stamp, rejecting values the unsigned wire cannot represent.</summary>
     public static WireStamp FromRuntime(HlcStamp stamp)
     {
@@ -190,6 +203,8 @@ internal sealed class IpcMessageJsonConverter : JsonConverter<IpcMessage>
             "Snapshot" => ReadSnapshot(property.Value),
             "Delta" => ReadDelta(property.Value),
             "CrdtSync" => ReadCrdtSync(property.Value),
+            "ResyncRequest" => ReadResyncRequest(property.Value),
+            "OutboxAck" => ReadOutboxAck(property.Value),
             _ => throw new JsonException($"Unknown IPC message variant '{property.Name}'."),
         };
     }
@@ -213,6 +228,14 @@ internal sealed class IpcMessageJsonConverter : JsonConverter<IpcMessage>
             case CrdtSyncMessage sync:
                 writer.WritePropertyName("CrdtSync");
                 WriteCrdtSync(writer, sync);
+                break;
+            case ResyncRequestMessage request:
+                writer.WritePropertyName("ResyncRequest");
+                WriteSingleEpoch(writer, "from_epoch", request.FromEpoch);
+                break;
+            case OutboxAckMessage acknowledgement:
+                writer.WritePropertyName("OutboxAck");
+                WriteSingleEpoch(writer, "through_epoch", acknowledgement.ThroughEpoch);
                 break;
             default:
                 throw new JsonException($"Unsupported IPC message type '{value.GetType().Name}'.");
@@ -250,7 +273,19 @@ internal sealed class IpcMessageJsonConverter : JsonConverter<IpcMessage>
 
         return new CrdtSyncMessage(
             Required(body, "ops").EnumerateArray().Select(ReadCrdtOp).ToArray(),
-            frontier);
+frontier);
+    }
+
+    private static ResyncRequestMessage ReadResyncRequest(JsonElement body)
+    {
+        RequireExactProperties(body, "ResyncRequest", "from_epoch");
+        return new ResyncRequestMessage(Required(body, "from_epoch").GetUInt64());
+    }
+
+    private static OutboxAckMessage ReadOutboxAck(JsonElement body)
+    {
+        RequireExactProperties(body, "OutboxAck", "through_epoch");
+        return new OutboxAckMessage(Required(body, "through_epoch").GetUInt64());
     }
 
     private static NodeSnapshot ReadNodeSnapshot(JsonElement body)
@@ -461,6 +496,13 @@ internal sealed class IpcMessageJsonConverter : JsonConverter<IpcMessage>
         writer.WriteStartArray();
         foreach (var operation in sync.Ops) WriteCrdtOp(writer, operation);
         writer.WriteEndArray();
+        writer.WriteEndObject();
+    }
+
+    private static void WriteSingleEpoch(Utf8JsonWriter writer, string name, ulong epoch)
+    {
+        writer.WriteStartObject();
+        writer.WriteNumber(name, epoch);
         writer.WriteEndObject();
     }
 
@@ -686,6 +728,21 @@ internal sealed class IpcMessageJsonConverter : JsonConverter<IpcMessage>
         if (element.ValueKind != JsonValueKind.Object)
         {
             throw new JsonException($"{context} must be an object.");
+        }
+    }
+
+    private static void RequireExactProperties(
+    JsonElement element,
+    string context,
+    params string[] expected)
+    {
+        RequireObject(element, context);
+        var actual = element.EnumerateObject().Select(property => property.Name).ToArray();
+        if (actual.Length != expected.Length
+        || actual.Any(name => !expected.Contains(name, StringComparer.Ordinal)))
+        {
+            throw new JsonException(
+            $"{context} must contain exactly: {string.Join(", ", expected)}.");
         }
     }
 }

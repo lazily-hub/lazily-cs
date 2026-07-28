@@ -30,7 +30,6 @@ KNOWN_UNCOVERED=(
   "agent-doc/delta_agent_doc_state.json"
   "agent-doc/snapshot_agent_doc_state.json"
   "collections/mergecell_algebra.json"
-"distributed/anti_entropy_converge.json"
   "message-passing/accepted_then_applied_receipt.json"
   "message-passing/cancel_preempts_nonterminal.json"
   "message-passing/editor_route_submit.json"
@@ -39,12 +38,6 @@ KNOWN_UNCOVERED=(
   "message-passing/stale_generation_ignored.json"
   "message-passing/sync_tmux_layout_submit.json"
   "message-passing/terminal_conflict_fail_closed.json"
-  "reliable-sync/coalesce_bounds_outbox.json"
-  "reliable-sync/idempotent_redelivery.json"
-"reliable-sync/liveness_lease_eviction.json"
-"reliable-sync/liveness_orset_lww.json"
-"reliable-sync/multi_epoch_delta.json"
-"reliable-sync/resync_gap_converge.json"
 )
 
 MANIFEST="${LAZILY_CONFORMANCE_MANIFEST:-build/conformance-fixtures-loaded.txt}"
