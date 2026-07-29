@@ -46,7 +46,13 @@ jobs:
         run: dotnet restore
 
       - name: Build all target frameworks
-        run: dotnet build --configuration Release --no-restore --nologo -warnaserror
+        run: >
+          dotnet build
+          --configuration Release
+          --no-restore
+          --nologo
+          -warnaserror
+          -p:Version=${{ steps.version.outputs.value }}
 
       - name: Fetch canonical lazily-spec conformance fixtures
         run: git clone --depth 1 https://github.com/lazily-hub/lazily-spec.git ../lazily-spec
@@ -64,7 +70,13 @@ jobs:
           --no-build
           --nologo
           --output artifacts
-          -p:PackageVersion=${{ steps.version.outputs.value }}
+          -p:Version=${{ steps.version.outputs.value }}
+
+      - name: Verify package and assembly versions
+        env:
+          EXPECTED_VERSION: ${{ steps.version.outputs.value }}
+          PACKAGE_PATH: artifacts/Lazily.${{ steps.version.outputs.value }}.nupkg
+        run: ./scripts/check-package.sh
 
       - uses: actions/upload-artifact@v4
         with:

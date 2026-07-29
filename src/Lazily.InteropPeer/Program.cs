@@ -37,7 +37,7 @@ while (Console.In.ReadLine() is { } line)
 internal sealed class InteropPeer
 {
     private const ulong ProtocolVersion = 1;
-    private const string BindingVersion = "0.3.0";
+    private const string BindingVersion = "0.4.0";
     private static readonly HashSet<string> StdlibFeatures =
     [
         "stdlib_timer_v1",

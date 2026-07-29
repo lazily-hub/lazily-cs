@@ -1,0 +1,10 @@
+<Project>
+  <Target Name="Check">
+    <GetAssemblyIdentity AssemblyFiles="$(AssemblyPath)">
+      <Output TaskParameter="Assemblies" ItemName="AssemblyIdentity" />
+    </GetAssemblyIdentity>
+    <Error
+      Condition="'%(AssemblyIdentity.Version)' != '$(ExpectedVersion)'"
+      Text="assembly version mismatch for $(AssemblyPath): expected $(ExpectedVersion), got %(AssemblyIdentity.Version)" />
+  </Target>
+</Project>
