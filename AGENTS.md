@@ -59,6 +59,18 @@ reported green while testing nothing.
   `KNOWN_UNREPLAYED_SCENARIOS` sits beside `KNOWN_UNCOVERED` so there is one place to read what
   this binding does not prove. Naming a scenario is not replaying it: `IdAt` deliberately records
   nothing, and neither does a bookkeeping read of the raw array.
+- **A guard CI does not run is not a guard.** The four conformance rungs do not all execute the
+  same way, and CI enforced only half of them until `#lzguardsnotinci`. The unconsumed-key and
+  read-but-not-asserted gates are raised by `FixtureAssertions.Verify()` *inside the test host*, so
+  any `dotnet test` step enforces them. The fixture-coverage guard and the scenario replay ledger
+  live in `scripts/check-conformance-coverage.sh`, which only `make check` invoked — a CI that runs
+  `dotnet test` alone stays green while skipping them silently. CI now invokes the script
+  explicitly, with `LAZILY_CONFORMANCE_MANIFEST` set to an ABSOLUTE path and truncated first
+  (exactly what the Makefile's `test` target does), and asserts positive fixture and scenario
+  counts from the outside. `LAZILY_CONFORMANCE_STRICT=1` turns the script's "corpus absent, skip"
+  branch into a failure where the corpus is supposed to be present. Evidence a run never wrote is
+  not evidence of absence, and a guard reading an evidence file from an earlier run is not
+  measuring this one.
 - **Assert the library, not the runner's bookkeeping.** Counters that pin library behaviour live
   inside the library's own call path — the merge-fold counter is installed *in the merge policy*,
   so `merges_of` counts folds the library performed rather than calls the runner issued. A runner

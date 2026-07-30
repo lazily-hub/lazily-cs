@@ -40,6 +40,27 @@ jobs:
             test -d "../lazily-spec/conformance/$corpus" || { echo "::error::../lazily-spec/conformance/$corpus missing"; exit 1; }
           done
 
+      # The runtime evidence file the fixture-coverage guard and the scenario replay
+      # ledger both read (#lzguardsnotinci). Set up here exactly as the Makefile's
+      # `test` target does locally, and for the same two reasons:
+      #
+      #   * ABSOLUTE path. The recorder runs inside the dotnet test host, whose working
+      #     directory is the test project's output dir, not the repo root — a relative
+      #     path writes the manifest somewhere nothing reads.
+      #   * TRUNCATED first. A guard that reads an evidence file from an earlier run is
+      #     not measuring this run. On a fresh runner the file does not exist yet, but
+      #     the truncation is the invariant, not the checkout's freshness.
+      #
+      # LAZILY_CONFORMANCE_STRICT turns the coverage script's "corpus absent, skip"
+      # branch into a failure. Here the corpus IS supposed to be present, so a skip
+      # would be the vacuous green this whole ladder exists to reject.
+      - name: Prepare conformance evidence manifest
+        run: |
+          mkdir -p build
+          : > build/conformance-fixtures-loaded.txt
+          echo "LAZILY_CONFORMANCE_MANIFEST=$GITHUB_WORKSPACE/build/conformance-fixtures-loaded.txt" >> "$GITHUB_ENV"
+          echo "LAZILY_CONFORMANCE_STRICT=1" >> "$GITHUB_ENV"
+
       - name: test
         run: dotnet test --no-build --nologo --verbosity normal
 
@@ -55,6 +76,40 @@ jobs:
             echo "::error::a conformance test skipped — the corpus must always replay in CI"
             exit 1
           fi
+
+      # Two of the four conformance guards execute INSIDE the test host and are already
+      # enforced by the steps above: the unconsumed-assertion-key gate
+      # (#lzassertunknownkeys) and the read-but-never-asserted gate
+      # (#lzconsumednotasserted), both raised by FixtureAssertions.Verify(). The other
+      # two only ever ran as a script step `make check` invokes locally, so CI enforced
+      # half the ladder and silently skipped the rest (#lzguardsnotinci):
+      #
+      #   rung 1  every canonical fixture was OPENED by the suite (#portconformancecoverage)
+      #   rung 4  every scenario inside an opened fixture was REPLAYED (#lzscenariocoverage)
+      #
+      # Both read the runtime manifest prepared above, so they must run AFTER the test
+      # steps that write it.
+      - name: Conformance coverage + scenario replay ledger
+        run: |
+          out=$(./scripts/check-conformance-coverage.sh 2>&1) || { echo "$out"; echo "::error::conformance coverage guard failed"; exit 1; }
+          echo "$out"
+          # The script's own exit code is not sufficient evidence. Both rungs have a
+          # shape that reports OK while measuring nothing: rung 1 over an empty corpus
+          # listing, rung 4 over a manifest with no OPENED lines ("0/0 scenarios across
+          # 0 opened fixtures"). Assert positive counts from the outside, the same way
+          # the replay step above refuses a zero-test pass.
+          #
+          # Here-strings, NOT pipes — `printf ... | grep -q` dies of SIGPIPE on a match
+          # and reports failure under pipefail, inverting every check. That exact
+          # inversion is documented in the coverage script itself.
+          if grep -q '^SKIP:' <<< "$out"; then
+            echo "::error::coverage guard skipped instead of running"
+            exit 1
+          fi
+          grep -qE 'conformance coverage OK: [1-9][0-9]*/[0-9]+ canonical fixtures' <<< "$out" \
+            || { echo "::error::fixture coverage guard reported no covered fixtures"; exit 1; }
+          grep -qE 'scenario replay coverage OK: [1-9][0-9]*/[0-9]+ scenarios across [1-9][0-9]* opened fixtures' <<< "$out" \
+            || { echo "::error::scenario replay ledger reported no replayed scenarios"; exit 1; }
 
   format:
     runs-on: ubuntu-latest

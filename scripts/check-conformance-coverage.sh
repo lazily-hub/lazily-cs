@@ -19,6 +19,19 @@ set -euo pipefail
 
 SPEC_DIR="${LAZILY_SPEC_CONFORMANCE_DIR:-../lazily-spec/conformance}"
 if [ ! -d "$SPEC_DIR" ]; then
+  # The one remaining path out of this script that is not a measurement. It exists
+  # for a working copy with no sibling checkout, where the alternative is a guard
+  # that cannot be run at all. It is NOT acceptable where the corpus is supposed to
+  # be there: a clone step that silently no-ops would turn every rung below into a
+  # green that proves nothing (#lzguardsnotinci). CI sets LAZILY_CONFORMANCE_STRICT
+  # so the skip becomes a failure there.
+  if [ -n "${LAZILY_CONFORMANCE_STRICT:-}" ]; then
+    echo "FAIL: canonical corpus not found at $SPEC_DIR, and LAZILY_CONFORMANCE_STRICT is set." >&2
+    echo "      Skipping here would report OK while checking nothing. The corpus is" >&2
+    echo "      expected to be present in this environment — fix the checkout, do not" >&2
+    echo "      unset the flag." >&2
+    exit 1
+  fi
   echo "SKIP: canonical corpus not found at $SPEC_DIR (clone the lazily-spec sibling)" >&2
   exit 0
 fi
