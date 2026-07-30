@@ -1,6 +1,4 @@
-using System;
 using System.Collections.Generic;
-using System.Linq;
 
 namespace Lazily;
 
@@ -33,18 +31,17 @@ public sealed record WorkQueueDeadLetter<T>(
     WorkQueueDeadLetterReason Reason);
 
 /// <summary>
-/// A reactive competing-consumer queue with exclusive, expiring delivery leases.
+/// A reactive competing-consumer queue with exclusive, expiring delivery leases — the
+/// single-threaded flavor.
 /// </summary>
+/// <remarks>
+/// The lease algebra lives in <see cref="WorkQueueCore{T}"/> and is shared verbatim with
+/// <see cref="ThreadSafeWorkQueueCell{T}"/> and <see cref="AsyncWorkQueueCell{T}"/>.
+/// </remarks>
 public sealed class WorkQueueCell<T>
 {
     private readonly Context _ctx;
-    private readonly Queue<WorkQueueItem<T>> _pending = new();
-    private readonly SortedDictionary<long, WorkQueueDelivery<T>> _inFlight = new();
-    private readonly List<WorkQueueDeadLetter<T>> _deadLetters = [];
-    private readonly long _visibilityTimeout;
-    private readonly int _maxDeliveries;
-    private long _nextItemId;
-    private long _nextDeliveryId;
+    private readonly WorkQueueCore<T> _core;
 
     private readonly Source<int> _pendingVersion;
     private readonly Source<int> _emptyVersion;
@@ -64,118 +61,48 @@ public sealed class WorkQueueCell<T>
     public WorkQueueCell(Context ctx, long visibilityTimeout, int maxDeliveries)
     {
         Guard.NotNull(ctx, nameof(ctx));
-        if (visibilityTimeout <= 0)
-            throw new ArgumentOutOfRangeException(
-                nameof(visibilityTimeout),
-                visibilityTimeout,
-                "visibility timeout must be positive");
-        if (maxDeliveries < 1)
-            throw new ArgumentOutOfRangeException(
-                nameof(maxDeliveries),
-                maxDeliveries,
-                "max deliveries must be at least one");
-
+        _core = new WorkQueueCore<T>(visibilityTimeout, maxDeliveries);
         _ctx = ctx;
-        _visibilityTimeout = visibilityTimeout;
-        _maxDeliveries = maxDeliveries;
         _pendingVersion = ctx.Source(0);
         _emptyVersion = ctx.Source(0);
         _inFlightVersion = ctx.Source(0);
         _deadLetterVersion = ctx.Source(0);
-        _pendingLen = ctx.Computed(cx =>
-        {
-            cx.Get(_pendingVersion);
-            return _pending.Count;
-        });
-        _isEmpty = ctx.Computed(cx =>
-        {
-            cx.Get(_emptyVersion);
-            return _pending.Count == 0;
-        });
-        _inFlightLen = ctx.Computed(cx =>
-        {
-            cx.Get(_inFlightVersion);
-            return _inFlight.Count;
-        });
-        _deadLetterLen = ctx.Computed(cx =>
-        {
-            cx.Get(_deadLetterVersion);
-            return _deadLetters.Count;
-        });
+        _pendingLen = ctx.Computed(cx => { cx.Get(_pendingVersion); return _core.PendingLen; });
+        _isEmpty = ctx.Computed(cx => { cx.Get(_emptyVersion); return _core.IsEmpty; });
+        _inFlightLen = ctx.Computed(cx => { cx.Get(_inFlightVersion); return _core.InFlightLen; });
+        _deadLetterLen = ctx.Computed(cx => { cx.Get(_deadLetterVersion); return _core.DeadLetterLen; });
     }
 
     /// <summary>Append one item and return its stable identity.</summary>
     public long Push(T value)
     {
-        var wasEmpty = _pending.Count == 0;
-        var itemId = _nextItemId++;
-        _pending.Enqueue(new WorkQueueItem<T>(itemId, value, 0));
-        Invalidate(pending: true, empty: wasEmpty, inFlight: false, deadLetters: false);
+        var (itemId, invalidates) = _core.Push(value);
+        Apply(invalidates);
         return itemId;
     }
 
     /// <summary>Claim the oldest pending item for a worker, or null when empty.</summary>
     public WorkQueueDelivery<T>? Claim(string worker, long now)
     {
-        Guard.NotNull(worker, nameof(worker));
-        if (_pending.Count == 0) return null;
-
-        var wasLast = _pending.Count == 1;
-        var item = _pending.Dequeue();
-        var attempt = item.Attempts + 1;
-        var delivery = new WorkQueueDelivery<T>(
-            _nextDeliveryId++,
-            item.ItemId,
-            item.Value,
-            worker,
-            attempt,
-            checked(now + _visibilityTimeout));
-        _inFlight.Add(delivery.DeliveryId, delivery);
-        Invalidate(pending: true, empty: wasLast, inFlight: true, deadLetters: false);
+        var (delivery, invalidates) = _core.Claim(worker, now);
+        Apply(invalidates);
         return delivery;
     }
 
     /// <summary>Settle a matching live delivery. Wrong-worker and duplicate acks are no-ops.</summary>
     public bool Ack(string worker, long deliveryId)
     {
-        Guard.NotNull(worker, nameof(worker));
-        if (!_inFlight.TryGetValue(deliveryId, out var delivery) ||
-            !StringComparer.Ordinal.Equals(delivery.Worker, worker))
-            return false;
-
-        _inFlight.Remove(deliveryId);
-        Invalidate(pending: false, empty: false, inFlight: true, deadLetters: false);
-        return true;
+        var (acked, invalidates) = _core.Ack(worker, deliveryId);
+        Apply(invalidates);
+        return acked;
     }
 
     /// <summary>Reject a live delivery, requeueing it or dead-lettering at the attempt limit.</summary>
     public bool Nack(string worker, long deliveryId)
     {
-        Guard.NotNull(worker, nameof(worker));
-        if (!_inFlight.TryGetValue(deliveryId, out var delivery) ||
-            !StringComparer.Ordinal.Equals(delivery.Worker, worker))
-            return false;
-
-        _inFlight.Remove(deliveryId);
-        if (delivery.Attempt >= _maxDeliveries)
-        {
-            _deadLetters.Add(new WorkQueueDeadLetter<T>(
-                delivery.ItemId,
-                delivery.Value,
-                delivery.Attempt,
-                WorkQueueDeadLetterReason.Nack));
-            Invalidate(pending: false, empty: false, inFlight: true, deadLetters: true);
-        }
-        else
-        {
-            var wasEmpty = _pending.Count == 0;
-            _pending.Enqueue(new WorkQueueItem<T>(
-                delivery.ItemId,
-                delivery.Value,
-                delivery.Attempt));
-            Invalidate(pending: true, empty: wasEmpty, inFlight: true, deadLetters: false);
-        }
-        return true;
+        var (nacked, invalidates) = _core.Nack(worker, deliveryId);
+        Apply(invalidates);
+        return nacked;
     }
 
     /// <summary>
@@ -183,40 +110,9 @@ public sealed class WorkQueueCell<T>
     /// </summary>
     public int ReapExpired(long now)
     {
-        var expired = _inFlight.Values
-            .Where(delivery => delivery.Deadline < now)
-            .OrderBy(delivery => delivery.DeliveryId)
-            .ToArray();
-        if (expired.Length == 0) return 0;
-
-        var pendingBefore = _pending.Count;
-        var deadBefore = _deadLetters.Count;
-        foreach (var delivery in expired)
-        {
-            _inFlight.Remove(delivery.DeliveryId);
-            if (delivery.Attempt >= _maxDeliveries)
-            {
-                _deadLetters.Add(new WorkQueueDeadLetter<T>(
-                    delivery.ItemId,
-                    delivery.Value,
-                    delivery.Attempt,
-                    WorkQueueDeadLetterReason.Expired));
-            }
-            else
-            {
-                _pending.Enqueue(new WorkQueueItem<T>(
-                    delivery.ItemId,
-                    delivery.Value,
-                    delivery.Attempt));
-            }
-        }
-
-        Invalidate(
-            pending: pendingBefore != _pending.Count,
-            empty: (pendingBefore == 0) != (_pending.Count == 0),
-            inFlight: true,
-            deadLetters: deadBefore != _deadLetters.Count);
-        return expired.Length;
+        var (expired, invalidates) = _core.ReapExpired(now);
+        Apply(invalidates);
+        return expired;
     }
 
     /// <summary>Number of items waiting to be claimed.</summary>
@@ -237,22 +133,28 @@ public sealed class WorkQueueCell<T>
     public int DeadLetterLen(IComputeOps ops) => _deadLetterLen.Get(ops);
 
     /// <summary>Non-reactive pending snapshot, oldest first.</summary>
-    public IReadOnlyList<WorkQueueItem<T>> Pending() => _pending.ToArray();
+    public IReadOnlyList<WorkQueueItem<T>> Pending() => _core.Pending();
 
     /// <summary>Non-reactive in-flight snapshot, sorted by delivery id.</summary>
-    public IReadOnlyList<WorkQueueDelivery<T>> InFlight() => _inFlight.Values.ToArray();
+    public IReadOnlyList<WorkQueueDelivery<T>> InFlight() => _core.InFlight();
 
     /// <summary>Non-reactive terminal dead-letter snapshot.</summary>
-    public IReadOnlyList<WorkQueueDeadLetter<T>> DeadLetters() => _deadLetters.ToArray();
+    public IReadOnlyList<WorkQueueDeadLetter<T>> DeadLetters() => _core.DeadLetters();
 
-    private void Invalidate(bool pending, bool empty, bool inFlight, bool deadLetters)
+    /// <summary>Handles to the four reader kinds, for graph-level probes.</summary>
+    public (Computed<int> PendingLen, Computed<bool> IsEmpty, Computed<int> InFlightLen,
+        Computed<int> DeadLetterLen) ReaderHandles() =>
+        (_pendingLen, _isEmpty, _inFlightLen, _deadLetterLen);
+
+    private void Apply(WorkQueueInvalidates invalidates)
     {
+        if (!invalidates.Any) return;
         _ctx.Batch(() =>
         {
-            if (pending) _pendingVersion.Set(++_pendingV);
-            if (empty) _emptyVersion.Set(++_emptyV);
-            if (inFlight) _inFlightVersion.Set(++_inFlightV);
-            if (deadLetters) _deadLetterVersion.Set(++_deadLetterV);
+            if (invalidates.PendingLen) _pendingVersion.Set(++_pendingV);
+            if (invalidates.IsEmpty) _emptyVersion.Set(++_emptyV);
+            if (invalidates.InFlightLen) _inFlightVersion.Set(++_inFlightV);
+            if (invalidates.DeadLetterLen) _deadLetterVersion.Set(++_deadLetterV);
         });
     }
 }

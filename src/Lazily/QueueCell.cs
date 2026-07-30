@@ -32,7 +32,7 @@ public readonly record struct QueuePopResult<T>(QueuePopStatus Status, T? Value)
 }
 
 /// <summary>
-/// A reactive FIFO queue (<c>#lzcsqueues</c>).
+/// A reactive FIFO queue (<c>#lzcsqueues</c>) — the single-threaded flavor.
 /// </summary>
 /// <remarks>
 /// <para>
@@ -43,27 +43,27 @@ public readonly record struct QueuePopResult<T>(QueuePopStatus Status, T? Value)
 /// queue cannot simply hang its readers off one state cell.
 /// </para>
 /// <para>
-/// Each reader kind therefore gets its own <see cref="Source{T}"/> version cell, bumped
-/// when and only when that kind's derived value changes — the same mechanism
+/// The transitions themselves live in <see cref="QueueCore{T}"/> and are shared verbatim with
+/// <see cref="ThreadSafeQueueCell{T}"/> and <see cref="AsyncQueueCell{T}"/>. This shell owns only
+/// the reactivity: each reader kind gets its own <see cref="Source{T}"/> version cell, bumped
+/// when and only when the core reports that kind dirtied — the same mechanism
 /// <see cref="ReactiveMap{TKey,TValue,THandle}"/> already uses for its membership and
 /// order signals. This is NOT the "poll a counter" shape the spec rules out: a reader is
 /// a <see cref="Computed{T}"/> that reads its version cell to register the dependency edge
-/// and then derives the real value from storage. Callers never see a version number.
+/// and then derives the real value from the core. Callers never see a version number.
 /// </para>
 /// <para>
-/// Storage sits outside the graph, so a reader has no reactive dependency other than its
+/// The core sits outside the graph, so a reader has no reactive dependency other than its
 /// version cell and stays memoized until the shell bumps it.
 /// </para>
 /// </remarks>
 public sealed class QueueCell<T>
 {
     private readonly Context _ctx;
-    private readonly LinkedList<T> _elements = new();
-    private readonly int? _capacity;
-    private bool _closed;
+    private readonly QueueCore<T> _core;
 
-    // One version cell per reader kind. Bumping exactly the kinds whose derived value
-    // changed is what keeps the kinds independent.
+    // One version cell per reader kind. Bumping exactly the kinds the core reported as changed
+    // is what keeps the kinds independent.
     private readonly Source<int> _headVersion;
     private readonly Source<int> _lenVersion;
     private readonly Source<int> _emptyVersion;
@@ -88,13 +88,8 @@ public sealed class QueueCell<T>
     public QueueCell(Context ctx, int? capacity)
     {
         Guard.NotNull(ctx, nameof(ctx));
-        if (capacity is <= 0)
-        {
-            throw new System.ArgumentOutOfRangeException(
-                nameof(capacity), capacity, "capacity must be positive when bounded");
-        }
+        _core = new QueueCore<T>(capacity);
         _ctx = ctx;
-        _capacity = capacity;
 
         _headVersion = ctx.Source(0);
         _lenVersion = ctx.Source(0);
@@ -102,15 +97,15 @@ public sealed class QueueCell<T>
         _fullVersion = ctx.Source(0);
         _closedVersion = ctx.Source(0);
 
-        _head = ctx.Computed(cx => { cx.Get(_headVersion); return _elements.First is null ? default : _elements.First.Value; });
-        _len = ctx.Computed(cx => { cx.Get(_lenVersion); return _elements.Count; });
-        _isEmpty = ctx.Computed(cx => { cx.Get(_emptyVersion); return _elements.Count == 0; });
-        _isFull = ctx.Computed(cx => { cx.Get(_fullVersion); return _capacity is int cap && _elements.Count >= cap; });
-        _isClosed = ctx.Computed(cx => { cx.Get(_closedVersion); return _closed; });
+        _head = ctx.Computed(cx => { cx.Get(_headVersion); return _core.Head; });
+        _len = ctx.Computed(cx => { cx.Get(_lenVersion); return _core.Len; });
+        _isEmpty = ctx.Computed(cx => { cx.Get(_emptyVersion); return _core.IsEmpty; });
+        _isFull = ctx.Computed(cx => { cx.Get(_fullVersion); return _core.IsFull; });
+        _isClosed = ctx.Computed(cx => { cx.Get(_closedVersion); return _core.IsClosed; });
     }
 
     /// <summary>Declared capacity, or <c>null</c> when unbounded. Not reactive.</summary>
-    public int? Capacity => _capacity;
+    public int? Capacity => _core.Capacity;
 
     /// <summary>The current head, or <c>default</c> when empty. Registers a dependency.</summary>
     public T? Head() => _head.Get();
@@ -147,6 +142,13 @@ public sealed class QueueCell<T>
     /// <param name="ops">The compute view.</param>
     public bool IsClosed(IComputeOps ops) => _isClosed.Get(ops);
 
+    /// <summary>Non-reactive FIFO-ordered snapshot.</summary>
+    public IReadOnlyList<T> Elements() => _core.Elements();
+
+    /// <summary>Handles to the five reader kinds, for graph-level probes.</summary>
+    public (Computed<T?> Head, Computed<int> Len, Computed<bool> IsEmpty, Computed<bool> IsFull,
+        Computed<bool> IsClosed) ReaderHandles() => (_head, _len, _isEmpty, _isFull, _isClosed);
+
     /// <summary>
     /// Appends to the tail. Returns <see cref="QueuePushResult.Full"/> when bounded and at
     /// capacity, or <see cref="QueuePushResult.Closed"/> when closed; on either the queue is
@@ -155,14 +157,9 @@ public sealed class QueueCell<T>
     /// <param name="value">The element to append.</param>
     public QueuePushResult TryPush(T value)
     {
-        if (_closed) return QueuePushResult.Closed;
-        if (_capacity is int cap && _elements.Count >= cap) return QueuePushResult.Full;
-
-        var wasEmpty = _elements.Count == 0;
-        var wasFull = _capacity is int c0 && _elements.Count >= c0;
-        _elements.AddLast(value);
-        Invalidate(wasEmpty, wasFull, headChanged: wasEmpty);
-        return QueuePushResult.Ok;
+        var (result, invalidates) = _core.TryPush(value);
+        Apply(invalidates);
+        return result;
     }
 
     /// <summary>
@@ -172,47 +169,32 @@ public sealed class QueueCell<T>
     /// </summary>
     public QueuePopResult<T> TryPop()
     {
-        if (_elements.Count == 0)
-        {
-            return new QueuePopResult<T>(_closed ? QueuePopStatus.Closed : QueuePopStatus.Empty, default);
-        }
-        var wasEmpty = false;
-        var wasFull = _capacity is int c0 && _elements.Count >= c0;
-        var value = _elements.First!.Value;
-        _elements.RemoveFirst();
-        // A pop ALWAYS changes the head: front -> next, or front -> empty.
-        Invalidate(wasEmpty, wasFull, headChanged: true);
-        return new QueuePopResult<T>(QueuePopStatus.Value, value);
+        var (result, invalidates) = _core.TryPop();
+        Apply(invalidates);
+        return result;
     }
 
     /// <summary>
     /// Closes the queue. Idempotent and terminal: the first close invalidates closed readers,
     /// later ones invalidate nothing.
     /// </summary>
-    public void Close()
-    {
-        if (_closed) return;
-        _closed = true;
-        _closedVersion.Set(++_closedV);
-    }
+    public void Close() => Apply(_core.Close());
 
     /// <summary>
-    /// Bumps exactly the reader kinds whose derived value changed, inside one batch so a
+    /// Bumps exactly the reader kinds the core reported dirtied, inside one batch so a
     /// subscriber never observes a partial transition (len decremented while is_full still
-    /// reads stale). <c>closed</c> is never touched here — only <see cref="Close"/> moves it.
+    /// reads stale).
     /// </summary>
-    private void Invalidate(bool wasEmpty, bool wasFull, bool headChanged)
+    private void Apply(QueueInvalidates invalidates)
     {
-        var isEmpty = _elements.Count == 0;
-        var isFull = _capacity is int cap && _elements.Count >= cap;
-
+        if (!invalidates.Any) return;
         _ctx.Batch(() =>
         {
-            // Len always changes on a successful op.
-            _lenVersion.Set(++_lenV);
-            if (wasEmpty != isEmpty) _emptyVersion.Set(++_emptyV);
-            if (wasFull != isFull) _fullVersion.Set(++_fullV);
-            if (headChanged) _headVersion.Set(++_headV);
+            if (invalidates.Len) _lenVersion.Set(++_lenV);
+            if (invalidates.IsEmpty) _emptyVersion.Set(++_emptyV);
+            if (invalidates.IsFull) _fullVersion.Set(++_fullV);
+            if (invalidates.Head) _headVersion.Set(++_headV);
+            if (invalidates.Closed) _closedVersion.Set(++_closedV);
         });
     }
 }

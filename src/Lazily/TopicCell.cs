@@ -74,31 +74,24 @@ public enum TopicSubscribeOutcome
 }
 
 /// <summary>
-/// Broadcast log whose subscribers own independent, non-destructive reactive cursors.
+/// Broadcast log whose subscribers own independent, non-destructive reactive cursors — the
+/// single-threaded flavor.
 /// </summary>
+/// <remarks>
+/// The log algebra lives in <see cref="TopicCore{T}"/> and is shared verbatim with
+/// <see cref="ThreadSafeTopicCell{T}"/> and <see cref="AsyncTopicCell{T}"/>. This shell owns only
+/// the per-subscriber reader nodes and their version sources.
+/// </remarks>
 public sealed class TopicCell<T>
 {
-    private sealed class Subscription(
-        long cursor,
-        TopicDurability durability,
-        bool connected)
-    {
-        internal long Cursor { get; set; } = cursor;
-        internal TopicDurability Durability { get; } = durability;
-        internal bool Connected { get; set; } = connected;
-    }
-
     private readonly Context _ctx;
-    private readonly List<T> _retained;
-    private readonly Dictionary<string, Subscription> _subscriptions =
-        new(StringComparer.Ordinal);
+    private readonly TopicCore<T> _core;
     private readonly Dictionary<string, Source<int>> _readerVersions =
         new(StringComparer.Ordinal);
     private readonly Dictionary<string, int> _readerVersionNumbers =
         new(StringComparer.Ordinal);
     private readonly Dictionary<string, Computed<IReadOnlyList<T>>> _readers =
         new(StringComparer.Ordinal);
-    private long _baseOffset;
 
     /// <summary>Creates an empty topic.</summary>
     public TopicCell(Context ctx)
@@ -110,43 +103,16 @@ public sealed class TopicCell<T>
     public TopicCell(Context ctx, TopicSnapshot<T> initial)
     {
         Guard.NotNull(ctx, nameof(ctx));
-        Guard.NotNull(initial, nameof(initial));
-        if (initial.BaseOffset < 0)
-            throw new ArgumentOutOfRangeException(
-                nameof(initial),
-                initial.BaseOffset,
-                "topic base offset must be non-negative");
-
+        _core = new TopicCore<T>(initial);
         _ctx = ctx;
-        _baseOffset = initial.BaseOffset;
-        _retained = [.. initial.Elements];
-        var end = EndOffset;
-        foreach (var (id, snapshot) in initial.Subscriptions)
-        {
-            Guard.NotNullOrEmpty(id, nameof(id));
-            Guard.NotNull(snapshot, nameof(snapshot));
-            if (snapshot.Cursor < _baseOffset || snapshot.Cursor > end)
-                throw new ArgumentOutOfRangeException(
-                    nameof(initial),
-                    snapshot.Cursor,
-                    $"topic cursor for '{id}' must be within the retained absolute offset range");
-            if (snapshot.Durability == TopicDurability.Ephemeral && !snapshot.Connected)
-                throw new ArgumentException(
-                    $"disconnected ephemeral topic subscription '{id}' must be removed",
-                    nameof(initial));
-
-            _subscriptions.Add(
-                id,
-                new Subscription(snapshot.Cursor, snapshot.Durability, snapshot.Connected));
-            EnsureReader(id);
-        }
+        foreach (var id in _core.SubscriptionIds()) EnsureReader(id);
     }
 
     /// <summary>Absolute offset represented by the first retained element.</summary>
-    public long BaseOffset => _baseOffset;
+    public long BaseOffset => _core.BaseOffset;
 
     /// <summary>Absolute offset immediately after the retained log.</summary>
-    public long EndOffset => checked(_baseOffset + _retained.Count);
+    public long EndOffset => _core.EndOffset;
 
     /// <summary>
     /// Creates a cursor at the current tail, or reconnects an existing durable identity
@@ -154,18 +120,10 @@ public sealed class TopicCell<T>
     /// </summary>
     public TopicSubscribeOutcome Subscribe(string id, TopicDurability durability)
     {
-        Guard.NotNullOrEmpty(id, nameof(id));
-        if (_subscriptions.TryGetValue(id, out var existing))
-        {
-            if (existing.Connected) return TopicSubscribeOutcome.AlreadyConnected;
-            existing.Connected = true;
-            InvalidateReaders([id]);
-            return TopicSubscribeOutcome.Reconnected;
-        }
-
-        _subscriptions.Add(id, new Subscription(EndOffset, durability, connected: true));
-        EnsureReader(id);
-        return TopicSubscribeOutcome.Created;
+        var (outcome, invalidated, created) = _core.Subscribe(id, durability);
+        if (created) EnsureReader(id);
+        InvalidateReaders(invalidated);
+        return outcome;
     }
 
     /// <summary>Reconnects a durable identity, creating it at the current tail when unknown.</summary>
@@ -176,35 +134,25 @@ public sealed class TopicCell<T>
     /// </summary>
     public bool Disconnect(string id)
     {
-        Guard.NotNullOrEmpty(id, nameof(id));
-        if (!_subscriptions.TryGetValue(id, out var subscription) || !subscription.Connected)
-            return false;
-
-        InvalidateReaders([id]);
-        if (subscription.Durability == TopicDurability.Ephemeral)
+        var (disconnected, invalidated, removed) = _core.Disconnect(id);
+        if (!disconnected) return false;
+        // Invalidate BEFORE dropping the reader, so a removed ephemeral subscriber still
+        // reports its own final transition.
+        InvalidateReaders(invalidated);
+        if (removed)
         {
-            _subscriptions.Remove(id);
             _readers.Remove(id);
             _readerVersions.Remove(id);
             _readerVersionNumbers.Remove(id);
         }
-        else
-        {
-            subscription.Connected = false;
-        }
-
         return true;
     }
 
     /// <summary>Appends one element, leaving every cursor unchanged.</summary>
     public long Publish(T value)
     {
-        var offset = EndOffset;
-        _retained.Add(value);
-        InvalidateReaders(
-            _subscriptions
-                .Where(pair => pair.Value.Connected && pair.Value.Cursor <= offset)
-                .Select(pair => pair.Key));
+        var (offset, invalidated) = _core.Publish(value);
+        InvalidateReaders(invalidated);
         return offset;
     }
 
@@ -233,15 +181,8 @@ public sealed class TopicCell<T>
     /// <summary>Advances only the named subscriber and returns the element it passed.</summary>
     public T? Advance(string id)
     {
-        Guard.NotNullOrEmpty(id, nameof(id));
-        if (!_subscriptions.TryGetValue(id, out var subscription) ||
-            !subscription.Connected ||
-            subscription.Cursor >= EndOffset)
-            return default;
-
-        var value = _retained[checked((int)(subscription.Cursor - _baseOffset))];
-        subscription.Cursor++;
-        InvalidateReaders([id]);
+        var (value, invalidated) = _core.Advance(id);
+        InvalidateReaders(invalidated);
         return value;
     }
 
@@ -249,37 +190,16 @@ public sealed class TopicCell<T>
     /// Removes the prefix below the minimum durable cursor, or everything when no durable
     /// subscription exists. Absolute cursors remain unchanged.
     /// </summary>
-    public int CollectGarbage()
-    {
-        var durableCursors = _subscriptions.Values
-            .Where(subscription => subscription.Durability == TopicDurability.Durable)
-            .Select(subscription => subscription.Cursor)
-            .ToArray();
-        var frontier = durableCursors.Length == 0 ? EndOffset : durableCursors.Min();
-        var remove = checked((int)(frontier - _baseOffset));
-        if (remove > 0) _retained.RemoveRange(0, remove);
-        _baseOffset = frontier;
-        return remove;
-    }
+    public int CollectGarbage() => _core.CollectGarbage();
 
     /// <summary>Non-reactive retained-log snapshot.</summary>
-    public IReadOnlyList<T> Elements() => _retained.ToArray();
+    public IReadOnlyList<T> Elements() => _core.Elements();
 
     /// <summary>Subscriber identities in stable ordinal order.</summary>
-    public IReadOnlyList<string> SubscriptionIds() =>
-        _subscriptions.Keys.OrderBy(id => id, StringComparer.Ordinal).ToArray();
+    public IReadOnlyList<string> SubscriptionIds() => _core.SubscriptionIds();
 
     /// <summary>Non-reactive state for one stable subscriber.</summary>
-    public TopicSubscriptionSnapshot? SubscriptionState(string id)
-    {
-        Guard.NotNullOrEmpty(id, nameof(id));
-        return _subscriptions.TryGetValue(id, out var subscription)
-            ? new TopicSubscriptionSnapshot(
-                subscription.Cursor,
-                subscription.Durability,
-                subscription.Connected)
-            : null;
-    }
+    public TopicSubscriptionSnapshot? SubscriptionState(string id) => _core.SubscriptionState(id);
 
     /// <summary>Handle to one subscriber's demand-driven unread suffix.</summary>
     public Computed<IReadOnlyList<T>>? ReaderHandle(string id)
@@ -289,17 +209,7 @@ public sealed class TopicCell<T>
     }
 
     /// <summary>Creates an atomic defensive snapshot suitable for restart.</summary>
-    public TopicSnapshot<T> Snapshot() =>
-        new(
-            _baseOffset,
-            _retained,
-            _subscriptions.ToDictionary(
-                pair => pair.Key,
-                pair => new TopicSubscriptionSnapshot(
-                    pair.Value.Cursor,
-                    pair.Value.Durability,
-                    pair.Value.Connected),
-                StringComparer.Ordinal));
+    public TopicSnapshot<T> Snapshot() => _core.Snapshot();
 
     private Computed<IReadOnlyList<T>> EnsureReader(string id)
     {
@@ -311,12 +221,7 @@ public sealed class TopicCell<T>
         var reader = _ctx.Computed<IReadOnlyList<T>>(cx =>
         {
             cx.Get(version);
-            if (!_subscriptions.TryGetValue(id, out var subscription) ||
-                !subscription.Connected)
-                return Array.Empty<T>();
-
-            var start = checked((int)(subscription.Cursor - _baseOffset));
-            return _retained.Skip(start).ToArray();
+            return _core.ReadStream(id);
         });
         _readers.Add(id, reader);
         return reader;
