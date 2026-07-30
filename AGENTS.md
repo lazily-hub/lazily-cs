@@ -97,6 +97,25 @@ Recorded here so they are decisions rather than drift:
   forever. `docs/async.md` lists `Error → Computing` — "`get_async` retry after an error" — and the
   spec is the authority, so a transient failure is not made permanent here.
 
+- **The async ingress flavor's READS are Task-typed; its ops are not.** lazily-rs's
+  `AsyncIngressCell` uses a synchronous compute on the async graph and returns plain values, because
+  admission awaits nothing. That half holds here: every `AsyncIngressCell` op
+  (`Admit`/`Drain`/`Suspend`/`Reconnect`/`Close`/`Fail`/`Tick`) is synchronous and every reader body
+  resolves with `Task.FromResult`. What cannot follow is the READ — this binding's `AsyncContext`
+  takes `Func<AsyncCompute, Task<T>>` and `AsyncComputed<T>.GetAsync()` returns a `Task<T>` — so
+  `ValueAsync`/`ReadinessAsync`/`AuthorityAsync`/`RetryAsync` are Task-typed. That is a property of
+  the async graph, not of the ingress algebra, and the conformance runner bridges it exactly as
+  `AsyncGraphModel` does rather than pretending the plane is synchronous.
+
+- **Ingress reader invalidation is a version-source bump, not a slot clear.** lazily-rs clears
+  reader slots directly (`clear_slots`, or `batch()` on the thread-safe context). This binding
+  exposes no slot-clearing surface, so each of a scope's four reader kinds — and each of the three
+  receipt channels — is a `Computed` gated by its own `Source<int>` version, and an invalidation is
+  a guarded write inside one `Batch`. That is the idiom `TopicCell` and `WorkQueueCell` already use;
+  one batch is still one frontier walk, which is the property the per-flavor frontier-walk gates in
+  `IngressCellTests` pin. There is no observer registry: nothing survives an invalidation, so
+  nothing has to be unsubscribed.
+
 ## Not yet implemented
 
 Everything in the feature matrix except the reactive graph, the merge algebra, and the
