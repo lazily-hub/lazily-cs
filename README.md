@@ -340,6 +340,34 @@ make conformance    # replay the shared lazily-spec fixtures only
 make format-check   # dotnet format --verify-no-changes
 ```
 
+## The lazily family
+
+lazily is one reactive kernel — `Source` / `Computed` / `Effect`, keyed
+collections, state charts, CRDTs, and a distributed plane — implemented natively
+in each language and held to a single cross-language contract:
+
+- [`lazily-spec`](https://github.com/lazily-hub/lazily-spec) — the wire protocol,
+  the generated feature matrix, and the conformance corpus every binding replays.
+- [`lazily-formal`](https://github.com/lazily-hub/lazily-formal) — the Lean 4
+  formal model the bindings share.
+
+| repo | language |
+|---|---|
+| [`lazily-rs`](https://github.com/lazily-hub/lazily-rs) | Rust — the reference implementation |
+| [`lazily-py`](https://github.com/lazily-hub/lazily-py) | Python |
+| [`lazily-go`](https://github.com/lazily-hub/lazily-go) | Go |
+| [`lazily-kt`](https://github.com/lazily-hub/lazily-kt) | Kotlin / JVM |
+| [`lazily-js`](https://github.com/lazily-hub/lazily-js) | JavaScript / TypeScript |
+| **`lazily-cs`** | C# / .NET — you are here |
+| [`lazily-cpp`](https://github.com/lazily-hub/lazily-cpp) | C++ |
+| [`lazily-zig`](https://github.com/lazily-hub/lazily-zig) | Zig |
+| [`lazily-dart`](https://github.com/lazily-hub/lazily-dart) | Dart / Flutter |
+| [`lazily-react`](https://github.com/lazily-hub/lazily-react) | React / Preact bindings layered over [`lazily-js`](https://github.com/lazily-hub/lazily-js) — not a separate language binding |
+
+The per-binding parity matrix above is generated from `coverage.json` in
+[`lazily-spec`](https://github.com/lazily-hub/lazily-spec), which stays the
+single source for cross-binding feature coverage.
+
 ## License
 
 MIT
