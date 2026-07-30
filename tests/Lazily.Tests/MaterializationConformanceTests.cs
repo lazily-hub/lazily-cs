@@ -73,7 +73,7 @@ public sealed class MaterializationConformanceTests
             using var doc = SpecCorpus.Load(Corpus, name);
             var fx = doc.RootElement;
             var spec = fx.GetProperty("spec");
-            var expected = fx.GetProperty("expected");
+            var expected = FixtureAssertions.Of(fx, "expected", $"{Corpus}/{name} [{model}]");
 
             // `spec.val` is a flat key -> canonical value map; `spec.entries` additionally declares
             // each key's EntryKind. Both shapes describe the same thing, so both are normalized to
@@ -98,6 +98,25 @@ public sealed class MaterializationConformanceTests
             using var eager = NewModel(model);
             foreach (var e in entries.Where(e => e.Kind == EntryKind.Source)) eager.SeedCell(e.Key, e.Value);
             eager.MaterializeAll(entries.Where(e => e.Kind == EntryKind.Computed).Select(e => e.Key), k => canonical[k]);
+
+            // `default_mode` names the strategy the fixture was authored against. Assert the
+            // BEHAVIOUR it implies, not the label: under "eager" the pre-mint build must hold
+            // every key at build time, under "lazy" it must not.
+            if (expected.TryGetProperty("default_mode", out var defaultMode))
+            {
+                using var defaults = NewModel(model);
+                foreach (var e in entries.Where(e => e.Kind == EntryKind.Source)) defaults.SeedCell(e.Key, e.Value);
+                var presentAtBuild = keys.Count(defaults.IsPresent);
+                Check(
+                    "default_mode",
+                    defaultMode.GetString() switch
+                    {
+                        "eager" => presentAtBuild == entries.Count(e => e.Kind == EntryKind.Source),
+                        "lazy" => presentAtBuild == 0,
+                        var other => throw new InvalidOperationException($"unknown default_mode {other}"),
+                    },
+                    true);
+            }
 
             Check(
                 "eager_present",
@@ -157,6 +176,7 @@ public sealed class MaterializationConformanceTests
                 Check($"materialize_preserves_observe.{key}", lazy.GetOrInsert(key, k => canonical[k]), canonical[key]);
             }
 
+            expected.Verify();
             replayed.Add(name);
         }
 

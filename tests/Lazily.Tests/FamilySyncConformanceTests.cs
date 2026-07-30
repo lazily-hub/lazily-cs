@@ -99,10 +99,19 @@ public sealed class FamilySyncConformanceTests
                     // a binding that re-applied every op would land on the same values, because the
                     // ops are the same. Only the count separates "converged" from "idempotent".
                     var applied = ops.Count(target.Ingest);
-                    Check("reingest_applied", applied, scenario.GetProperty("expect").GetProperty("reingest_applied").GetInt32());
+                    Check(
+                        "reingest_applied",
+                        applied,
+                        FixtureAssertions.Of(scenario, "expect", name)
+                            .GetProperty("reingest_applied")
+                            .GetInt32());
                 }
 
-                var expect = scenario.GetProperty("expect");
+                var expect = FixtureAssertions.Of(
+                    scenario,
+                    "expect",
+                    $"{Corpus}/{name} scenario {scenario.GetProperty("name").GetString()}");
+                expect.MarkConsumed("reingest_applied");
 
                 Check(
                     "target_keys",
@@ -129,6 +138,7 @@ public sealed class FamilySyncConformanceTests
                 // not because the assertion asked for it.
                 Check("aggregate_is_reactive", aggregateRuns > 1, true);
 
+                expect.Verify();
                 scenarios++;
             }
 

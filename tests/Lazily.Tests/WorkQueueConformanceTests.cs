@@ -89,7 +89,7 @@ public sealed class WorkQueueConformanceTests
                 };
 
                 AssertReturn(fixture, index, step.GetProperty("returns"), returned);
-                var expected = step.GetProperty("expected");
+                var expected = FixtureAssertions.Of(step, "expected", $"{fixture} step {index}");
                 foreach (var probe in expected.GetProperty("invalidates").EnumerateObject())
                 {
                     var invalidated = !readers.StillValid(probe.Name);
@@ -112,6 +112,7 @@ public sealed class WorkQueueConformanceTests
                     expected.GetProperty("reads").GetProperty("dead_letter_len").GetInt32(),
                     queue.DeadLetterLen());
                 AssertSnapshots(expected, queue);
+                expected.Verify();
                 steps++;
                 index++;
             }
@@ -146,7 +147,7 @@ public sealed class WorkQueueConformanceTests
         AssertDelivery(expected, delivery, $"{fixture} step {index} return");
     }
 
-    private static void AssertSnapshots(JsonElement expected, WorkQueueCell<string> queue)
+    private static void AssertSnapshots(FixtureAssertions expected, WorkQueueCell<string> queue)
     {
         var pending = expected.GetProperty("pending").EnumerateArray().ToArray();
         Assert.Equal(pending.Length, queue.Pending().Count);

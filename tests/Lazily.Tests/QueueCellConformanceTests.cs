@@ -151,7 +151,7 @@ public sealed class QueueCellConformanceTests
                         throw new InvalidOperationException($"{fixture} step {i}: unhandled op '{kind}'");
                 }
 
-                var expected = step.GetProperty("expected");
+                var expected = FixtureAssertions.Of(step, "expected", $"{fixture} step {i}");
 
                 // Invalidation FIRST — reading a reader revalidates it.
                 if (expected.TryGetProperty("invalidates", out var invalidates))
@@ -189,6 +189,16 @@ public sealed class QueueCellConformanceTests
                         queue.Head());
                 }
 
+                // `elements` pins the whole FIFO body, which the scalar reads above cannot:
+                // `len` plus `head` is satisfied by a queue that reordered its tail.
+                if (expected.TryGetProperty("elements", out var wantElements))
+                {
+                    Assert.Equal(
+                        wantElements.EnumerateArray().Select(value => value.GetString()),
+                        queue.Elements());
+                }
+
+                expected.Verify();
                 i++;
                 steps++;
             }

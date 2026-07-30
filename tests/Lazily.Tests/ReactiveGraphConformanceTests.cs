@@ -195,7 +195,13 @@ public sealed class ReactiveGraphConformanceTests
                         var engine = new ReactiveGraphEngine(scenarioModel, $"{name}[{label}]");
                         engine.Replay(scenario.GetProperty("steps"));
                         if (root.TryGetProperty("expected", out var expected))
-                            observations[label] = engine.ReplayTail(expected);
+                        {
+                            var tail = FixtureAssertions.Wrap(expected, $"{Corpus}/{name}[{label}]");
+                            // `observationally_equal` is evaluated once for the whole
+                            // fixture below, not per scenario.
+                            tail.MarkConsumed("observationally_equal");
+                            observations[label] = engine.ReplayTail(tail);
+                        }
                         observed.AddRange(engine.Divergences.Select(d => $"{model.Name}/{d}"));
                         checks += engine.Checks;
                     }

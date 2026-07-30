@@ -35,7 +35,7 @@ public sealed class StableIdConformanceTests
         foreach (var scenario in doc.RootElement.GetProperty("scenarios").EnumerateArray())
         {
             var name = scenario.GetProperty("name").GetString()!;
-            var expect = scenario.GetProperty("expect");
+            var expect = FixtureAssertions.Of(scenario, "expect", $"{Corpus}/{Fixture} scenario {name}");
 
             void Check(string key, object? got, object? want)
             {
@@ -67,6 +67,7 @@ public sealed class StableIdConformanceTests
                     }
                 }
 
+                expect.Verify();
                 scenarios++;
                 continue;
             }
@@ -111,6 +112,7 @@ public sealed class StableIdConformanceTests
                 }
             }
 
+            expect.Verify();
             scenarios++;
         }
 

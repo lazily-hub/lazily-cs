@@ -115,6 +115,7 @@ public sealed class QueueFamilyConformanceTests
         bool IsEmpty();
         bool IsFull();
         bool IsClosed();
+        IReadOnlyList<string> Elements();
     }
 
     private interface ITopicRunner
@@ -221,6 +222,7 @@ public sealed class QueueFamilyConformanceTests
             public bool IsEmpty() => _q.IsEmpty();
             public bool IsFull() => _q.IsFull();
             public bool IsClosed() => _q.IsClosed();
+            public IReadOnlyList<string> Elements() => _q.Elements();
         }
 
         private sealed class TopicRunner(TopicSnapshot<string> initial) : ITopicRunner
@@ -343,6 +345,7 @@ public sealed class QueueFamilyConformanceTests
             public bool IsEmpty() => _q.IsEmpty();
             public bool IsFull() => _q.IsFull();
             public bool IsClosed() => _q.IsClosed();
+            public IReadOnlyList<string> Elements() => _q.Elements();
         }
 
         private sealed class TopicRunner(TopicSnapshot<string> initial) : ITopicRunner
@@ -471,6 +474,7 @@ public sealed class QueueFamilyConformanceTests
             public bool IsEmpty() => _q.IsEmptyAsync().GetAwaiter().GetResult();
             public bool IsFull() => _q.IsFullAsync().GetAwaiter().GetResult();
             public bool IsClosed() => _q.IsClosedAsync().GetAwaiter().GetResult();
+            public IReadOnlyList<string> Elements() => _q.Elements();
         }
 
         private sealed class TopicRunner(TopicSnapshot<string> initial) : ITopicRunner
@@ -615,7 +619,10 @@ public sealed class QueueFamilyConformanceTests
                         $"{flavor.Name} {fixture} step {index}: unhandled op '{type}'");
             }
 
-            var expected = step.GetProperty("expected");
+            var expected = FixtureAssertions.Of(
+                step,
+                "expected",
+                $"{flavor.Name} {Corpus}/{fixture} step {index}");
 
             // Invalidation FIRST — reading a reader revalidates it.
             if (expected.TryGetProperty("invalidates", out var invalidates))
@@ -653,6 +660,16 @@ public sealed class QueueFamilyConformanceTests
                     q.Head());
             }
 
+            // `elements` pins the whole FIFO body, which the scalar reads above cannot:
+            // `len` plus `head` is satisfied by a queue that reordered its tail.
+            if (expected.TryGetProperty("elements", out var wantElements))
+            {
+                Assert.Equal(
+                    wantElements.EnumerateArray().Select(value => value.GetString()),
+                    q.Elements());
+            }
+
+            expected.Verify();
             index++;
             steps++;
         }
@@ -673,7 +690,10 @@ public sealed class QueueFamilyConformanceTests
 
         foreach (var step in root.GetProperty("steps").EnumerateArray())
         {
-            var expected = step.GetProperty("expected");
+            var expected = FixtureAssertions.Of(
+                step,
+                "expected",
+                $"{flavor.Name} {Corpus}/{fixture} step {index}");
             var invalidates = expected.GetProperty("invalidates");
             // Capture the handles BEFORE the op: a removed ephemeral subscriber must still be
             // able to report its own final transition.
@@ -749,6 +769,7 @@ public sealed class QueueFamilyConformanceTests
 
             AssertReturns(flavor, fixture, index, step, returned);
 
+            expected.Verify();
             index++;
             steps++;
         }
@@ -808,7 +829,10 @@ public sealed class QueueFamilyConformanceTests
                         $"{flavor.Name} {fixture} step {index}: unhandled op '{type}'");
             }
 
-            var expected = step.GetProperty("expected");
+            var expected = FixtureAssertions.Of(
+                step,
+                "expected",
+                $"{flavor.Name} {Corpus}/{fixture} step {index}");
 
             // Invalidation FIRST — reading a reader revalidates it.
             foreach (var probe in expected.GetProperty("invalidates").EnumerateObject())
@@ -832,6 +856,7 @@ public sealed class QueueFamilyConformanceTests
             Assert.Equal(wantReads.GetProperty("in_flight_len").GetInt32(), queue.InFlightLen());
             Assert.Equal(wantReads.GetProperty("dead_letter_len").GetInt32(), queue.DeadLetterLen());
 
+            expected.Verify();
             index++;
             steps++;
         }

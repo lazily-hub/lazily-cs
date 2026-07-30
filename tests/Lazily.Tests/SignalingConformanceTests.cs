@@ -68,6 +68,17 @@ public sealed class SignalingConformanceTests
             var client = SignalingWire.DeserializeClient(input.GetProperty("recv").GetRawText());
             var actual = room.Handle(connection, client);
             var expected = step.GetProperty("expect").EnumerateArray().ToArray();
+            foreach (var frame in expected)
+            {
+                // The per-frame entries are an assertion block too: `to` and `frame`
+                // are read positionally below, so a sibling key would be ignored.
+                var entry = FixtureAssertions.Wrap(
+                    frame,
+                    "signaling/anti_spoof_session.json step expect entry");
+                entry.MarkConsumed("to");
+                entry.MarkConsumed("frame");
+                entry.Verify();
+            }
             Assert.Equal(expected.Length, actual.Count);
 
             for (var index = 0; index < expected.Length; index++)
@@ -80,13 +91,15 @@ public sealed class SignalingConformanceTests
             }
         }
 
-        Assert.True(root.GetProperty("assertions").GetProperty("roster_excludes_self").GetBoolean());
+        var assertions = FixtureAssertions.Of(
+            root,
+            "assertions",
+            "signaling/anti_spoof_session.json");
+        Assert.True(assertions.GetProperty("roster_excludes_self").GetBoolean());
         Assert.True(
-            root.GetProperty("assertions")
-                .GetProperty("forwarded_from_is_server_registered")
-                .GetBoolean());
-        Assert.True(
-            root.GetProperty("assertions").GetProperty("roster_sorted_ascending").GetBoolean());
+            assertions.GetProperty("forwarded_from_is_server_registered").GetBoolean());
+        Assert.True(assertions.GetProperty("roster_sorted_ascending").GetBoolean());
+        assertions.Verify();
     }
 
     [Fact]

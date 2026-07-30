@@ -13,7 +13,7 @@ public sealed class CausalReceiptConformanceTests
         var fixture = Assert.Single(SpecCorpus.FixtureNames("receipts"));
         using var document = SpecCorpus.Load("receipts", fixture);
         var root = document.RootElement;
-        var expected = root.GetProperty("assertions");
+        var expected = FixtureAssertions.Of(root, "assertions", $"receipts/{fixture}");
         var wire = root.GetProperty("wire");
         var message = CausalReceiptWire.Deserialize(wire.GetRawText());
         var projection = new ReceiptProjection();
@@ -42,6 +42,7 @@ public sealed class CausalReceiptConformanceTests
             JsonNode.DeepEquals(JsonNode.Parse(wire.GetRawText()), JsonNode.Parse(actualJson)),
             fixture);
         AssertSchemaValid(actualJson);
+        expected.Verify();
     }
 
     [Fact]

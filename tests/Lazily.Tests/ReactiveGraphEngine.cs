@@ -226,7 +226,7 @@ public sealed class ReactiveGraphEngine
     /// observation, so two scenarios declared <c>observationally_equal</c> can be compared.
     /// </summary>
     /// <param name="expected">The fixture's <c>expected</c> object.</param>
-    public IReadOnlyList<string> ReplayTail(JsonElement expected)
+    public IReadOnlyList<string> ReplayTail(FixtureAssertions expected)
     {
         _step = -1; // the expected tail is not a numbered step
         _model.Settle();
@@ -293,6 +293,7 @@ public sealed class ReactiveGraphEngine
             }
         }
 
+        expected.Verify();
         return observation;
     }
 

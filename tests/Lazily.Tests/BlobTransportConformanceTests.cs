@@ -14,7 +14,7 @@ public sealed class BlobTransportConformanceTests
         var root = document.RootElement;
         Assert.Equal("Arena", root.GetProperty("kind").GetString());
         var input = root.GetProperty("input");
-        var expected = root.GetProperty("expected");
+        var expected = FixtureAssertions.Of(root, "expected", "arena_blob.json");
         var expectedDescriptor = expected.GetProperty("descriptor");
         var payload = input.GetProperty("payload")
             .EnumerateArray()
@@ -50,6 +50,7 @@ public sealed class BlobTransportConformanceTests
             expectedPayload,
             arena.Bytes.Span.Slice(ShmBlobArena.HeaderLength, payload.Length).ToArray());
         Assert.Equal(payload, arena.Read(descriptor));
+        expected.Verify();
     }
 
     [Fact]

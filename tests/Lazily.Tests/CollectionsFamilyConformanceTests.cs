@@ -80,8 +80,8 @@ public sealed class CollectionsFamilyConformanceTests
             {
                 var step = steps[i];
                 var op = step.GetProperty("op");
-                var expected = step.GetProperty("expected");
                 var where = $"{fixtureName} step {i}";
+                var expected = FixtureAssertions.Of(step, "expected", where);
 
                 // Rebuild + settle readers from the CURRENT key set so each step's
                 // invalidation is measured against a fully settled graph.
@@ -219,6 +219,19 @@ public sealed class CollectionsFamilyConformanceTests
                     invalidates.TryGetProperty("order", out var o) && o.GetBoolean(),
                     orderCount != orderBase);
 
+                // `membership` is the ORDER-INDEPENDENT key set. It is not implied by
+                // `order`: a shell that dropped a key and re-appended it lands the same
+                // ordered list only if the drop and the append cancel, and the membership
+                // set is what says whether the key was ever absent.
+                if (expected.TryGetProperty("membership", out var wantMembership))
+                {
+                    Assert.Equal(
+                        wantMembership.EnumerateArray()
+                            .Select(value => value.GetString()!)
+                            .Order(StringComparer.Ordinal),
+                        map.PresentKeys().Order(StringComparer.Ordinal));
+                }
+
                 // Handle stability: the law separating an atomic move from a
                 // remove + re-mint. A reorder keeps the entry's node.
                 if (expected.TryGetProperty("handle_stable", out var stable))
@@ -238,6 +251,8 @@ public sealed class CollectionsFamilyConformanceTests
                         }
                     }
                 }
+
+                expected.Verify();
             }
 
             Assert.True(matrices > 0, $"{fixtureName}: asserted no invalidation matrix");

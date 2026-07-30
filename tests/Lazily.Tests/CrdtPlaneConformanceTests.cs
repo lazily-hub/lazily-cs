@@ -20,7 +20,10 @@ public sealed class CrdtPlaneConformanceTests
             var operations = scenario.GetProperty("ops").EnumerateArray().Select(ParseOperation).ToArray();
             var runtime = new CrdtPlaneRuntime(peer: 99);
             var applied = runtime.Ingest(new CrdtSyncMessage(operations));
-            var expected = scenario.GetProperty("expect");
+            var expected = FixtureAssertions.Of(
+                scenario,
+                "expect",
+                $"distributed/anti_entropy_converge.json scenario {scenario.GetProperty("name").GetString()}");
             Assert.Equal(expected.GetProperty("applied_count").GetInt32(), applied);
             assertions++;
 
@@ -36,17 +39,47 @@ public sealed class CrdtPlaneConformanceTests
                 assertions++;
             }
 
-            if (scenario.TryGetProperty("reverse_order_equivalent", out var reverse)
-            && reverse.GetBoolean())
+            var declaresOrderIndependent = expected.TryGetProperty("order_independent", out var independent);
+            if (declaresOrderIndependent
+            || (scenario.TryGetProperty("reverse_order_equivalent", out var reverse) && reverse.GetBoolean()))
             {
                 var reversed = new CrdtPlaneRuntime(peer: 100);
                 Assert.Equal(
                 operations.Length,
                 reversed.Ingest(new CrdtSyncMessage(operations.Reverse().ToArray())));
                 AssertConverged(expected.GetProperty("converged"), reversed.Converged());
+                if (declaresOrderIndependent)
+                {
+                    Assert.Equal(
+                        independent.GetBoolean(),
+                        Equivalent(runtime.Converged(), reversed.Converged()));
+                }
+
                 AssertEquivalent(runtime.Converged(), reversed.Converged());
                 assertions += 3;
             }
+
+            // `resolution` names the conflict rule the plane applies. Assert the RULE, not
+            // the label: every converged entry must carry the state of the highest-stamped
+            // op for its node. Comparing the label alone would pass against a plane that
+            // resolved by arrival order and happened to agree.
+            Assert.Equal("max_stamp", expected.GetProperty("resolution").GetString());
+            foreach (var entry in runtime.Converged())
+            {
+                var rivals = operations.Where(operation => operation.Node == entry.Node).ToArray();
+                Assert.NotEmpty(rivals);
+                var winner = rivals
+                    .OrderByDescending(operation => operation.Stamp.WallTime)
+                    .ThenByDescending(operation => operation.Stamp.Logical)
+                    .ThenByDescending(operation => operation.Stamp.Peer)
+                    .First();
+                Assert.Equal(
+                    Assert.IsType<IpcValue.Inline>(winner.State).Bytes,
+                    Assert.IsType<IpcValue.Inline>(entry.State).Bytes);
+                assertions++;
+            }
+
+            expected.Verify();
         }
 
         Assert.True(assertions >= 8);
@@ -183,6 +216,33 @@ public sealed class CrdtPlaneConformanceTests
             var inline = Assert.IsType<IpcValue.Inline>(winner.State);
             Assert.Equal(expectedState, inline.Bytes);
         }
+    }
+
+    /// <summary>Whether two converged views agree entry for entry.</summary>
+    /// <remarks>
+    /// The boolean twin of <see cref="AssertEquivalent"/>, so a fixture that declares
+    /// <c>order_independent: false</c> is checked in that direction too rather than being
+    /// read and discarded.
+    /// </remarks>
+    private static bool Equivalent(
+    IReadOnlyList<ConvergedCrdtEntry> left,
+    IReadOnlyList<ConvergedCrdtEntry> right)
+    {
+        if (left.Count != right.Count) return false;
+        for (var index = 0; index < left.Count; index++)
+        {
+            if (left[index].Node != right[index].Node) return false;
+            if (left[index].Key != right[index].Key) return false;
+            if (!Equals(left[index].Stamp, right[index].Stamp)) return false;
+            if (left[index].State is not IpcValue.Inline leftInline
+                || right[index].State is not IpcValue.Inline rightInline
+                || !leftInline.Bytes.SequenceEqual(rightInline.Bytes))
+            {
+                return false;
+            }
+        }
+
+        return true;
     }
 
     private static void AssertEquivalent(

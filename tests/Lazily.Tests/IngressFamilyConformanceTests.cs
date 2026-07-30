@@ -292,8 +292,10 @@ public sealed class IngressFamilyConformanceTests
             // claim a receipt COUNT cannot make, and a count assertion that fired first would
             // report the symptom instead of the defect.
             var after = SnapshotValidity(model, keys);
-            checks += AssertInvalidation(step.GetProperty("expected"), before, after, where);
-            AssertState(model, step.GetProperty("expected"), where);
+            var expected = FixtureAssertions.Of(step, "expected", where);
+            checks += AssertInvalidation(expected, before, after, where);
+            AssertState(model, expected, where);
+            expected.Verify();
             Materialize(model, keys);
             steps++;
         }
@@ -423,7 +425,7 @@ public sealed class IngressFamilyConformanceTests
         IReadOnlyDictionary<string, bool[]> Scopes,
         bool[] Receipts);
 
-    private static void AssertState(IIngressModel model, JsonElement expected, string where)
+    private static void AssertState(IIngressModel model, FixtureAssertions expected, string where)
     {
         foreach (var scope in expected.GetProperty("scopes").EnumerateObject())
         {
@@ -497,7 +499,7 @@ public sealed class IngressFamilyConformanceTests
     /// clears every reader on every op pass the whole corpus.
     /// </remarks>
     private static int AssertInvalidation(
-        JsonElement expected,
+        FixtureAssertions expected,
         ValiditySnapshot before,
         ValiditySnapshot after,
         string where)

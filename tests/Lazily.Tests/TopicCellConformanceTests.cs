@@ -38,7 +38,7 @@ public sealed class TopicCellConformanceTests
             var index = 0;
             foreach (var step in root.GetProperty("steps").EnumerateArray())
             {
-                var expected = step.GetProperty("expected");
+                var expected = FixtureAssertions.Of(step, "expected", $"collections/{fixture} step {index}");
                 var invalidates = expected.GetProperty("invalidates");
                 var before = invalidates.EnumerateObject().ToDictionary(
                     probe => probe.Name,
@@ -80,6 +80,7 @@ public sealed class TopicCellConformanceTests
                 }
 
                 AssertState(fixture, index, expected, topic);
+                expected.Verify();
                 PrimeAll(topic);
                 steps++;
                 index++;
@@ -151,7 +152,7 @@ public sealed class TopicCellConformanceTests
     private static void AssertState(
         string fixture,
         int index,
-        JsonElement expected,
+        FixtureAssertions expected,
         TopicCell<string> topic)
     {
         Assert.Equal(expected.GetProperty("base_offset").GetInt64(), topic.BaseOffset);

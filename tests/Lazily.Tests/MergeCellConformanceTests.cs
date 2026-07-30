@@ -28,9 +28,13 @@ public sealed class MergeCellConformanceTests
                 var before = source.Get();
                 source.Merge(step.GetProperty("merge").GetInt64());
                 var after = source.Get();
-                var expected = step.GetProperty("expected");
+                var expected = FixtureAssertions.Of(
+                    step,
+                    "expected",
+                    $"collections/mergecell_algebra.json scenario {policyName}");
                 Assert.Equal(expected.GetProperty("value").GetInt64(), after);
                 Assert.Equal(expected.GetProperty("invalidates").GetBoolean(), before != after);
+                expected.Verify();
                 assertions += 2;
             }
         }

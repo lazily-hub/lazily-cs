@@ -120,7 +120,7 @@ public sealed class TemporalRateWindowConformanceTests
         var initial = root.GetProperty("initial");
         Func<long, bool> tick;
         Func<IComputeOps, long> reactiveRead;
-        Action<JsonElement> assertState;
+        Action<FixtureAssertions> assertState;
         Func<long?> nextFire;
         string invalidationName;
 
@@ -209,7 +209,7 @@ public sealed class TemporalRateWindowConformanceTests
             var returned = tick(operation.GetProperty("now").GetInt64());
             Assert.Equal(step.GetProperty("returns").GetBoolean(), returned);
 
-            var expected = step.GetProperty("expected");
+            var expected = FixtureAssertions.Of(step, "expected", $"{fixture} step {index}");
             AssertInvalidation(fixture, index, expected, invalidationName, probe);
             assertState(expected);
             if (expected.TryGetProperty("next_fire", out var expectedNext))
@@ -218,6 +218,7 @@ public sealed class TemporalRateWindowConformanceTests
                     expectedNext.ValueKind == JsonValueKind.Null ? null : expectedNext.GetInt64(),
                     nextFire());
             }
+            expected.Verify();
             _ = probe.Get();
             index++;
         }
@@ -303,9 +304,10 @@ public sealed class TemporalRateWindowConformanceTests
         {
             var returned = apply(step.GetProperty("op"));
             AssertOptionalString(step.GetProperty("returns"), returned);
-            var expected = step.GetProperty("expected");
+            var expected = FixtureAssertions.Of(step, "expected", $"{fixture} step {index}");
             AssertInvalidation(fixture, index, expected, "output", probe);
             AssertOptionalString(expected.GetProperty("output"), outputCell.Get());
+            expected.Verify();
             _ = probe.Get();
             index++;
         }
@@ -390,9 +392,10 @@ public sealed class TemporalRateWindowConformanceTests
         {
             var returned = apply(step.GetProperty("op"));
             AssertOptionalInt(step.GetProperty("returns"), returned);
-            var expected = step.GetProperty("expected");
+            var expected = FixtureAssertions.Of(step, "expected", $"{fixture} step {index}");
             AssertInvalidation(fixture, index, expected, "output", probe);
             AssertOptionalInt(expected.GetProperty("output"), outputCell.Get());
+            expected.Verify();
             _ = probe.Get();
             index++;
         }
@@ -410,7 +413,7 @@ public sealed class TemporalRateWindowConformanceTests
     private static void AssertInvalidation<T>(
         string fixture,
         int index,
-        JsonElement expected,
+        FixtureAssertions expected,
         string name,
         Computed<T> probe)
     {

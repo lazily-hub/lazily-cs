@@ -53,10 +53,12 @@ public sealed class LosslessTreeConformanceTests
                     }
                 }
 
-                AssertExpectations(
-                    world,
-                    scenario.GetProperty("expect"),
-                    ref assertionCount);
+                var expect = FixtureAssertions.Of(
+                    scenario,
+                    "expect",
+                    $"lossless-tree/{fixture} scenario {scenarioCount}");
+                AssertExpectations(world, expect, ref assertionCount);
+                expect.Verify();
             }
         }
 
@@ -245,7 +247,7 @@ public sealed class LosslessTreeConformanceTests
 
     private static void AssertExpectations(
         World world,
-        JsonElement expect,
+        FixtureAssertions expect,
         ref int assertions)
     {
         if (expect.TryGetProperty("render", out var render))

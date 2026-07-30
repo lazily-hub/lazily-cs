@@ -81,7 +81,10 @@ public sealed class ClusterConformanceTests
                 };
             }
 
-            var expected = step.GetProperty("expected");
+            var expected = FixtureAssertions.Of(
+                step,
+                "expected",
+                $"membership/{MembershipFixtures[0]} step {steps}");
             AssertInvalidation(expected, "invalidates", probe);
             Assert.Equal(
                 expected.GetProperty("alive_set").EnumerateArray().Select(value => value.GetInt64()),
@@ -93,6 +96,7 @@ public sealed class ClusterConformanceTests
                     cell.State(long.Parse(state.Name, System.Globalization.CultureInfo.InvariantCulture)));
             }
             _ = probe.Get();
+            expected.Verify();
             steps++;
         }
         Assert.Equal(9, steps);
@@ -110,11 +114,11 @@ public sealed class ClusterConformanceTests
             Assert.Equal("Coordination", root.GetProperty("kind").GetString());
             steps += root.GetProperty("model").GetString() switch
             {
-                "LeaseCell" => ReplayLease(root),
-                "LeaderCell" => ReplayLeader(root),
-                "LockCell" => ReplayLock(root),
-                "QuorumCell" => ReplayQuorum(root),
-                "SemaphoreCell" => ReplaySemaphore(root),
+                "LeaseCell" => ReplayLease(root, fixture),
+                "LeaderCell" => ReplayLeader(root, fixture),
+                "LockCell" => ReplayLock(root, fixture),
+                "QuorumCell" => ReplayQuorum(root, fixture),
+                "SemaphoreCell" => ReplaySemaphore(root, fixture),
                 _ => throw new InvalidOperationException($"{fixture}: unknown coordination model"),
             };
         }
@@ -133,9 +137,9 @@ public sealed class ClusterConformanceTests
             Assert.Equal("Presence", root.GetProperty("kind").GetString());
             steps += root.GetProperty("model").GetString() switch
             {
-                "EphemeralCell" => ReplayEphemeral(root),
-                "PresenceCell" => ReplayPresence(root),
-                "AwarenessCell" => ReplayAwareness(root),
+                "EphemeralCell" => ReplayEphemeral(root, fixture),
+                "PresenceCell" => ReplayPresence(root, fixture),
+                "AwarenessCell" => ReplayAwareness(root, fixture),
                 _ => throw new InvalidOperationException($"{fixture}: unknown presence model"),
             };
         }
@@ -154,10 +158,10 @@ public sealed class ClusterConformanceTests
             Assert.Equal("Resilience", root.GetProperty("kind").GetString());
             steps += root.GetProperty("model").GetString() switch
             {
-                "CircuitBreakerCell" => ReplayCircuitBreaker(root),
-                "RetryPolicyCell" => ReplayRetry(root),
-                "BulkheadCell" => ReplayBulkhead(root),
-                "TimeoutCell" => ReplayTimeout(root),
+                "CircuitBreakerCell" => ReplayCircuitBreaker(root, fixture),
+                "RetryPolicyCell" => ReplayRetry(root, fixture),
+                "BulkheadCell" => ReplayBulkhead(root, fixture),
+                "TimeoutCell" => ReplayTimeout(root, fixture),
                 _ => throw new InvalidOperationException($"{fixture}: unknown resilience model"),
             };
         }
@@ -176,17 +180,17 @@ public sealed class ClusterConformanceTests
             Assert.Equal("Service", root.GetProperty("kind").GetString());
             steps += root.GetProperty("model").GetString() switch
             {
-                "HealthCell" => ReplayHealth(root),
-                "ReadinessCell" => ReplayReadiness(root),
-                "DiscoveryCell" => ReplayDiscovery(root),
-                "ServiceRegistry" => ReplayServiceRegistry(root),
+                "HealthCell" => ReplayHealth(root, fixture),
+                "ReadinessCell" => ReplayReadiness(root, fixture),
+                "DiscoveryCell" => ReplayDiscovery(root, fixture),
+                "ServiceRegistry" => ReplayServiceRegistry(root, fixture),
                 _ => throw new InvalidOperationException($"{fixture}: unknown service model"),
             };
         }
         Assert.Equal(20, steps);
     }
 
-    private static int ReplayLease(JsonElement root)
+    private static int ReplayLease(JsonElement root, string fixture)
     {
         var context = new Context();
         var cell = new LeaseCell(context);
@@ -219,18 +223,19 @@ public sealed class ClusterConformanceTests
                     Assert.Equal(step.GetProperty("returns").GetBoolean(), cell.Tick(now));
                     break;
             }
-            var expected = step.GetProperty("expected");
+            var expected = FixtureAssertions.Of(step, "expected", $"{fixture} step {index}");
             AssertInvalidation(expected, "holder", probe);
             AssertNullableLong(expected.GetProperty("holder"), cell.Holder(now));
             Assert.Equal(expected.GetProperty("held").GetBoolean(), cell.IsHeld(now));
             Assert.Equal(expected.GetProperty("fence").GetInt64(), cell.Fence);
             _ = probe.Get();
+            expected.Verify();
             index++;
         }
         return index;
     }
 
-    private static int ReplayLeader(JsonElement root)
+    private static int ReplayLeader(JsonElement root, string fixture)
     {
         var context = new Context();
         var cell = new LeaderCell(context, root.GetProperty("config").GetProperty("me").GetInt64());
@@ -251,17 +256,18 @@ public sealed class ClusterConformanceTests
                 "tick" => cell.Tick(now),
                 _ => throw new InvalidOperationException("unknown leader operation"),
             };
-            var expected = step.GetProperty("expected");
+            var expected = FixtureAssertions.Of(step, "expected", $"{fixture} step {index}");
             AssertInvalidation(expected, "current_leader", probe);
             AssertNullableLong(expected.GetProperty("current_leader"), cell.CurrentLeader(now));
             Assert.Equal(Enum.Parse<LeaderRole>(expected.GetProperty("role").GetString()!), cell.Role(now));
             _ = probe.Get();
+            expected.Verify();
             index++;
         }
         return index;
     }
 
-    private static int ReplayLock(JsonElement root)
+    private static int ReplayLock(JsonElement root, string fixture)
     {
         var context = new Context();
         var cell = new LockCell(context);
@@ -291,17 +297,18 @@ public sealed class ClusterConformanceTests
                     Assert.Equal(step.GetProperty("returns").GetBoolean(), cell.Tick(now));
                     break;
             }
-            var expected = step.GetProperty("expected");
+            var expected = FixtureAssertions.Of(step, "expected", $"{fixture} step {index}");
             AssertInvalidation(expected, "is_locked", probe);
             Assert.Equal(expected.GetProperty("is_locked").GetBoolean(), cell.IsLocked(now));
             Assert.Equal(expected.GetProperty("fence").GetInt64(), cell.Fence);
             _ = probe.Get();
+            expected.Verify();
             index++;
         }
         return index;
     }
 
-    private static int ReplayQuorum(JsonElement root)
+    private static int ReplayQuorum(JsonElement root, string fixture)
     {
         var context = new Context();
         var cell = BarrierCell.Quorum(
@@ -316,17 +323,18 @@ public sealed class ClusterConformanceTests
             Assert.Equal(
                 step.GetProperty("returns").GetBoolean(),
                 cell.Arrive(operation.GetProperty("peer").GetInt64()));
-            var expected = step.GetProperty("expected");
+            var expected = FixtureAssertions.Of(step, "expected", $"{fixture} step {index}");
             AssertInvalidation(expected, "is_open", probe);
             Assert.Equal(expected.GetProperty("votes").GetInt32(), cell.Count);
             Assert.Equal(expected.GetProperty("is_open").GetBoolean(), cell.IsOpen);
             _ = probe.Get();
+            expected.Verify();
             index++;
         }
         return index;
     }
 
-    private static int ReplaySemaphore(JsonElement root)
+    private static int ReplaySemaphore(JsonElement root, string fixture)
     {
         var context = new Context();
         var cell = new SemaphoreCell(
@@ -345,16 +353,17 @@ public sealed class ClusterConformanceTests
                 Assert.Equal(JsonValueKind.Null, step.GetProperty("returns").ValueKind);
                 cell.Release();
             }
-            var expected = step.GetProperty("expected");
+            var expected = FixtureAssertions.Of(step, "expected", $"{fixture} step {index}");
             AssertInvalidation(expected, "permits_available", probe);
             Assert.Equal(expected.GetProperty("permits_available").GetInt32(), cell.PermitsAvailable);
             _ = probe.Get();
+            expected.Verify();
             index++;
         }
         return index;
     }
 
-    private static int ReplayEphemeral(JsonElement root)
+    private static int ReplayEphemeral(JsonElement root, string fixture)
     {
         var context = new Context();
         var cell = new EphemeralCell<string>(context);
@@ -375,16 +384,17 @@ public sealed class ClusterConformanceTests
             {
                 cell.Tick(operation.GetProperty("now").GetInt64());
             }
-            var expected = step.GetProperty("expected");
+            var expected = FixtureAssertions.Of(step, "expected", $"{fixture} step {index}");
             AssertInvalidation(expected, "value", probe);
             AssertOptionalString(expected.GetProperty("value"), cell.Value);
             _ = probe.Get();
+            expected.Verify();
             index++;
         }
         return index;
     }
 
-    private static int ReplayPresence(JsonElement root)
+    private static int ReplayPresence(JsonElement root, string fixture)
     {
         var context = new Context();
         var cell = new PresenceCell<string>(
@@ -412,16 +422,17 @@ public sealed class ClusterConformanceTests
                     cell.Tick(now);
                     break;
             }
-            var expected = step.GetProperty("expected");
+            var expected = FixtureAssertions.Of(step, "expected", $"{fixture} step {index}");
             AssertInvalidation(expected, "present", probe);
             AssertLongStringMap(expected.GetProperty("present"), cell.Present);
             _ = probe.Get();
+            expected.Verify();
             index++;
         }
         return index;
     }
 
-    private static int ReplayAwareness(JsonElement root)
+    private static int ReplayAwareness(JsonElement root, string fixture)
     {
         var context = new Context();
         var cell = new AwarenessCell<string>(
@@ -445,16 +456,17 @@ public sealed class ClusterConformanceTests
             {
                 cell.Tick(now);
             }
-            var expected = step.GetProperty("expected");
+            var expected = FixtureAssertions.Of(step, "expected", $"{fixture} step {index}");
             AssertInvalidation(expected, "present", probe);
             AssertLongStringMap(expected.GetProperty("present"), cell.Present);
             _ = probe.Get();
+            expected.Verify();
             index++;
         }
         return index;
     }
 
-    private static int ReplayCircuitBreaker(JsonElement root)
+    private static int ReplayCircuitBreaker(JsonElement root, string fixture)
     {
         var config = root.GetProperty("config");
         var context = new Context();
@@ -474,18 +486,19 @@ public sealed class ClusterConformanceTests
                 Assert.Equal(step.GetProperty("returns").GetBoolean(), cell.Allow(now));
             else
                 cell.Record(operation.GetProperty("success").GetBoolean(), now);
-            var expected = step.GetProperty("expected");
+            var expected = FixtureAssertions.Of(step, "expected", $"{fixture} step {index}");
             AssertInvalidation(expected, "state", probe);
             Assert.Equal(
                 Enum.Parse<BreakerState>(expected.GetProperty("state").GetString()!),
                 cell.State);
             _ = probe.Get();
+            expected.Verify();
             index++;
         }
         return index;
     }
 
-    private static int ReplayRetry(JsonElement root)
+    private static int ReplayRetry(JsonElement root, string fixture)
     {
         var config = root.GetProperty("config");
         var context = new Context();
@@ -499,16 +512,17 @@ public sealed class ClusterConformanceTests
         foreach (var step in root.GetProperty("steps").EnumerateArray())
         {
             Assert.Equal(step.GetProperty("returns").GetInt64(), cell.NextDelay());
-            var expected = step.GetProperty("expected");
+            var expected = FixtureAssertions.Of(step, "expected", $"{fixture} step {index}");
             AssertInvalidation(expected, "delay", probe);
             Assert.Equal(expected.GetProperty("delay").GetInt64(), cell.Delay);
             _ = probe.Get();
+            expected.Verify();
             index++;
         }
         return index;
     }
 
-    private static int ReplayBulkhead(JsonElement root)
+    private static int ReplayBulkhead(JsonElement root, string fixture)
     {
         var context = new Context();
         var cell = new BulkheadCell(
@@ -527,16 +541,17 @@ public sealed class ClusterConformanceTests
                 Assert.Equal(JsonValueKind.Null, step.GetProperty("returns").ValueKind);
                 cell.Release();
             }
-            var expected = step.GetProperty("expected");
+            var expected = FixtureAssertions.Of(step, "expected", $"{fixture} step {index}");
             AssertInvalidation(expected, "in_use", probe);
             Assert.Equal(expected.GetProperty("in_use").GetInt32(), cell.InUse);
             _ = probe.Get();
+            expected.Verify();
             index++;
         }
         return index;
     }
 
-    private static int ReplayTimeout(JsonElement root)
+    private static int ReplayTimeout(JsonElement root, string fixture)
     {
         var context = new Context();
         var cell = new TimeoutCell(context);
@@ -551,16 +566,17 @@ public sealed class ClusterConformanceTests
                 ? cell.Arm(now, operation.GetProperty("timeout").GetInt64())
                 : cell.Tick(now);
             Assert.Equal(step.GetProperty("returns").GetBoolean(), returned);
-            var expected = step.GetProperty("expected");
+            var expected = FixtureAssertions.Of(step, "expected", $"{fixture} step {index}");
             AssertInvalidation(expected, "is_timed_out", probe);
             Assert.Equal(expected.GetProperty("is_timed_out").GetBoolean(), cell.IsTimedOut);
             _ = probe.Get();
+            expected.Verify();
             index++;
         }
         return index;
     }
 
-    private static int ReplayHealth(JsonElement root)
+    private static int ReplayHealth(JsonElement root, string fixture)
     {
         var context = new Context();
         var cell = new HealthCell(context);
@@ -574,18 +590,19 @@ public sealed class ClusterConformanceTests
                 operation.GetProperty("name").GetString()!,
                 operation.GetProperty("up").GetBoolean(),
                 operation.GetProperty("critical").GetBoolean());
-            var expected = step.GetProperty("expected");
+            var expected = FixtureAssertions.Of(step, "expected", $"{fixture} step {index}");
             AssertInvalidation(expected, "health", probe);
             Assert.Equal(
                 Enum.Parse<HealthState>(expected.GetProperty("health").GetString()!),
                 cell.Health);
             _ = probe.Get();
+            expected.Verify();
             index++;
         }
         return index;
     }
 
-    private static int ReplayReadiness(JsonElement root)
+    private static int ReplayReadiness(JsonElement root, string fixture)
     {
         var context = new Context();
         var cell = new ReadinessCell(context);
@@ -598,16 +615,17 @@ public sealed class ClusterConformanceTests
             cell.Set(
                 operation.GetProperty("name").GetString()!,
                 operation.GetProperty("ready").GetBoolean());
-            var expected = step.GetProperty("expected");
+            var expected = FixtureAssertions.Of(step, "expected", $"{fixture} step {index}");
             AssertInvalidation(expected, "ready", probe);
             Assert.Equal(expected.GetProperty("ready").GetBoolean(), cell.Ready);
             _ = probe.Get();
+            expected.Verify();
             index++;
         }
         return index;
     }
 
-    private static int ReplayDiscovery(JsonElement root)
+    private static int ReplayDiscovery(JsonElement root, string fixture)
     {
         var context = new Context();
         var cell = new DiscoveryCell(context);
@@ -637,16 +655,17 @@ public sealed class ClusterConformanceTests
                         cell.Resolve(operation.GetProperty("service").GetString()!));
                     break;
             }
-            var expected = step.GetProperty("expected");
+            var expected = FixtureAssertions.Of(step, "expected", $"{fixture} step {index}");
             AssertInvalidation(expected, "discovery", probe);
             AssertStringMap(expected.GetProperty("discovery"), cell.Discovery);
             _ = probe.Get();
+            expected.Verify();
             index++;
         }
         return index;
     }
 
-    private static int ReplayServiceRegistry(JsonElement root)
+    private static int ReplayServiceRegistry(JsonElement root, string fixture)
     {
         var context = new Context();
         var cell = new ServiceRegistry(context);
@@ -670,10 +689,11 @@ public sealed class ClusterConformanceTests
                     cell.Replay();
                     break;
             }
-            var expected = step.GetProperty("expected");
+            var expected = FixtureAssertions.Of(step, "expected", $"{fixture} step {index}");
             AssertInvalidation(expected, "projection", probe);
             AssertStringMap(expected.GetProperty("projection"), cell.Projection);
             _ = probe.Get();
+            expected.Verify();
             index++;
         }
         Assert.Equal(4, cell.Log.Count);
@@ -689,7 +709,7 @@ public sealed class ClusterConformanceTests
     }
 
     private static void AssertInvalidation<T>(
-        JsonElement expected,
+        FixtureAssertions expected,
         string projection,
         Computed<T> probe)
     {

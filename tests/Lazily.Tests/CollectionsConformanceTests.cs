@@ -101,8 +101,16 @@ public sealed class CollectionsConformanceTests
                 if (!Equals(got?.ToString(), want?.ToString())) divergences.Add($"{name}:{key} — got {got}, want {want}");
             }
 
-            if (fx.TryGetProperty("reconcile", out var reconcile)) ReplayReconcile(reconcile, fx.GetProperty("expected"), Check);
-            else ReplaySteps(fx, Check);
+            if (fx.TryGetProperty("reconcile", out var reconcile))
+            {
+                var reconcileExpected = FixtureAssertions.Of(fx, "expected", name);
+                ReplayReconcile(reconcile, reconcileExpected, Check);
+                reconcileExpected.Verify();
+            }
+            else
+            {
+                ReplaySteps(fx, Check);
+            }
 
             replayed.Add(name);
         }
@@ -156,8 +164,8 @@ public sealed class CollectionsConformanceTests
             }
 
             var recomputed = probes.Recomputed();
-            var expected = step.GetProperty("expected");
             var where = $"#{stepIndex}";
+            var expected = FixtureAssertions.Of(step, "expected", where);
 
             check(
                 $"{where}:order",
@@ -203,13 +211,14 @@ public sealed class CollectionsConformanceTests
                 }
             }
 
+            expected.Verify();
             probes.Rearm();
             stepIndex++;
         }
     }
 
     /// <summary>Replays a reconcile-shaped fixture, asserting the emitted op set and stable-key quiescence.</summary>
-    private static void ReplayReconcile(JsonElement reconcile, JsonElement expected, Action<string, object?, object?> check)
+    private static void ReplayReconcile(JsonElement reconcile, FixtureAssertions expected, Action<string, object?, object?> check)
     {
         var ctx = new Context();
         var map = new SourceMap<string, int>(ctx);

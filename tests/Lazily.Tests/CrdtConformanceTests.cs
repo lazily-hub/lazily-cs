@@ -54,7 +54,12 @@ public sealed class CrdtConformanceTests
                 ApplySequenceStep(replicas, step);
             }
 
-            AssertSequenceExpectations(replicas, scenario.GetProperty("expect"), ref assertions);
+            var expect = FixtureAssertions.Of(
+                scenario,
+                "expect",
+                $"{Collections}/{fixture} scenario {scenario.GetProperty("name").GetString()}");
+            AssertSequenceExpectations(replicas, expect, ref assertions);
+            expect.Verify();
         }
 
         Assert.Equal(6, scenarios.GetArrayLength());
@@ -143,10 +148,12 @@ public sealed class CrdtConformanceTests
                 ApplyTextStep(replicas, step, ref assertionCount);
             }
 
-            AssertTextExpectations(
-                replicas,
-                scenario.GetProperty("expect"),
-                ref assertionCount);
+            var expect = FixtureAssertions.Of(
+                scenario,
+                "expect",
+                $"{Collections}/{fixture} scenario {scenario.GetProperty("name").GetString()}");
+            AssertTextExpectations(replicas, expect, ref assertionCount);
+            expect.Verify();
         }
     }
 
@@ -277,7 +284,7 @@ public sealed class CrdtConformanceTests
 
     private static void AssertTextExpectations(
         IReadOnlyDictionary<string, TextCrdt> replicas,
-        JsonElement expect,
+        FixtureAssertions expect,
         ref int assertions)
     {
         if (expect.TryGetProperty("texts_equal", out var equalGroups))
@@ -445,7 +452,7 @@ public sealed class CrdtConformanceTests
 
     private static void AssertSequenceExpectations(
         IReadOnlyDictionary<string, SeqCrdt<string, string>> replicas,
-        JsonElement expect,
+        FixtureAssertions expect,
         ref int assertions)
     {
         if (expect.TryGetProperty("order", out var order))
@@ -539,7 +546,7 @@ public sealed class CrdtConformanceTests
             ? value.GetString()!
             : value.GetRawText();
 
-    private static string ConvergedTarget(JsonElement expect)
+    private static string ConvergedTarget(FixtureAssertions expect)
     {
         if (!expect.TryGetProperty("orders_equal", out var groups)
             || groups.GetArrayLength() == 0
@@ -575,7 +582,10 @@ public sealed class CrdtConformanceTests
             merged.Add(result);
         }
 
-        var expected = scenario.GetProperty("expect");
+        var expected = FixtureAssertions.Of(
+            scenario,
+            "expect",
+            $"crdt-tree/algebra.json scenario {scenario.GetProperty("name").GetString()}");
         if (expected.GetProperty("texts_equal").GetBoolean())
         {
             foreach (var result in merged.Skip(1))
@@ -593,6 +603,8 @@ public sealed class CrdtConformanceTests
                 Assert.Equal(vector, result.VersionVector().OrderBy(pair => pair.Key));
             }
         }
+
+        expected.Verify();
     }
 
     private static void ReplaySnapshotLineage(JsonElement scenario, ref int assertions)

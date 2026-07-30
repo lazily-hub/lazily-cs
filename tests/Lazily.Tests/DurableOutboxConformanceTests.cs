@@ -82,23 +82,63 @@ public sealed class DurableOutboxConformanceTests
             }
 
             var restarted = new DurableOutbox<FileOutboxStore>(new FileOutboxStore(path));
-            var expected = scenario.GetProperty("expect");
+            var expected = FixtureAssertions.Of(
+                scenario,
+                "expect",
+                $"reliable-sync/{fixture} scenario {scenario.GetProperty("name").GetString()}");
             if (expected.TryGetProperty("retained_after_ack", out var retainedAfterAck))
             {
                 Assert.Equal(Epochs(retainedAfterAck), restarted.RetainedEpochs);
+                var cursor = scenario.GetProperty("reconnect_cursor").GetUInt64();
+                var replayed = restarted.ReplayFrom(cursor).Select(entry => entry.Epoch).ToArray();
+                Assert.Equal(Epochs(expected.GetProperty("replayed_from_cursor")), replayed);
+                // `replay_order` is not a duplicate of `replayed_from_cursor`: the SET can be
+                // right while the order is wrong, and a receiver that folds a later epoch
+                // first sees a gap it can never close.
+                Assert.Equal(Epochs(expected.GetProperty("replay_order")), replayed);
+
+                // The receiver half: at-least-once on the wire, exactly-once in effect.
+                var coordinator = new ResyncCoordinator(cursor);
+                var applied = new List<ulong>();
+                foreach (var entry in restarted.ReplayFrom(cursor))
+                {
+                    if (coordinator.Ingest(entry.Message).Action == ResyncAction.Apply)
+                    {
+                        applied.Add(coordinator.LastEpoch);
+                    }
+                }
+
+                Assert.Equal(Epochs(expected.GetProperty("receiver_applies")), applied);
                 Assert.Equal(
-                    Epochs(expected.GetProperty("replayed_from_cursor")),
-                    restarted.ReplayFrom(scenario.GetProperty("reconnect_cursor").GetUInt64())
-                        .Select(entry => entry.Epoch));
+                    expected.GetProperty("receiver_last_epoch_after").GetUInt64(),
+                    coordinator.LastEpoch);
+
+                var ackedThrough = scenario.GetProperty("ack_through").GetUInt64();
+                var owed = scenario.GetProperty("appended")
+                    .EnumerateArray()
+                    .Select(entry => entry.GetProperty("epoch").GetUInt64())
+                    .Where(epoch => epoch > ackedThrough)
+                    .ToArray();
+                var lost = owed.Count(epoch => !applied.Contains(epoch));
+                var doubled = applied.Count - applied.Distinct().Count();
+                Assert.Equal(expected.GetProperty("ops_lost").GetInt32(), lost);
+                Assert.Equal(expected.GetProperty("ops_doubled").GetInt32(), doubled);
+                Assert.Equal(
+                    expected.GetProperty("exactly_once_effect").GetBoolean(),
+                    lost == 0 && doubled == 0);
             }
             else
             {
                 Assert.True(expected.GetProperty("frame_retained_after_failed_send").GetBoolean());
                 Assert.Equal(Epochs(expected.GetProperty("retained")), restarted.RetainedEpochs);
-                Assert.Equal(
-                    Epochs(expected.GetProperty("resent_on_next_tick")),
-                    restarted.ReplayFrom(0).Select(entry => entry.Epoch));
+                var resent = restarted.ReplayFrom(0).Select(entry => entry.Epoch).ToArray();
+                Assert.Equal(Epochs(expected.GetProperty("resent_on_next_tick")), resent);
+                // A retained frame is a DELAY, not a hole: the next tick replays it, so the
+                // receiver never sees an epoch it can no longer obtain.
+                Assert.Equal(expected.GetProperty("permanent_gap").GetBoolean(), resent.Length == 0);
             }
+
+            expected.Verify();
         }
     }
 
@@ -131,7 +171,10 @@ public sealed class DurableOutboxConformanceTests
 
     private static void AssertScenario(string path, JsonElement scenario)
     {
-        var expected = scenario.GetProperty("expect");
+        var expected = FixtureAssertions.Of(
+            scenario,
+            "expect",
+            $"reliable-sync/outbox_store_protocol.json scenario {scenario.GetProperty("name").GetString()}");
         var restarted = new DurableOutbox<FileOutboxStore>(new FileOutboxStore(path));
 
         if (expected.TryGetProperty("epochs", out var epochs))
@@ -158,10 +201,20 @@ public sealed class DurableOutboxConformanceTests
             Assert.Equal(loaded.GetUInt64(), restarted.AckedThrough);
         }
 
+        // `retained` is asserted for EVERY scenario that carries it. Reading it only inside
+        // the `cursor` branch above meant the restart scenario — the one whose whole point
+        // is that the unacked suffix survives a reopen — never checked the suffix at all.
+        if (expected.TryGetProperty("retained", out var retained))
+        {
+            Assert.Equal(Epochs(retained), restarted.RetainedEpochs);
+        }
+
         if (expected.TryGetProperty("replay", out var replay))
         {
             Assert.Equal(Epochs(replay), restarted.ReplayFrom(0).Select(entry => entry.Epoch));
         }
+
+        expected.Verify();
     }
 
     private static IEnumerable<JsonElement> OptionalArray(JsonElement element, string property) =>

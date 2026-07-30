@@ -28,7 +28,10 @@ public sealed class CommandPlaneConformanceTests
                 {
                     Replay(
                         scenario.GetProperty("frames"),
-                        scenario.GetProperty("expect"),
+                        FixtureAssertions.Of(
+                            scenario,
+                            "expect",
+                            $"{Corpus}/{name}#{scenario.GetProperty("name").GetString()}"),
                         $"{name}#{scenario.GetProperty("name").GetString()}",
                         schema,
                         ref assertions);
@@ -39,7 +42,7 @@ public sealed class CommandPlaneConformanceTests
             {
                 Replay(
                     fixture.GetProperty("frames"),
-                    fixture.GetProperty("expect"),
+                    FixtureAssertions.Of(fixture, "expect", $"{Corpus}/{name}"),
                     name,
                     schema,
                     ref assertions);
@@ -65,7 +68,7 @@ public sealed class CommandPlaneConformanceTests
 
     private static void Replay(
         JsonElement frames,
-        JsonElement expected,
+        FixtureAssertions expected,
         string label,
         JsonSchema schema,
         ref int assertions)
@@ -201,6 +204,8 @@ public sealed class CommandPlaneConformanceTests
                 label + " before conflict");
             assertions += 3;
         }
+
+        expected.Verify();
     }
 
     private static void AssertProjection(
