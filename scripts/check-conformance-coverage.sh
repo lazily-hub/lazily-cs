@@ -78,11 +78,32 @@ while IFS= read -r fixture; do
   fi
 done < <(cd "$SPEC_DIR" && find . -name '*.json' | sed 's|^\./||' | sort)
 
-# A stale allowlist is its own drift: an entry naming a fixture that no longer
-# exists means the corpus moved and nobody updated the excuse.
+# A stale allowlist is its own drift, in TWO directions (#lzcovallowlistrot).
+#
+#   1. The entry names a fixture that no longer exists — the corpus moved and
+#      nobody updated the excuse.
+#   2. The entry names a fixture the suite DOES open — the excuse outlived the
+#      gap it documented. Nothing above can see this: a covered fixture takes
+#      the `continue` branch and never consults KNOWN_UNCOVERED at all, so a
+#      stale excuse sits there forever understating what this binding replays.
+#      That is the same understating rot #lzcoverageaudit corrected one layer up
+#      in lazily-spec's coverage.json, and the ledger-rot direction that does not
+#      announce itself: the build stays green while the count reads low.
+#
+# The covered-check comparison is reused EXACTLY — `grep -qxF` against the same
+# $OPENED set, on the corpus-relative path. A looser match here (basename, or a
+# substring) would fire on a fixture the suite never touched.
 for known in "${KNOWN_UNCOVERED[@]}"; do
   if [ ! -f "$SPEC_DIR/$known" ]; then
     echo "ERROR: KNOWN_UNCOVERED lists '$known', which is not in the canonical corpus." >&2
+    missing=$((missing + 1))
+    continue
+  fi
+  if grep -qxF "$known" <<< "$OPENED"; then
+    echo "ERROR: KNOWN_UNCOVERED lists '$known', but the suite OPENED it." >&2
+    echo "       The excuse is stale: this binding replays that fixture now." >&2
+    echo "       Delete the entry. An allowlist that outlives its gap understates" >&2
+    echo "       coverage silently — it can never turn the build red on its own." >&2
     missing=$((missing + 1))
   fi
 done
