@@ -37,9 +37,7 @@ public sealed class LosslessTreeConformanceTests
         {
             fixtureCount++;
             using var document = SpecCorpus.Load(Corpus, fixture);
-            foreach (var scenario in document.RootElement
-                         .GetProperty("scenarios")
-                         .EnumerateArray())
+            foreach (var scenario in SpecCorpus.Scenarios(document.RootElement, Corpus, fixture).All())
             {
                 scenarioCount++;
                 var world = SeedWorld(scenario);

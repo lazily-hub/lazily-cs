@@ -46,7 +46,7 @@ public sealed class FamilySyncConformanceTests
             var fx = doc.RootElement;
             var ns = fx.GetProperty("namespace").GetString()!;
 
-            foreach (var scenario in fx.GetProperty("scenarios").EnumerateArray())
+            foreach (var scenario in SpecCorpus.Scenarios(fx, Corpus, name).All())
             {
                 var label = scenario.GetProperty("name").GetString()!;
 

@@ -52,6 +52,37 @@ public static class SpecCorpus
         return JsonDocument.Parse(File.ReadAllText(Path.Combine(Root, corpus, fixture)));
     }
 
+    /// <summary>The fixture's <c>scenarios</c>, wrapped in the replay ledger.</summary>
+    /// <param name="root">The fixture root element.</param>
+    /// <param name="corpus">The corpus directory name, as passed to <see cref="Load"/>.</param>
+    /// <param name="fixture">The fixture file name, as passed to <see cref="Load"/>.</param>
+    /// <remarks>
+    /// Throws when the fixture carries no <c>scenarios</c> array, exactly as
+    /// <c>GetProperty("scenarios")</c> did. Use <see cref="TryScenarios"/> for a corpus whose
+    /// fixtures are a mix of the two shapes.
+    /// </remarks>
+    public static ScenarioSet Scenarios(JsonElement root, string corpus, string fixture) =>
+        new(root.GetProperty("scenarios"), Key(corpus, fixture));
+
+    /// <summary><see cref="Scenarios"/> for a fixture that may carry no scenarios at all.</summary>
+    public static bool TryScenarios(
+        JsonElement root,
+        string corpus,
+        string fixture,
+        out ScenarioSet scenarios)
+    {
+        if (root.ValueKind == JsonValueKind.Object
+            && root.TryGetProperty("scenarios", out var element)
+            && element.ValueKind == JsonValueKind.Array)
+        {
+            scenarios = new ScenarioSet(element, Key(corpus, fixture));
+            return true;
+        }
+
+        scenarios = new ScenarioSet(default, Key(corpus, fixture));
+        return false;
+    }
+
     // -- Runtime conformance manifest (#lazilyupgradeconformance) --------------
     //
     // This binding discovers fixtures by enumerating the corpus directory, so no
@@ -70,13 +101,30 @@ public static class SpecCorpus
     private static readonly SortedSet<string> Opened = new(StringComparer.Ordinal);
     private static bool _flushRegistered;
 
-    private static void Record(string corpus, string fixture)
+    private static string Key(string corpus, string fixture) =>
+        string.IsNullOrEmpty(corpus) ? fixture : corpus + "/" + fixture;
+
+    private static void Record(string corpus, string fixture) => Append(Key(corpus, fixture));
+
+    // -- Runtime scenario ledger (#lzscenariocoverage) --------------------------
+    //
+    // Rides in the SAME manifest as the fixture record above, one evidence file and
+    // one env var, distinguished by a TAB: a bare line is "this fixture was opened",
+    // a `fixture<TAB>id` line is "this scenario was replayed". The coverage guard
+    // matches opened fixtures with `grep -qxF` on the whole line, so a suffixed
+    // scenario line can never be mistaken for a fixture record.
+    //
+    // Called from ScenarioSet at the point a runner actually reaches a scenario —
+    // never from a bookkeeping read, because naming a scenario is not replaying it.
+    internal static void RecordScenario(string fixture, string id) => Append(fixture + "\t" + id);
+
+    private static void Append(string line)
     {
         var manifest = Environment.GetEnvironmentVariable("LAZILY_CONFORMANCE_MANIFEST");
         if (string.IsNullOrEmpty(manifest)) return;
         lock (ManifestGate)
         {
-            Opened.Add(string.IsNullOrEmpty(corpus) ? fixture : corpus + "/" + fixture);
+            Opened.Add(line);
             if (_flushRegistered) return;
             _flushRegistered = true;
             AppDomain.CurrentDomain.ProcessExit += (_, _) => Flush(manifest);

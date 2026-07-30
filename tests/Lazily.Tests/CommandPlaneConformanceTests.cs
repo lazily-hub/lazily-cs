@@ -22,9 +22,9 @@ public sealed class CommandPlaneConformanceTests
         {
             using var document = SpecCorpus.Load(Corpus, name);
             var fixture = document.RootElement;
-            if (fixture.TryGetProperty("scenarios", out var nested))
+            if (SpecCorpus.TryScenarios(fixture, Corpus, name, out var nested))
             {
-                foreach (var scenario in nested.EnumerateArray())
+                foreach (var scenario in nested.All())
                 {
                     Replay(
                         scenario.GetProperty("frames"),

@@ -41,11 +41,11 @@ public sealed class CrdtConformanceTests
         const string fixture = "seqcrdt_convergence.json";
         RequireFixture(Collections, fixture);
         using var document = SpecCorpus.Load(Collections, fixture);
-        var scenarios = document.RootElement.GetProperty("scenarios");
+        var scenarios = SpecCorpus.Scenarios(document.RootElement, Collections, fixture);
         var stepCount = 0;
         var assertions = 0;
 
-        foreach (var scenario in scenarios.EnumerateArray())
+        foreach (var scenario in scenarios.All())
         {
             var replicas = SeedSequence(scenario);
             foreach (var step in scenario.GetProperty("steps").EnumerateArray())
@@ -62,7 +62,7 @@ public sealed class CrdtConformanceTests
             expect.Verify();
         }
 
-        Assert.Equal(6, scenarios.GetArrayLength());
+        Assert.Equal(6, scenarios.Count);
         Assert.True(stepCount >= 33, $"SeqCrdt runner replayed only {stepCount} steps");
         Assert.True(assertions >= 16, $"SeqCrdt runner made only {assertions} assertions");
     }
@@ -75,10 +75,10 @@ public sealed class CrdtConformanceTests
         var names = SpecCorpus.FixtureNames(corpus);
         Assert.Equal([fixture], names);
         using var document = SpecCorpus.Load(corpus, fixture);
-        var scenarios = document.RootElement.GetProperty("scenarios");
+        var scenarios = SpecCorpus.Scenarios(document.RootElement, corpus, fixture);
         var assertions = 0;
 
-        foreach (var scenario in scenarios.EnumerateArray())
+        foreach (var scenario in scenarios.All())
         {
             var name = scenario.GetProperty("name").GetString();
             switch (name)
@@ -97,7 +97,7 @@ public sealed class CrdtConformanceTests
             }
         }
 
-        Assert.Equal(3, scenarios.GetArrayLength());
+        Assert.Equal(3, scenarios.Count);
         Assert.True(assertions >= 10, $"CrdtTree runner made only {assertions} assertions");
     }
 
@@ -138,7 +138,7 @@ public sealed class CrdtConformanceTests
         ref int assertionCount)
     {
         using var document = SpecCorpus.Load(Collections, fixture);
-        foreach (var scenario in document.RootElement.GetProperty("scenarios").EnumerateArray())
+        foreach (var scenario in SpecCorpus.Scenarios(document.RootElement, Collections, fixture).All())
         {
             scenarioCount++;
             var replicas = SeedText(scenario);

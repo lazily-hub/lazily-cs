@@ -11,11 +11,14 @@ public sealed class CrdtPlaneConformanceTests
     public void Canonical_anti_entropy_corpus_converges_and_redelivery_is_idempotent()
     {
         using var document = SpecCorpus.Load("distributed", "anti_entropy_converge.json");
-        var scenarios = document.RootElement.GetProperty("scenarios").EnumerateArray().ToArray();
-        Assert.Equal(3, scenarios.Length);
+        var scenarios = SpecCorpus.Scenarios(
+            document.RootElement,
+            "distributed",
+            "anti_entropy_converge.json");
+        Assert.Equal(3, scenarios.Count);
         var assertions = 0;
 
-        foreach (var scenario in scenarios)
+        foreach (var scenario in scenarios.All())
         {
             var operations = scenario.GetProperty("ops").EnumerateArray().Select(ParseOperation).ToArray();
             var runtime = new CrdtPlaneRuntime(peer: 99);

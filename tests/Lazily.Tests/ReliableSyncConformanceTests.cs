@@ -14,10 +14,13 @@ public sealed class ReliableSyncConformanceTests
     public void Resync_gap_corpus_requests_once_then_converges_on_snapshot()
     {
         using var document = SpecCorpus.Load("reliable-sync", "resync_gap_converge.json");
-        var scenarios = document.RootElement.GetProperty("scenarios").EnumerateArray().ToArray();
-        Assert.Equal(2, scenarios.Length);
+        var scenarios = SpecCorpus.Scenarios(
+            document.RootElement,
+            "reliable-sync",
+            "resync_gap_converge.json");
+        Assert.Equal(2, scenarios.Count);
 
-        foreach (var scenario in scenarios)
+        foreach (var scenario in scenarios.All())
         {
             var coordinator = new ResyncCoordinator(
             scenario.GetProperty("start_last_epoch").GetUInt64());
@@ -87,10 +90,13 @@ public sealed class ReliableSyncConformanceTests
     public void Idempotent_redelivery_corpus_has_exactly_once_effect()
     {
         using var document = SpecCorpus.Load("reliable-sync", "idempotent_redelivery.json");
-        var scenarios = document.RootElement.GetProperty("scenarios").EnumerateArray().ToArray();
-        Assert.Equal(2, scenarios.Length);
+        var scenarios = SpecCorpus.Scenarios(
+            document.RootElement,
+            "reliable-sync",
+            "idempotent_redelivery.json");
+        Assert.Equal(2, scenarios.Count);
 
-        foreach (var scenario in scenarios)
+        foreach (var scenario in scenarios.All())
         {
             var coordinator = new ResyncCoordinator(
             scenario.GetProperty("start_last_epoch").GetUInt64());
@@ -124,8 +130,8 @@ public sealed class ReliableSyncConformanceTests
             root,
             "assertions",
             "reliable-sync/multi_epoch_delta.json");
-        var scenarios = root.GetProperty("scenarios").EnumerateArray().ToArray();
-        Assert.Equal(2, scenarios.Length);
+        var scenarios = SpecCorpus.Scenarios(root, "reliable-sync", "multi_epoch_delta.json");
+        Assert.Equal(2, scenarios.Count);
 
         var spanScenario = scenarios[0];
         var delta = ParseDelta(spanScenario.GetProperty("delta"));
@@ -199,8 +205,11 @@ public sealed class ReliableSyncConformanceTests
     public void Liveness_corpus_replays_orset_lww_cascade_and_retry_convergence()
     {
         using var document = SpecCorpus.Load("reliable-sync", "liveness_orset_lww.json");
-        var scenarios = document.RootElement.GetProperty("scenarios").EnumerateArray().ToArray();
-        Assert.Equal(4, scenarios.Length);
+        var scenarios = SpecCorpus.Scenarios(
+            document.RootElement,
+            "reliable-sync",
+            "liveness_orset_lww.json");
+        Assert.Equal(4, scenarios.Count);
 
         var addWins = scenarios[0];
         var addExpect = FixtureAssertions.Of(
@@ -351,8 +360,11 @@ public sealed class ReliableSyncConformanceTests
     public void Coalesce_corpus_bounds_state_and_fuses_queue_batches_without_loss()
     {
         using var document = SpecCorpus.Load("reliable-sync", "coalesce_bounds_outbox.json");
-        var scenarios = document.RootElement.GetProperty("scenarios").EnumerateArray().ToArray();
-        Assert.Equal(3, scenarios.Length);
+        var scenarios = SpecCorpus.Scenarios(
+            document.RootElement,
+            "reliable-sync",
+            "coalesce_bounds_outbox.json");
+        Assert.Equal(3, scenarios.Count);
 
         var stateScenario = scenarios[0];
         var stateOutbox = new DurableOutbox<InMemoryOutboxStore>(new InMemoryOutboxStore());
@@ -429,8 +441,11 @@ public sealed class ReliableSyncConformanceTests
     public void Lease_eviction_corpus_is_peer_isolated_and_rejoins_from_a_fresh_snapshot()
     {
         using var document = SpecCorpus.Load("reliable-sync", "liveness_lease_eviction.json");
-        var scenarios = document.RootElement.GetProperty("scenarios").EnumerateArray().ToArray();
-        Assert.Equal(4, scenarios.Length);
+        var scenarios = SpecCorpus.Scenarios(
+            document.RootElement,
+            "reliable-sync",
+            "liveness_lease_eviction.json");
+        Assert.Equal(4, scenarios.Count);
 
         var slow = scenarios[0];
         var peerB = slow.GetProperty("peers").GetProperty("B");

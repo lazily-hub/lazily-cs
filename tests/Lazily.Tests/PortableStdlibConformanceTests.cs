@@ -22,7 +22,7 @@ public sealed class PortableStdlibConformanceTests
             using var document = SpecCorpus.Load("stdlib", fixtureName);
             var fixture = document.RootElement;
             AssertFixtureBookkeeping(fixture);
-            foreach (var scenario in fixture.GetProperty("scenarios").EnumerateArray())
+            foreach (var scenario in SpecCorpus.Scenarios(fixture, "stdlib", fixtureName).All())
             {
                 switch (fixture.GetProperty("feature").GetString())
                 {

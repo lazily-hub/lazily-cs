@@ -32,7 +32,7 @@ public sealed class SemTreeConformanceTests
         var assertions = 0;
         var scenarios = 0;
 
-        foreach (var scenario in doc.RootElement.GetProperty("scenarios").EnumerateArray())
+        foreach (var scenario in SpecCorpus.Scenarios(doc.RootElement, Corpus, Fixture).All())
         {
             var name = scenario.GetProperty("name").GetString()!;
 

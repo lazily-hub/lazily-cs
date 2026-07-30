@@ -8,11 +8,14 @@ public sealed class MergeCellConformanceTests
     public void ReplaysTheCanonicalMergeCellAlgebra()
     {
         using var document = SpecCorpus.Load("collections", "mergecell_algebra.json");
-        var scenarios = document.RootElement.GetProperty("scenarios").EnumerateArray().ToArray();
-        Assert.Equal(3, scenarios.Length);
+        var scenarios = SpecCorpus.Scenarios(
+            document.RootElement,
+            "collections",
+            "mergecell_algebra.json");
+        Assert.Equal(3, scenarios.Count);
         var assertions = 0;
 
-        foreach (var scenario in scenarios)
+        foreach (var scenario in scenarios.All())
         {
             var policyName = scenario.GetProperty("policy").GetString()!;
             var policy = Policy(policyName);

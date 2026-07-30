@@ -49,6 +49,16 @@ reported green while testing nothing.
   a fixed one fails it until the entry is deleted.
 - **A ledger entry is a finding against this binding, never a relaxation of a fixture.** If a
   fixture looks wrong, take it up in lazily-spec; do not weaken it here.
+- **Opening a fixture is not replaying every scenario in it.** A fixture carrying several named
+  scenarios can be PARTIALLY replayed while the coverage guard stays green — it asks only whether
+  the FILE was opened, and one scenario answers yes; the key trackers only bind blocks a runner
+  reaches, so a scenario nobody reached contributes no unconsumed and no unasserted key. Reach
+  every scenario through `SpecCorpus.Scenarios(...)`, whose indexer and iterators record each one
+  in the runtime ledger at the point of replay. `scripts/check-conformance-coverage.sh` verifies
+  that ledger against the ids on disk (`id`, else `name`, else positional `#<n>`), and
+  `KNOWN_UNREPLAYED_SCENARIOS` sits beside `KNOWN_UNCOVERED` so there is one place to read what
+  this binding does not prove. Naming a scenario is not replaying it: `IdAt` deliberately records
+  nothing, and neither does a bookkeeping read of the raw array.
 - **Assert the library, not the runner's bookkeeping.** Counters that pin library behaviour live
   inside the library's own call path — the merge-fold counter is installed *in the merge policy*,
   so `merges_of` counts folds the library performed rather than calls the runner issued. A runner

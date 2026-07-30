@@ -14,10 +14,10 @@ public sealed class DurableOutboxConformanceTests
             SpecCorpus.FixtureNames("reliable-sync"),
             name => name.StartsWith("outbox_store_", StringComparison.Ordinal));
         using var document = SpecCorpus.Load("reliable-sync", fixture);
-        var scenarios = document.RootElement.GetProperty("scenarios").EnumerateArray().ToArray();
-        Assert.Equal(4, scenarios.Length);
+        var scenarios = SpecCorpus.Scenarios(document.RootElement, "reliable-sync", fixture);
+        Assert.Equal(4, scenarios.Count);
 
-        foreach (var scenario in scenarios)
+        foreach (var scenario in scenarios.All())
         {
             var path = TemporaryJournal();
             var store = new FileOutboxStore(path);
@@ -61,10 +61,10 @@ public sealed class DurableOutboxConformanceTests
             SpecCorpus.FixtureNames("reliable-sync"),
             name => name.StartsWith("outbox_replay_", StringComparison.Ordinal));
         using var document = SpecCorpus.Load("reliable-sync", fixture);
-        var scenarios = document.RootElement.GetProperty("scenarios").EnumerateArray().ToArray();
-        Assert.Equal(2, scenarios.Length);
+        var scenarios = SpecCorpus.Scenarios(document.RootElement, "reliable-sync", fixture);
+        Assert.Equal(2, scenarios.Count);
 
-        foreach (var scenario in scenarios)
+        foreach (var scenario in scenarios.All())
         {
             var path = TemporaryJournal();
             var outbox = new DurableOutbox<FileOutboxStore>(new FileOutboxStore(path));

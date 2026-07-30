@@ -188,7 +188,7 @@ public sealed class ReactiveGraphConformanceTests
                     // disposing each member individually. Both scenarios build the identical graph
                     // and differ only in HOW the nodes go away; every observable must agree.
                     var observations = new Dictionary<string, IReadOnlyList<string>>(StringComparer.Ordinal);
-                    foreach (var scenario in root.GetProperty("scenarios").EnumerateArray())
+                    foreach (var scenario in SpecCorpus.Scenarios(root, Corpus, name).All())
                     {
                         var label = scenario.GetProperty("name").GetString()!;
                         using var scenarioModel = NewModel(model.Name);
