@@ -61,6 +61,17 @@ public sealed class SignalingConformanceTests
         var root = document.RootElement;
         var room = new SignalingRoom();
 
+        // The three fixture-level assertions used to be `Assert.True(fixture_value)` — a
+        // comparison of the fixture against itself, true by construction and blind to the
+        // room. They are now observations accumulated off the transcript the room actually
+        // emitted, and compared against the fixture's own booleans below.
+        var registeredPeer = new Dictionary<string, ulong>(StringComparer.Ordinal);
+        var welcomes = 0;
+        var forwards = 0;
+        var rosterExcludesSelf = true;
+        var rosterSortedAscending = true;
+        var forwardedFromIsServerRegistered = true;
+
         foreach (var step in root.GetProperty("steps").EnumerateArray())
         {
             var input = step.GetProperty("input");
@@ -68,37 +79,93 @@ public sealed class SignalingConformanceTests
             var client = SignalingWire.DeserializeClient(input.GetProperty("recv").GetRawText());
             var actual = room.Handle(connection, client);
             var expected = step.GetProperty("expect").EnumerateArray().ToArray();
-            foreach (var frame in expected)
-            {
-                // The per-frame entries are an assertion block too: `to` and `frame`
-                // are read positionally below, so a sibling key would be ignored.
-                var entry = FixtureAssertions.Wrap(
-                    frame,
-                    "signaling/anti_spoof_session.json step expect entry");
-                entry.MarkConsumed("to");
-                entry.MarkConsumed("frame");
-                entry.Verify();
-            }
             Assert.Equal(expected.Length, actual.Count);
 
             for (var index = 0; index < expected.Length; index++)
             {
-                Assert.Equal(expected[index].GetProperty("to").GetString(), actual[index].To);
-                Assert.True(
-                    JsonNode.DeepEquals(
-                        JsonNode.Parse(expected[index].GetProperty("frame").GetRawText()),
-                        JsonNode.Parse(SignalingWire.Serialize(actual[index].Frame))));
+                // The per-frame entries are an assertion block too, so `to` and `frame` are
+                // compared THROUGH the tracker rather than marked consumed beside it.
+                var delivery = actual[index];
+                var entry = FixtureAssertions.Wrap(
+                    expected[index],
+                    "signaling/anti_spoof_session.json step expect entry");
+                entry.AssertKey("to", delivery.To);
+                entry.AssertKeyWith(
+                    "frame",
+                    want => Assert.True(
+                        JsonNode.DeepEquals(
+                            JsonNode.Parse(want.GetRawText()),
+                            JsonNode.Parse(SignalingWire.Serialize(delivery.Frame)))));
+                entry.Verify();
+            }
+
+            foreach (var delivery in actual)
+            {
+                if (delivery.Frame is ServerSignalingFrame.Welcome welcome
+                    && string.Equals(delivery.To, connection, StringComparison.Ordinal))
+                {
+                    registeredPeer[connection] = welcome.Peer;
+                    welcomes++;
+                    if (welcome.Peers.Contains(welcome.Peer)) rosterExcludesSelf = false;
+                    if (!welcome.Peers.SequenceEqual(welcome.Peers.OrderBy(peer => peer)))
+                        rosterSortedAscending = false;
+                }
+
+                var forwardedFrom = delivery.Frame switch
+                {
+                    ServerSignalingFrame.Offer offer => offer.From,
+                    ServerSignalingFrame.Answer answer => answer.From,
+                    ServerSignalingFrame.Ice ice => ice.From,
+                    ServerSignalingFrame.Relay relay => relay.From,
+                    _ => (ulong?)null,
+                };
+                if (forwardedFrom is not { } from) continue;
+                forwards++;
+                if (!registeredPeer.TryGetValue(connection, out var sender) || sender != from)
+                    forwardedFromIsServerRegistered = false;
             }
         }
+
+        // A vacuous observation is worse than a wrong one: with no welcome and no forward,
+        // all three flags stay true and the fixture agrees for the wrong reason.
+        Assert.True(welcomes > 0, "the transcript emitted no welcome — roster claims are vacuous");
+        Assert.True(forwards > 0, "the transcript forwarded nothing — the sender claim is vacuous");
+
+        // The canonical transcript never produces a roster with TWO entries, so no ordering
+        // can be distinguished from any other on it: reversing the room's sort leaves every
+        // frame in the transcript byte-identical. That is a property of the corpus, not
+        // something to fix by editing it, so the ordering claim is folded together with an
+        // observation from a room this runner drives itself — three peers joining in
+        // descending id order, whose roster a room that did not sort would hand back
+        // descending.
+        var ordered = new SignalingRoom();
+        IReadOnlyList<ulong> widestRoster = [];
+        foreach (var peer in (ulong[])[30, 10, 20])
+        {
+            foreach (var delivery in ordered.Handle($"c{peer}", new ClientSignalingFrame.Join(peer)))
+            {
+                if (delivery.Frame is not ServerSignalingFrame.Welcome welcome) continue;
+                if (welcome.Peers.Count <= widestRoster.Count) continue;
+                widestRoster = welcome.Peers;
+                if (welcome.Peers.Contains(welcome.Peer)) rosterExcludesSelf = false;
+                if (!welcome.Peers.SequenceEqual(welcome.Peers.OrderBy(id => id)))
+                    rosterSortedAscending = false;
+            }
+        }
+
+        Assert.True(
+            widestRoster.Count >= 2,
+            "the ordering claim needs a roster of at least two peers to discriminate");
 
         var assertions = FixtureAssertions.Of(
             root,
             "assertions",
             "signaling/anti_spoof_session.json");
-        Assert.True(assertions.GetProperty("roster_excludes_self").GetBoolean());
-        Assert.True(
-            assertions.GetProperty("forwarded_from_is_server_registered").GetBoolean());
-        Assert.True(assertions.GetProperty("roster_sorted_ascending").GetBoolean());
+        assertions.AssertKey("roster_excludes_self", rosterExcludesSelf);
+        assertions.AssertKey(
+            "forwarded_from_is_server_registered",
+            forwardedFromIsServerRegistered);
+        assertions.AssertKey("roster_sorted_ascending", rosterSortedAscending);
         assertions.Verify();
     }
 

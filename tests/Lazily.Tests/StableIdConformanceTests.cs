@@ -49,23 +49,27 @@ public sealed class StableIdConformanceTests
                 var blocks = ReadBlocks(blocksEl);
                 var keys = blocks.Select(b => StableId.KeyOf(b).ToString()).ToArray();
 
-                if (expect.TryGetProperty("key_equal", out var equalPairs))
-                {
-                    foreach (var pair in equalPairs.EnumerateArray())
+                expect.TryAssertKeyWith(
+                    "key_equal",
+                    equalPairs =>
                     {
-                        var (i, j) = (pair[0].GetInt32(), pair[1].GetInt32());
-                        Check($"key_equal[{i},{j}]", keys[i] == keys[j], true);
-                    }
-                }
+                        foreach (var pair in equalPairs.EnumerateArray())
+                        {
+                            var (i, j) = (pair[0].GetInt32(), pair[1].GetInt32());
+                            Check($"key_equal[{i},{j}]", keys[i] == keys[j], true);
+                        }
+                    });
 
-                if (expect.TryGetProperty("key_not_equal", out var notEqualPairs))
-                {
-                    foreach (var pair in notEqualPairs.EnumerateArray())
+                expect.TryAssertKeyWith(
+                    "key_not_equal",
+                    notEqualPairs =>
                     {
-                        var (i, j) = (pair[0].GetInt32(), pair[1].GetInt32());
-                        Check($"key_not_equal[{i},{j}]", keys[i] == keys[j], false);
-                    }
-                }
+                        foreach (var pair in notEqualPairs.EnumerateArray())
+                        {
+                            var (i, j) = (pair[0].GetInt32(), pair[1].GetInt32());
+                            Check($"key_not_equal[{i},{j}]", keys[i] == keys[j], false);
+                        }
+                    });
 
                 expect.Verify();
                 scenarios++;
@@ -76,41 +80,49 @@ public sealed class StableIdConformanceTests
             var oldBlocks = ReadBlocks(scenario.GetProperty("old"));
             var newBlocks = ReadBlocks(scenario.GetProperty("new"));
 
-            if (expect.TryGetProperty("matches", out var wantMatches))
+            if (expect.TryGetProperty("matches", out _))
             {
                 var alignment = StableId.Align(oldBlocks, newBlocks);
-                Check(
+                expect.AssertKeyWith(
                     "matches",
-                    string.Join(",", alignment.NewMatches.Select(m => m.ToString())),
-                    string.Join(",", wantMatches.EnumerateArray().Select(x => x.GetString()!)));
-                Check(
+                    wantMatches => Check(
+                        "matches",
+                        string.Join(",", alignment.NewMatches.Select(m => m.ToString())),
+                        string.Join(",", wantMatches.EnumerateArray().Select(x => x.GetString()!))));
+                expect.AssertKeyWith(
                     "removed",
-                    string.Join(",", alignment.Removed),
-                    string.Join(",", expect.GetProperty("removed").EnumerateArray().Select(x => x.GetInt32())));
+                    want => Check(
+                        "removed",
+                        string.Join(",", alignment.Removed),
+                        string.Join(",", want.EnumerateArray().Select(x => x.GetInt32()))));
 
-                if (expect.TryGetProperty("similarity_min", out var simMin))
-                {
-                    // Asserted as a FLOOR on the edit itself, not just on the label: a binding that
-                    // returned Edited with a similarity under the threshold would be labelling by
-                    // accident rather than by measurement.
-                    var edited = alignment.NewMatches.Where(m => m.Kind is MatchKind.Edited).ToList();
-                    Check("similarity_min.any_edited", edited.Count > 0, true);
-                    Check("similarity_min", edited.All(m => m.Similarity >= simMin.GetDouble()), true);
-                }
+                // Asserted as a FLOOR on the edit itself, not just on the label: a binding that
+                // returned Edited with a similarity under the threshold would be labelling by
+                // accident rather than by measurement.
+                expect.TryAssertKeyWith(
+                    "similarity_min",
+                    simMin =>
+                    {
+                        var edited = alignment.NewMatches.Where(m => m.Kind is MatchKind.Edited).ToList();
+                        Check("similarity_min.any_edited", edited.Count > 0, true);
+                        Check("similarity_min", edited.All(m => m.Similarity >= simMin.GetDouble()), true);
+                    });
             }
 
-            if (expect.TryGetProperty("new_key_equals_old_key", out var flowPairs))
-            {
-                var assigned = StableId.AssignStableKeys(oldBlocks, newBlocks);
-                foreach (var pair in flowPairs.EnumerateArray())
+            expect.TryAssertKeyWith(
+                "new_key_equals_old_key",
+                flowPairs =>
                 {
-                    var (ni, oi) = (pair[0].GetInt32(), pair[1].GetInt32());
-                    Check(
-                        $"new_key_equals_old_key[{ni},{oi}]",
-                        assigned[ni],
-                        StableId.KeyOf(oldBlocks[oi]).ToString());
-                }
-            }
+                    var assigned = StableId.AssignStableKeys(oldBlocks, newBlocks);
+                    foreach (var pair in flowPairs.EnumerateArray())
+                    {
+                        var (ni, oi) = (pair[0].GetInt32(), pair[1].GetInt32());
+                        Check(
+                            $"new_key_equals_old_key[{ni},{oi}]",
+                            assigned[ni],
+                            StableId.KeyOf(oldBlocks[oi]).ToString());
+                    }
+                });
 
             expect.Verify();
             scenarios++;

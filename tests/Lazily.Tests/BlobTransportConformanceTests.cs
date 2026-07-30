@@ -15,7 +15,6 @@ public sealed class BlobTransportConformanceTests
         Assert.Equal("Arena", root.GetProperty("kind").GetString());
         var input = root.GetProperty("input");
         var expected = FixtureAssertions.Of(root, "expected", "arena_blob.json");
-        var expectedDescriptor = expected.GetProperty("descriptor");
         var payload = input.GetProperty("payload")
             .EnumerateArray()
             .Select(value => value.GetByte())
@@ -26,28 +25,21 @@ public sealed class BlobTransportConformanceTests
             input.GetProperty("epoch").GetUInt64());
         var descriptor = arena.Write(payload);
 
-        Assert.Equal(expectedDescriptor.GetProperty("offset").GetUInt64(), descriptor.Offset);
-        Assert.Equal(expectedDescriptor.GetProperty("len").GetUInt64(), descriptor.Length);
-        Assert.Equal(
-            expectedDescriptor.GetProperty("generation").GetUInt64(),
-            descriptor.Generation);
-        Assert.Equal(expectedDescriptor.GetProperty("epoch").GetUInt64(), descriptor.Epoch);
-        Assert.Equal(
-            expectedDescriptor.GetProperty("checksum").GetUInt64(),
-            descriptor.Checksum);
+        expected.AssertKeyWith(
+            "descriptor",
+            want =>
+            {
+                Assert.Equal(want.GetProperty("offset").GetUInt64(), descriptor.Offset);
+                Assert.Equal(want.GetProperty("len").GetUInt64(), descriptor.Length);
+                Assert.Equal(want.GetProperty("generation").GetUInt64(), descriptor.Generation);
+                Assert.Equal(want.GetProperty("epoch").GetUInt64(), descriptor.Epoch);
+                Assert.Equal(want.GetProperty("checksum").GetUInt64(), descriptor.Checksum);
+            });
         Assert.Null(descriptor.Backend);
 
-        var expectedHeader = expected.GetProperty("header_bytes")
-            .EnumerateArray()
-            .Select(value => value.GetByte())
-            .ToArray();
-        var expectedPayload = expected.GetProperty("payload_region")
-            .EnumerateArray()
-            .Select(value => value.GetByte())
-            .ToArray();
-        Assert.Equal(expectedHeader, arena.Bytes.Span[..ShmBlobArena.HeaderLength].ToArray());
-        Assert.Equal(
-            expectedPayload,
+        expected.AssertKey("header_bytes", arena.Bytes.Span[..ShmBlobArena.HeaderLength].ToArray());
+        expected.AssertKey(
+            "payload_region",
             arena.Bytes.Span.Slice(ShmBlobArena.HeaderLength, payload.Length).ToArray());
         Assert.Equal(payload, arena.Read(descriptor));
         expected.Verify();

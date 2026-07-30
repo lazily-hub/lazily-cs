@@ -135,17 +135,21 @@ public sealed class TemporalRateWindowConformanceTests
                     invalidationName = "fired";
                     assertState = expected =>
                     {
-                        Assert.Equal(expected.GetProperty("fired").GetBoolean(), cell.HasFired);
-                        var value = expected.GetProperty("value");
-                        if (value.ValueKind == JsonValueKind.Null)
-                        {
-                            Assert.False(cell.Value.HasValue);
-                        }
-                        else
-                        {
-                            Assert.True(cell.Value.HasValue);
-                            Assert.Equal("()", value.GetString());
-                        }
+                        expected.AssertKey("fired", cell.HasFired);
+                        expected.AssertKeyWith(
+                            "value",
+                            value =>
+                            {
+                                if (value.ValueKind == JsonValueKind.Null)
+                                {
+                                    Assert.False(cell.Value.HasValue);
+                                }
+                                else
+                                {
+                                    Assert.True(cell.Value.HasValue);
+                                    Assert.Equal("()", value.GetString());
+                                }
+                            });
                     };
                     break;
                 }
@@ -156,8 +160,7 @@ public sealed class TemporalRateWindowConformanceTests
                     reactiveRead = ops => cell.CountCell.Get(ops);
                     nextFire = () => cell.NextFire;
                     invalidationName = "count";
-                    assertState = expected =>
-                        Assert.Equal(expected.GetProperty("count").GetInt64(), cell.Count);
+                    assertState = expected => expected.AssertKey("count", cell.Count);
                     break;
                 }
             case "CronCell":
@@ -170,8 +173,7 @@ public sealed class TemporalRateWindowConformanceTests
                     reactiveRead = ops => cell.CountCell.Get(ops);
                     nextFire = () => cell.NextFire;
                     invalidationName = "count";
-                    assertState = expected =>
-                        Assert.Equal(expected.GetProperty("count").GetInt64(), cell.Count);
+                    assertState = expected => expected.AssertKey("count", cell.Count);
                     break;
                 }
             case "DeadlineCell":
@@ -186,12 +188,14 @@ public sealed class TemporalRateWindowConformanceTests
                     invalidationName = "state";
                     assertState = expected =>
                     {
-                        Assert.Equal(
-                            expected.GetProperty("state").GetString() == "Expired"
-                                ? DeadlinePhase.Expired
-                                : DeadlinePhase.Live,
-                            cell.State.Phase);
-                        Assert.Equal(expected.GetProperty("value").GetString(), cell.State.Value);
+                        expected.AssertKeyWith(
+                            "state",
+                            want => Assert.Equal(
+                                want.GetString() == "Expired"
+                                    ? DeadlinePhase.Expired
+                                    : DeadlinePhase.Live,
+                                cell.State.Phase));
+                        expected.AssertKey("value", cell.State.Value);
                     };
                     break;
                 }
@@ -212,12 +216,11 @@ public sealed class TemporalRateWindowConformanceTests
             var expected = FixtureAssertions.Of(step, "expected", $"{fixture} step {index}");
             AssertInvalidation(fixture, index, expected, invalidationName, probe);
             assertState(expected);
-            if (expected.TryGetProperty("next_fire", out var expectedNext))
-            {
-                Assert.Equal(
+            expected.TryAssertKeyWith(
+                "next_fire",
+                expectedNext => Assert.Equal(
                     expectedNext.ValueKind == JsonValueKind.Null ? null : expectedNext.GetInt64(),
-                    nextFire());
-            }
+                    nextFire()));
             expected.Verify();
             _ = probe.Get();
             index++;
@@ -306,7 +309,7 @@ public sealed class TemporalRateWindowConformanceTests
             AssertOptionalString(step.GetProperty("returns"), returned);
             var expected = FixtureAssertions.Of(step, "expected", $"{fixture} step {index}");
             AssertInvalidation(fixture, index, expected, "output", probe);
-            AssertOptionalString(expected.GetProperty("output"), outputCell.Get());
+            expected.AssertKeyWith("output", want => AssertOptionalString(want, outputCell.Get()));
             expected.Verify();
             _ = probe.Get();
             index++;
@@ -394,7 +397,7 @@ public sealed class TemporalRateWindowConformanceTests
             AssertOptionalInt(step.GetProperty("returns"), returned);
             var expected = FixtureAssertions.Of(step, "expected", $"{fixture} step {index}");
             AssertInvalidation(fixture, index, expected, "output", probe);
-            AssertOptionalInt(expected.GetProperty("output"), outputCell.Get());
+            expected.AssertKeyWith("output", want => AssertOptionalInt(want, outputCell.Get()));
             expected.Verify();
             _ = probe.Get();
             index++;
@@ -418,8 +421,11 @@ public sealed class TemporalRateWindowConformanceTests
         Computed<T> probe)
     {
         var actual = !probe.Peek(out _);
-        var wanted = expected.GetProperty("invalidates").GetProperty(name).GetBoolean();
-        Assert.True(actual == wanted, $"{fixture} step {index}: invalidates.{name}");
+        expected.AssertKeyWith(
+            "invalidates",
+            want => Assert.True(
+                actual == want.GetProperty(name).GetBoolean(),
+                $"{fixture} step {index}: invalidates.{name}"));
     }
 
     private static void AssertOptionalString(JsonElement expected, Optional<string> actual)

@@ -93,46 +93,60 @@ public sealed class FamilySyncConformanceTests
 
                 foreach (var op in ops) target.Ingest(op);
 
+                var expect = FixtureAssertions.Of(
+                    scenario,
+                    "expect",
+                    $"{Corpus}/{name} scenario {scenario.GetProperty("name").GetString()}");
+
                 if (scenario.TryGetProperty("reingest", out var reingest) && reingest.GetBoolean())
                 {
                     // Idempotence, asserted on the APPLY COUNT rather than on the resulting state:
                     // a binding that re-applied every op would land on the same values, because the
                     // ops are the same. Only the count separates "converged" from "idempotent".
+                    //
+                    // This used to build a THROWAWAY tracker to read the count out of, and mark
+                    // the key consumed on the real one — so the real tracker saw a read that never
+                    // reached a comparison. The count is now asserted through the tracker that
+                    // verifies the scenario.
                     var applied = ops.Count(target.Ingest);
-                    Check(
+                    expect.AssertKeyWith(
                         "reingest_applied",
-                        applied,
-                        FixtureAssertions.Of(scenario, "expect", name)
-                            .GetProperty("reingest_applied")
-                            .GetInt32());
+                        want => Check("reingest_applied", applied, want.GetInt32()));
                 }
 
-                var expect = FixtureAssertions.Of(
-                    scenario,
-                    "expect",
-                    $"{Corpus}/{name} scenario {scenario.GetProperty("name").GetString()}");
-                expect.MarkConsumed("reingest_applied");
-
-                Check(
+                expect.AssertKeyWith(
                     "target_keys",
-                    string.Join(",", target.Keys(ns)),
-                    string.Join(",", expect.GetProperty("target_keys").EnumerateArray().Select(x => x.GetString()!)));
+                    want => Check(
+                        "target_keys",
+                        string.Join(",", target.Keys(ns)),
+                        string.Join(",", want.EnumerateArray().Select(x => x.GetString()!))));
 
-                foreach (var want in expect.GetProperty("target_values").EnumerateObject())
-                {
-                    Check(
-                        $"target_values.{want.Name}",
-                        target.TryValue(ns, want.Name, out var v) ? v : null,
-                        want.Value.GetBoolean());
-                }
+                expect.AssertKeyWith(
+                    "target_values",
+                    wants =>
+                    {
+                        foreach (var want in wants.EnumerateObject())
+                        {
+                            Check(
+                                $"target_values.{want.Name}",
+                                target.TryValue(ns, want.Name, out var v) ? v : null,
+                                want.Value.GetBoolean());
+                        }
+                    });
 
-                Check("target_present_count", target.PresentCount(ns), expect.GetProperty("target_present_count").GetInt32());
-                Check("target_count_true", observed.Get(), expect.GetProperty("target_count_true").GetInt32());
+                expect.AssertKeyWith(
+                    "target_present_count",
+                    want => Check("target_present_count", target.PresentCount(ns), want.GetInt32()));
+                expect.AssertKeyWith(
+                    "target_count_true",
+                    want => Check("target_count_true", observed.Get(), want.GetInt32()));
 
-                if (expect.TryGetProperty("target_epoch_bumped", out var bumped))
-                {
-                    Check("target_epoch_bumped", target.MembershipEpoch.Peek() > epochBefore, bumped.GetBoolean());
-                }
+                expect.TryAssertKeyWith(
+                    "target_epoch_bumped",
+                    bumped => Check(
+                        "target_epoch_bumped",
+                        target.MembershipEpoch.Peek() > epochBefore,
+                        bumped.GetBoolean()));
 
                 // The aggregate must be a real derived: it recomputed because membership changed,
                 // not because the assertion asked for it.

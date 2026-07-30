@@ -625,19 +625,22 @@ public sealed class QueueFamilyConformanceTests
                 $"{flavor.Name} {Corpus}/{fixture} step {index}");
 
             // Invalidation FIRST — reading a reader revalidates it.
-            if (expected.TryGetProperty("invalidates", out var invalidates))
-            {
-                foreach (var probe in invalidates.EnumerateObject())
+            var at = index;
+            expected.TryAssertKeyWith(
+                "invalidates",
+                invalidates =>
                 {
-                    var wasInvalidated = !q.Probe(probe.Name).StillValid();
-                    Assert.True(
-                        wasInvalidated == probe.Value.GetBoolean(),
-                        $"{flavor.Name} {fixture} step {index}: invalidates.{probe.Name} — expected " +
-                        $"{probe.Value.GetBoolean()}, got {wasInvalidated}. Reader kinds are " +
-                        "independent: a push onto a non-empty queue must not touch head.");
-                    checks++;
-                }
-            }
+                    foreach (var probe in invalidates.EnumerateObject())
+                    {
+                        var wasInvalidated = !q.Probe(probe.Name).StillValid();
+                        Assert.True(
+                            wasInvalidated == probe.Value.GetBoolean(),
+                            $"{flavor.Name} {fixture} step {at}: invalidates.{probe.Name} — expected " +
+                            $"{probe.Value.GetBoolean()}, got {wasInvalidated}. Reader kinds are " +
+                            "independent: a push onto a non-empty queue must not touch head.");
+                        checks++;
+                    }
+                });
 
             if (step.TryGetProperty("returns", out var wantReturn) &&
                 wantReturn.ValueKind == JsonValueKind.String)
@@ -645,29 +648,23 @@ public sealed class QueueFamilyConformanceTests
                 Assert.Equal(wantReturn.GetString(), returned);
             }
 
-            if (expected.TryGetProperty("len", out var wantLen))
-                Assert.Equal(wantLen.GetInt32(), q.Len());
-            if (expected.TryGetProperty("is_empty", out var wantEmpty))
-                Assert.Equal(wantEmpty.GetBoolean(), q.IsEmpty());
-            if (expected.TryGetProperty("is_full", out var wantFull))
-                Assert.Equal(wantFull.GetBoolean(), q.IsFull());
-            if (expected.TryGetProperty("closed", out var wantClosed))
-                Assert.Equal(wantClosed.GetBoolean(), q.IsClosed());
-            if (expected.TryGetProperty("head", out var wantHead))
-            {
-                Assert.Equal(
-                    wantHead.ValueKind == JsonValueKind.Null ? null : wantHead.GetString(),
-                    q.Head());
-            }
+            expected.TryAssertKeyWith("len", want => Assert.Equal(want.GetInt32(), q.Len()));
+            expected.TryAssertKeyWith("is_empty", want => Assert.Equal(want.GetBoolean(), q.IsEmpty()));
+            expected.TryAssertKeyWith("is_full", want => Assert.Equal(want.GetBoolean(), q.IsFull()));
+            expected.TryAssertKeyWith("closed", want => Assert.Equal(want.GetBoolean(), q.IsClosed()));
+            expected.TryAssertKeyWith(
+                "head",
+                want => Assert.Equal(
+                    want.ValueKind == JsonValueKind.Null ? null : want.GetString(),
+                    q.Head()));
 
             // `elements` pins the whole FIFO body, which the scalar reads above cannot:
             // `len` plus `head` is satisfied by a queue that reordered its tail.
-            if (expected.TryGetProperty("elements", out var wantElements))
-            {
-                Assert.Equal(
-                    wantElements.EnumerateArray().Select(value => value.GetString()),
-                    q.Elements());
-            }
+            expected.TryAssertKeyWith(
+                "elements",
+                want => Assert.Equal(
+                    want.EnumerateArray().Select(value => value.GetString()),
+                    q.Elements()));
 
             expected.Verify();
             index++;
@@ -736,36 +733,44 @@ public sealed class QueueFamilyConformanceTests
             }
 
             // Invalidation FIRST — reading a reader revalidates it.
-            foreach (var probe in invalidates.EnumerateObject())
-            {
-                var handle = before[probe.Name] ?? topic.Probe(probe.Name);
-                Assert.True(
-                    handle is not null,
-                    $"{flavor.Name} {fixture} step {index}: no reader for '{probe.Name}'");
-                var invalidated = !handle!.StillValid();
-                Assert.True(
-                    invalidated == probe.Value.GetBoolean(),
-                    $"{flavor.Name} {fixture} step {index}: invalidates.{probe.Name} — expected " +
-                    $"{probe.Value.GetBoolean()}, got {invalidated}. Cursors are independent: " +
-                    "advancing one subscriber must not wake another.");
-                checks++;
-            }
-
-            Assert.Equal(expected.GetProperty("base_offset").GetInt64(), topic.BaseOffset);
-            Assert.Equal(
-                expected.GetProperty("elements").EnumerateArray().Select(e => e.GetString()!).ToArray(),
-                topic.Elements());
-            AssertSubscriptions(flavor, fixture, index, topic, expected.GetProperty("subscriptions"));
-
-            if (expected.TryGetProperty("reads", out var reads))
-            {
-                foreach (var read in reads.EnumerateObject())
+            var at = index;
+            expected.AssertKeyWith(
+                "invalidates",
+                want =>
                 {
-                    Assert.Equal(
-                        read.Value.EnumerateArray().Select(e => e.GetString()!).ToArray(),
-                        topic.ReadStream(read.Name));
-                }
-            }
+                    foreach (var probe in want.EnumerateObject())
+                    {
+                        var handle = before[probe.Name] ?? topic.Probe(probe.Name);
+                        Assert.True(
+                            handle is not null,
+                            $"{flavor.Name} {fixture} step {at}: no reader for '{probe.Name}'");
+                        var invalidated = !handle!.StillValid();
+                        Assert.True(
+                            invalidated == probe.Value.GetBoolean(),
+                            $"{flavor.Name} {fixture} step {at}: invalidates.{probe.Name} — expected " +
+                            $"{probe.Value.GetBoolean()}, got {invalidated}. Cursors are independent: " +
+                            "advancing one subscriber must not wake another.");
+                        checks++;
+                    }
+                });
+
+            expected.AssertKey("base_offset", topic.BaseOffset);
+            expected.AssertKey("elements", topic.Elements());
+            expected.AssertKeyWith(
+                "subscriptions",
+                want => AssertSubscriptions(flavor, fixture, at, topic, want));
+
+            expected.TryAssertKeyWith(
+                "reads",
+                reads =>
+                {
+                    foreach (var read in reads.EnumerateObject())
+                    {
+                        Assert.Equal(
+                            read.Value.EnumerateArray().Select(e => e.GetString()!).ToArray(),
+                            topic.ReadStream(read.Name));
+                    }
+                });
 
             AssertReturns(flavor, fixture, index, step, returned);
 
@@ -835,26 +840,42 @@ public sealed class QueueFamilyConformanceTests
                 $"{flavor.Name} {Corpus}/{fixture} step {index}");
 
             // Invalidation FIRST — reading a reader revalidates it.
-            foreach (var probe in expected.GetProperty("invalidates").EnumerateObject())
-            {
-                var invalidated = !queue.Probe(probe.Name).StillValid();
-                Assert.True(
-                    invalidated == probe.Value.GetBoolean(),
-                    $"{flavor.Name} {fixture} step {index}: invalidates.{probe.Name} — expected " +
-                    $"{probe.Value.GetBoolean()}, got {invalidated}");
-                checks++;
-            }
+            var at = index;
+            expected.AssertKeyWith(
+                "invalidates",
+                want =>
+                {
+                    foreach (var probe in want.EnumerateObject())
+                    {
+                        var invalidated = !queue.Probe(probe.Name).StillValid();
+                        Assert.True(
+                            invalidated == probe.Value.GetBoolean(),
+                            $"{flavor.Name} {fixture} step {at}: invalidates.{probe.Name} — expected " +
+                            $"{probe.Value.GetBoolean()}, got {invalidated}");
+                        checks++;
+                    }
+                });
 
             AssertReturns(flavor, fixture, index, step, returned);
-            AssertPending(flavor, fixture, index, queue, expected.GetProperty("pending"));
-            AssertInFlight(flavor, fixture, index, queue, expected.GetProperty("in_flight"));
-            AssertDeadLetters(flavor, fixture, index, queue, expected.GetProperty("dead_letters"));
+            expected.AssertKeyWith(
+                "pending",
+                want => AssertPending(flavor, fixture, at, queue, want));
+            expected.AssertKeyWith(
+                "in_flight",
+                want => AssertInFlight(flavor, fixture, at, queue, want));
+            expected.AssertKeyWith(
+                "dead_letters",
+                want => AssertDeadLetters(flavor, fixture, at, queue, want));
 
-            var wantReads = expected.GetProperty("reads");
-            Assert.Equal(wantReads.GetProperty("pending_len").GetInt32(), queue.PendingLen());
-            Assert.Equal(wantReads.GetProperty("is_empty").GetBoolean(), queue.IsEmpty());
-            Assert.Equal(wantReads.GetProperty("in_flight_len").GetInt32(), queue.InFlightLen());
-            Assert.Equal(wantReads.GetProperty("dead_letter_len").GetInt32(), queue.DeadLetterLen());
+            expected.AssertKeyWith(
+                "reads",
+                wantReads =>
+                {
+                    Assert.Equal(wantReads.GetProperty("pending_len").GetInt32(), queue.PendingLen());
+                    Assert.Equal(wantReads.GetProperty("is_empty").GetBoolean(), queue.IsEmpty());
+                    Assert.Equal(wantReads.GetProperty("in_flight_len").GetInt32(), queue.InFlightLen());
+                    Assert.Equal(wantReads.GetProperty("dead_letter_len").GetInt32(), queue.DeadLetterLen());
+                });
 
             expected.Verify();
             index++;

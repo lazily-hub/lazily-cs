@@ -86,15 +86,18 @@ public sealed class ClusterConformanceTests
                 "expected",
                 $"membership/{MembershipFixtures[0]} step {steps}");
             AssertInvalidation(expected, "invalidates", probe);
-            Assert.Equal(
-                expected.GetProperty("alive_set").EnumerateArray().Select(value => value.GetInt64()),
-                cell.PeerSet);
-            foreach (var state in expected.GetProperty("states").EnumerateObject())
-            {
-                Assert.Equal(
-                    Enum.Parse<PeerState>(state.Value.GetString()!),
-                    cell.State(long.Parse(state.Name, System.Globalization.CultureInfo.InvariantCulture)));
-            }
+            expected.AssertKey("alive_set", cell.PeerSet);
+            expected.AssertKeyWith(
+                "states",
+                want =>
+                {
+                    foreach (var state in want.EnumerateObject())
+                    {
+                        Assert.Equal(
+                            Enum.Parse<PeerState>(state.Value.GetString()!),
+                            cell.State(long.Parse(state.Name, System.Globalization.CultureInfo.InvariantCulture)));
+                    }
+                });
             _ = probe.Get();
             expected.Verify();
             steps++;
@@ -225,9 +228,9 @@ public sealed class ClusterConformanceTests
             }
             var expected = FixtureAssertions.Of(step, "expected", $"{fixture} step {index}");
             AssertInvalidation(expected, "holder", probe);
-            AssertNullableLong(expected.GetProperty("holder"), cell.Holder(now));
-            Assert.Equal(expected.GetProperty("held").GetBoolean(), cell.IsHeld(now));
-            Assert.Equal(expected.GetProperty("fence").GetInt64(), cell.Fence);
+            expected.AssertKeyWith("holder", want => AssertNullableLong(want, cell.Holder(now)));
+            expected.AssertKey("held", cell.IsHeld(now));
+            expected.AssertKey("fence", cell.Fence);
             _ = probe.Get();
             expected.Verify();
             index++;
@@ -258,8 +261,12 @@ public sealed class ClusterConformanceTests
             };
             var expected = FixtureAssertions.Of(step, "expected", $"{fixture} step {index}");
             AssertInvalidation(expected, "current_leader", probe);
-            AssertNullableLong(expected.GetProperty("current_leader"), cell.CurrentLeader(now));
-            Assert.Equal(Enum.Parse<LeaderRole>(expected.GetProperty("role").GetString()!), cell.Role(now));
+            expected.AssertKeyWith(
+                "current_leader",
+                want => AssertNullableLong(want, cell.CurrentLeader(now)));
+            expected.AssertKeyWith(
+                "role",
+                want => Assert.Equal(Enum.Parse<LeaderRole>(want.GetString()!), cell.Role(now)));
             _ = probe.Get();
             expected.Verify();
             index++;
@@ -299,8 +306,8 @@ public sealed class ClusterConformanceTests
             }
             var expected = FixtureAssertions.Of(step, "expected", $"{fixture} step {index}");
             AssertInvalidation(expected, "is_locked", probe);
-            Assert.Equal(expected.GetProperty("is_locked").GetBoolean(), cell.IsLocked(now));
-            Assert.Equal(expected.GetProperty("fence").GetInt64(), cell.Fence);
+            expected.AssertKey("is_locked", cell.IsLocked(now));
+            expected.AssertKey("fence", cell.Fence);
             _ = probe.Get();
             expected.Verify();
             index++;
@@ -325,8 +332,8 @@ public sealed class ClusterConformanceTests
                 cell.Arrive(operation.GetProperty("peer").GetInt64()));
             var expected = FixtureAssertions.Of(step, "expected", $"{fixture} step {index}");
             AssertInvalidation(expected, "is_open", probe);
-            Assert.Equal(expected.GetProperty("votes").GetInt32(), cell.Count);
-            Assert.Equal(expected.GetProperty("is_open").GetBoolean(), cell.IsOpen);
+            expected.AssertKey("votes", cell.Count);
+            expected.AssertKey("is_open", cell.IsOpen);
             _ = probe.Get();
             expected.Verify();
             index++;
@@ -355,7 +362,7 @@ public sealed class ClusterConformanceTests
             }
             var expected = FixtureAssertions.Of(step, "expected", $"{fixture} step {index}");
             AssertInvalidation(expected, "permits_available", probe);
-            Assert.Equal(expected.GetProperty("permits_available").GetInt32(), cell.PermitsAvailable);
+            expected.AssertKey("permits_available", cell.PermitsAvailable);
             _ = probe.Get();
             expected.Verify();
             index++;
@@ -386,7 +393,7 @@ public sealed class ClusterConformanceTests
             }
             var expected = FixtureAssertions.Of(step, "expected", $"{fixture} step {index}");
             AssertInvalidation(expected, "value", probe);
-            AssertOptionalString(expected.GetProperty("value"), cell.Value);
+            expected.AssertKeyWith("value", want => AssertOptionalString(want, cell.Value));
             _ = probe.Get();
             expected.Verify();
             index++;
@@ -424,7 +431,7 @@ public sealed class ClusterConformanceTests
             }
             var expected = FixtureAssertions.Of(step, "expected", $"{fixture} step {index}");
             AssertInvalidation(expected, "present", probe);
-            AssertLongStringMap(expected.GetProperty("present"), cell.Present);
+            expected.AssertKeyWith("present", want => AssertLongStringMap(want, cell.Present));
             _ = probe.Get();
             expected.Verify();
             index++;
@@ -458,7 +465,7 @@ public sealed class ClusterConformanceTests
             }
             var expected = FixtureAssertions.Of(step, "expected", $"{fixture} step {index}");
             AssertInvalidation(expected, "present", probe);
-            AssertLongStringMap(expected.GetProperty("present"), cell.Present);
+            expected.AssertKeyWith("present", want => AssertLongStringMap(want, cell.Present));
             _ = probe.Get();
             expected.Verify();
             index++;
@@ -488,9 +495,9 @@ public sealed class ClusterConformanceTests
                 cell.Record(operation.GetProperty("success").GetBoolean(), now);
             var expected = FixtureAssertions.Of(step, "expected", $"{fixture} step {index}");
             AssertInvalidation(expected, "state", probe);
-            Assert.Equal(
-                Enum.Parse<BreakerState>(expected.GetProperty("state").GetString()!),
-                cell.State);
+            expected.AssertKeyWith(
+                "state",
+                want => Assert.Equal(Enum.Parse<BreakerState>(want.GetString()!), cell.State));
             _ = probe.Get();
             expected.Verify();
             index++;
@@ -514,7 +521,7 @@ public sealed class ClusterConformanceTests
             Assert.Equal(step.GetProperty("returns").GetInt64(), cell.NextDelay());
             var expected = FixtureAssertions.Of(step, "expected", $"{fixture} step {index}");
             AssertInvalidation(expected, "delay", probe);
-            Assert.Equal(expected.GetProperty("delay").GetInt64(), cell.Delay);
+            expected.AssertKey("delay", cell.Delay);
             _ = probe.Get();
             expected.Verify();
             index++;
@@ -543,7 +550,7 @@ public sealed class ClusterConformanceTests
             }
             var expected = FixtureAssertions.Of(step, "expected", $"{fixture} step {index}");
             AssertInvalidation(expected, "in_use", probe);
-            Assert.Equal(expected.GetProperty("in_use").GetInt32(), cell.InUse);
+            expected.AssertKey("in_use", cell.InUse);
             _ = probe.Get();
             expected.Verify();
             index++;
@@ -568,7 +575,7 @@ public sealed class ClusterConformanceTests
             Assert.Equal(step.GetProperty("returns").GetBoolean(), returned);
             var expected = FixtureAssertions.Of(step, "expected", $"{fixture} step {index}");
             AssertInvalidation(expected, "is_timed_out", probe);
-            Assert.Equal(expected.GetProperty("is_timed_out").GetBoolean(), cell.IsTimedOut);
+            expected.AssertKey("is_timed_out", cell.IsTimedOut);
             _ = probe.Get();
             expected.Verify();
             index++;
@@ -592,9 +599,9 @@ public sealed class ClusterConformanceTests
                 operation.GetProperty("critical").GetBoolean());
             var expected = FixtureAssertions.Of(step, "expected", $"{fixture} step {index}");
             AssertInvalidation(expected, "health", probe);
-            Assert.Equal(
-                Enum.Parse<HealthState>(expected.GetProperty("health").GetString()!),
-                cell.Health);
+            expected.AssertKeyWith(
+                "health",
+                want => Assert.Equal(Enum.Parse<HealthState>(want.GetString()!), cell.Health));
             _ = probe.Get();
             expected.Verify();
             index++;
@@ -617,7 +624,7 @@ public sealed class ClusterConformanceTests
                 operation.GetProperty("ready").GetBoolean());
             var expected = FixtureAssertions.Of(step, "expected", $"{fixture} step {index}");
             AssertInvalidation(expected, "ready", probe);
-            Assert.Equal(expected.GetProperty("ready").GetBoolean(), cell.Ready);
+            expected.AssertKey("ready", cell.Ready);
             _ = probe.Get();
             expected.Verify();
             index++;
@@ -657,7 +664,7 @@ public sealed class ClusterConformanceTests
             }
             var expected = FixtureAssertions.Of(step, "expected", $"{fixture} step {index}");
             AssertInvalidation(expected, "discovery", probe);
-            AssertStringMap(expected.GetProperty("discovery"), cell.Discovery);
+            expected.AssertKeyWith("discovery", want => AssertStringMap(want, cell.Discovery));
             _ = probe.Get();
             expected.Verify();
             index++;
@@ -691,7 +698,7 @@ public sealed class ClusterConformanceTests
             }
             var expected = FixtureAssertions.Of(step, "expected", $"{fixture} step {index}");
             AssertInvalidation(expected, "projection", probe);
-            AssertStringMap(expected.GetProperty("projection"), cell.Projection);
+            expected.AssertKeyWith("projection", want => AssertStringMap(want, cell.Projection));
             _ = probe.Get();
             expected.Verify();
             index++;
@@ -714,11 +721,13 @@ public sealed class ClusterConformanceTests
         Computed<T> probe)
     {
         var actual = !probe.Peek(out _);
-        var invalidates = expected.GetProperty("invalidates");
-        var wanted = invalidates.ValueKind is JsonValueKind.True or JsonValueKind.False
-            ? invalidates.GetBoolean()
-            : invalidates.GetProperty(projection).GetBoolean();
-        Assert.Equal(wanted, actual);
+        expected.AssertKeyWith(
+            "invalidates",
+            invalidates => Assert.Equal(
+                invalidates.ValueKind is JsonValueKind.True or JsonValueKind.False
+                    ? invalidates.GetBoolean()
+                    : invalidates.GetProperty(projection).GetBoolean(),
+                actual));
     }
 
     private static void AssertNullableLong(JsonElement expected, long? actual)

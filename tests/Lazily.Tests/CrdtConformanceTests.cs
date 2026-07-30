@@ -285,75 +285,82 @@ public sealed class CrdtConformanceTests
     private static void AssertTextExpectations(
         IReadOnlyDictionary<string, TextCrdt> replicas,
         FixtureAssertions expect,
-        ref int assertions)
+        ref int assertionsOut)
     {
-        if (expect.TryGetProperty("texts_equal", out var equalGroups))
-        {
-            foreach (var group in equalGroups.EnumerateArray())
+        var assertions = 0;
+
+        expect.TryAssertKeyWith(
+            "texts_equal",
+            equalGroups =>
             {
-                var names = group.EnumerateArray().Select(item => item.GetString()!).ToArray();
-                var convergedText = replicas[names[0]].Text;
-                foreach (var name in names.Skip(1))
+                foreach (var group in equalGroups.EnumerateArray())
+                {
+                    var names = group.EnumerateArray().Select(item => item.GetString()!).ToArray();
+                    var convergedText = replicas[names[0]].Text;
+                    foreach (var name in names.Skip(1))
+                    {
+                        assertions++;
+                        Assert.Equal(convergedText, replicas[name].Text);
+                    }
+                }
+            });
+
+        if (expect.TryAssertKeyWith("text", text => Assert.Equal(text.GetString(), replicas["a"].Text)))
+            assertions++;
+
+        expect.TryAssertKeyWith(
+            "text_on",
+            perReplica =>
+            {
+                foreach (var property in perReplica.EnumerateObject())
                 {
                     assertions++;
-                    Assert.Equal(convergedText, replicas[name].Text);
+                    Assert.Equal(property.Value.GetString(), replicas[property.Name].Text);
                 }
-            }
-        }
+            });
 
-        if (expect.TryGetProperty("text", out var text))
-        {
+        if (expect.TryAssertKeyWith("len", length => Assert.Equal(length.GetInt32(), replicas["a"].Length)))
             assertions++;
-            Assert.Equal(text.GetString(), replicas["a"].Text);
-        }
 
-        if (expect.TryGetProperty("text_on", out var perReplica))
-        {
-            foreach (var property in perReplica.EnumerateObject())
+        if (expect.TryAssertKeyWith(
+                "tombstone_count",
+                tombstones => Assert.Equal(tombstones.GetInt32(), replicas["a"].TombstoneCount)))
+            assertions++;
+
+        if (expect.TryAssertKeyWith(
+                "a_starts_with",
+                startsWith => Assert.StartsWith(
+                    startsWith.GetString()!,
+                    replicas["a"].Text,
+                    StringComparison.Ordinal)))
+            assertions++;
+
+        if (expect.TryAssertKeyWith(
+                "a_ends_with",
+                endsWith => Assert.EndsWith(
+                    endsWith.GetString()!,
+                    replicas["a"].Text,
+                    StringComparison.Ordinal)))
+            assertions++;
+
+        expect.TryAssertKeyWith(
+            "version_vector_on",
+            vectors =>
             {
-                assertions++;
-                Assert.Equal(property.Value.GetString(), replicas[property.Name].Text);
-            }
-        }
+                foreach (var property in vectors.EnumerateObject())
+                {
+                    var actual = replicas[property.Name].VersionVector();
+                    var expected = property.Value
+                        .EnumerateObject()
+                        .ToDictionary(
+                            item => long.Parse(item.Name, System.Globalization.CultureInfo.InvariantCulture),
+                            item => item.Value.GetInt64());
+                    assertions++;
+                    Assert.Equal(expected.OrderBy(item => item.Key), actual.OrderBy(item => item.Key));
+                }
+            });
 
-        if (expect.TryGetProperty("len", out var length))
-        {
-            assertions++;
-            Assert.Equal(length.GetInt32(), replicas["a"].Length);
-        }
-
-        if (expect.TryGetProperty("tombstone_count", out var tombstones))
-        {
-            assertions++;
-            Assert.Equal(tombstones.GetInt32(), replicas["a"].TombstoneCount);
-        }
-
-        if (expect.TryGetProperty("a_starts_with", out var startsWith))
-        {
-            assertions++;
-            Assert.StartsWith(startsWith.GetString()!, replicas["a"].Text, StringComparison.Ordinal);
-        }
-
-        if (expect.TryGetProperty("a_ends_with", out var endsWith))
-        {
-            assertions++;
-            Assert.EndsWith(endsWith.GetString()!, replicas["a"].Text, StringComparison.Ordinal);
-        }
-
-        if (expect.TryGetProperty("version_vector_on", out var vectors))
-        {
-            foreach (var property in vectors.EnumerateObject())
-            {
-                var actual = replicas[property.Name].VersionVector();
-                var expected = property.Value
-                    .EnumerateObject()
-                    .ToDictionary(
-                        item => long.Parse(item.Name, System.Globalization.CultureInfo.InvariantCulture),
-                        item => item.Value.GetInt64());
-                assertions++;
-                Assert.Equal(expected.OrderBy(item => item.Key), actual.OrderBy(item => item.Key));
-            }
-        }
+        assertionsOut += assertions;
     }
 
     private static Dictionary<string, SeqCrdt<string, string>> SeedSequence(JsonElement scenario)
@@ -453,92 +460,99 @@ public sealed class CrdtConformanceTests
     private static void AssertSequenceExpectations(
         IReadOnlyDictionary<string, SeqCrdt<string, string>> replicas,
         FixtureAssertions expect,
-        ref int assertions)
+        ref int assertionsOut)
     {
-        if (expect.TryGetProperty("order", out var order))
-            AssertOrder(replicas["a"], order, ref assertions);
+        var assertions = 0;
 
-        if (expect.TryGetProperty("order_on", out var orderOn))
-        {
-            foreach (var property in orderOn.EnumerateObject())
-                AssertOrder(replicas[property.Name], property.Value, ref assertions);
-        }
+        expect.TryAssertKeyWith("order", order => assertions += AssertOrder(replicas["a"], order));
 
-        if (expect.TryGetProperty("orders_equal", out var groups))
-        {
-            foreach (var group in groups.EnumerateArray())
+        expect.TryAssertKeyWith(
+            "order_on",
+            orderOn =>
             {
-                var names = group.EnumerateArray().Select(item => item.GetString()!).ToArray();
-                var first = replicas[names[0]].Order();
-                foreach (var name in names.Skip(1))
+                foreach (var property in orderOn.EnumerateObject())
+                    assertions += AssertOrder(replicas[property.Name], property.Value);
+            });
+
+        expect.TryAssertKeyWith(
+            "orders_equal",
+            groups =>
+            {
+                foreach (var group in groups.EnumerateArray())
                 {
-                    assertions++;
-                    Assert.Equal(first, replicas[name].Order());
+                    var names = group.EnumerateArray().Select(item => item.GetString()!).ToArray();
+                    var first = replicas[names[0]].Order();
+                    foreach (var name in names.Skip(1))
+                    {
+                        assertions++;
+                        Assert.Equal(first, replicas[name].Order());
+                    }
                 }
-            }
-        }
+            });
 
-        if (expect.TryGetProperty("get", out var get))
-            AssertGets(replicas["a"], get, ref assertions);
+        expect.TryAssertKeyWith("get", get => assertions += AssertGets(replicas["a"], get));
 
-        if (expect.TryGetProperty("get_on", out var getOn))
-        {
-            foreach (var property in getOn.EnumerateObject())
-                AssertGets(replicas[property.Name], property.Value, ref assertions);
-        }
+        expect.TryAssertKeyWith(
+            "get_on",
+            getOn =>
+            {
+                foreach (var property in getOn.EnumerateObject())
+                    assertions += AssertGets(replicas[property.Name], property.Value);
+            });
 
-        if (expect.TryGetProperty("len", out var length))
-        {
-            var target = ConvergedTarget(expect);
+        var convergedTarget = ConvergedTarget(expect);
+
+        if (expect.TryAssertKeyWith(
+                "len",
+                length => Assert.Equal(length.GetInt32(), replicas[convergedTarget].Count)))
             assertions++;
-            Assert.Equal(length.GetInt32(), replicas[target].Count);
-        }
 
-        if (expect.TryGetProperty("contains_all", out var contains))
-        {
-            var target = ConvergedTarget(expect);
-            foreach (var id in contains.EnumerateArray())
+        expect.TryAssertKeyWith(
+            "contains_all",
+            contains =>
             {
-                assertions++;
-                Assert.True(replicas[target].Contains(id.GetString()!));
-            }
-        }
-
-        if (expect.TryGetProperty("not_contains_on", out var absentOn))
-        {
-            foreach (var property in absentOn.EnumerateObject())
-            {
-                foreach (var id in property.Value.EnumerateArray())
+                foreach (var id in contains.EnumerateArray())
                 {
                     assertions++;
-                    Assert.False(replicas[property.Name].Contains(id.GetString()!));
+                    Assert.True(replicas[convergedTarget].Contains(id.GetString()!));
                 }
-            }
-        }
+            });
+
+        expect.TryAssertKeyWith(
+            "not_contains_on",
+            absentOn =>
+            {
+                foreach (var property in absentOn.EnumerateObject())
+                {
+                    foreach (var id in property.Value.EnumerateArray())
+                    {
+                        assertions++;
+                        Assert.False(replicas[property.Name].Contains(id.GetString()!));
+                    }
+                }
+            });
+
+        assertionsOut += assertions;
     }
 
-    private static void AssertOrder(
-        SeqCrdt<string, string> sequence,
-        JsonElement expected,
-        ref int assertions)
+    private static int AssertOrder(SeqCrdt<string, string> sequence, JsonElement expected)
     {
-        assertions++;
         Assert.Equal(
             expected.EnumerateArray().Select(item => item.GetString()!).ToArray(),
             sequence.Order());
+        return 1;
     }
 
-    private static void AssertGets(
-        SeqCrdt<string, string> sequence,
-        JsonElement expected,
-        ref int assertions)
+    private static int AssertGets(SeqCrdt<string, string> sequence, JsonElement expected)
     {
+        var made = 0;
         foreach (var property in expected.EnumerateObject())
         {
-            assertions++;
+            made++;
             Assert.True(sequence.TryGetValue(property.Name, out var actual));
             Assert.Equal(SequenceValue(property.Value), actual);
         }
+        return made;
     }
 
     private static string SequenceValue(JsonElement value) =>
@@ -586,23 +600,19 @@ public sealed class CrdtConformanceTests
             scenario,
             "expect",
             $"crdt-tree/algebra.json scenario {scenario.GetProperty("name").GetString()}");
-        if (expected.GetProperty("texts_equal").GetBoolean())
-        {
-            foreach (var result in merged.Skip(1))
-            {
-                assertions++;
-                Assert.Equal(merged[0].Text, result.Text);
-            }
-        }
-        if (expected.GetProperty("version_vectors_equal").GetBoolean())
-        {
-            var vector = merged[0].VersionVector().OrderBy(pair => pair.Key).ToArray();
-            foreach (var result in merged.Skip(1))
-            {
-                assertions++;
-                Assert.Equal(vector, result.VersionVector().OrderBy(pair => pair.Key));
-            }
-        }
+        // Both keys used to GATE their loop and never be asserted, so a fixture flipped
+        // to false would have retired the check rather than failing it. Each is now
+        // compared against what the merges actually produced.
+        var textsEqual = merged.Skip(1).All(result => result.Text == merged[0].Text);
+        expected.AssertKey("texts_equal", textsEqual);
+        assertions += merged.Count - 1;
+
+        var vector = merged[0].VersionVector().OrderBy(pair => pair.Key).ToArray();
+        var vectorsEqual = merged
+            .Skip(1)
+            .All(result => result.VersionVector().OrderBy(pair => pair.Key).SequenceEqual(vector));
+        expected.AssertKey("version_vectors_equal", vectorsEqual);
+        assertions += merged.Count - 1;
 
         expected.Verify();
     }

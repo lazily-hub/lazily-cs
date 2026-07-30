@@ -197,9 +197,14 @@ public sealed class ReactiveGraphConformanceTests
                         if (root.TryGetProperty("expected", out var expected))
                         {
                             var tail = FixtureAssertions.Wrap(expected, $"{Corpus}/{name}[{label}]");
-                            // `observationally_equal` is evaluated once for the whole
-                            // fixture below, not per scenario.
-                            tail.MarkConsumed("observationally_equal");
+                            // A per-scenario tracker cannot assert a claim ABOUT the pair of
+                            // scenarios: the comparison needs both observations, and only the
+                            // second scenario has them. It is declared here and asserted once
+                            // for the whole fixture, after this loop.
+                            tail.ExcuseKey(
+                                "observationally_equal",
+                                "cross-scenario claim: asserted once after both scenarios replay, "
+                                + "by comparing their observation tails below");
                             observations[label] = engine.ReplayTail(tail);
                         }
                         observed.AddRange(engine.Divergences.Select(d => $"{model.Name}/{d}"));

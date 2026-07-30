@@ -167,90 +167,96 @@ public sealed class CollectionsFamilyConformanceTests
                 }
 
                 var gotOrder = map.PresentKeys().ToList();
-                Assert.Equal(
-                    expected.GetProperty("order").EnumerateArray().Select(k => k.GetString()!).ToList(),
-                    gotOrder);
+                expected.AssertKey("order", gotOrder);
 
-                if (expected.TryGetProperty("values", out var wantValues))
-                {
-                    foreach (var want in wantValues.EnumerateObject())
+                expected.TryAssertKeyWith(
+                    "values",
+                    wantValues =>
                     {
-                        Assert.True(map.TryGetHandle(want.Name, out var h), $"{where}: {want.Name} absent");
-                        Assert.Equal(want.Value.GetInt32(), ctx.Get(h));
-                    }
-                }
+                        foreach (var want in wantValues.EnumerateObject())
+                        {
+                            Assert.True(map.TryGetHandle(want.Name, out var h), $"{where}: {want.Name} absent");
+                            Assert.Equal(want.Value.GetInt32(), ctx.Get(h));
+                        }
+                    });
 
                 // The invalidation matrix, read from expected.invalidates - where
                 // the fixtures actually nest it. lazily-rs read it off the step
                 // instead, so its assertion never ran once.
                 Assert.True(
-                    expected.TryGetProperty("invalidates", out var invalidates),
+                    expected.TryGetProperty("invalidates", out _),
                     $"{where}: expected.invalidates is missing - the matrix is the contract");
                 matrices++;
 
-                var dirty = invalidates.TryGetProperty("value", out var dv)
-                    ? dv.EnumerateArray().Select(k => k.GetString()!).ToHashSet()
-                    : [];
-                var survivors = gotOrder.ToHashSet();
-                foreach (var (key, reader) in valueReaders)
-                {
-                    if (!survivors.Contains(key)) continue; // removed: nothing left to read
-                    ctx.Get(reader);
-                    var recomputed = valueCounts[key] != valueBase[key];
-                    if (dirty.Contains(key))
+                expected.AssertKeyWith(
+                    "invalidates",
+                    invalidates =>
                     {
-                        Assert.True(recomputed, $"{where}: value reader for {key} should have been invalidated");
-                    }
-                    else
-                    {
-                        Assert.False(
-                            recomputed,
-                            $"{where}: value reader for {key} should have stayed cached - " +
-                            "per-entry independence is the whole point");
-                    }
-                }
+                        var dirty = invalidates.TryGetProperty("value", out var dv)
+                            ? dv.EnumerateArray().Select(k => k.GetString()!).ToHashSet()
+                            : [];
+                        var survivors = gotOrder.ToHashSet();
+                        foreach (var (key, reader) in valueReaders)
+                        {
+                            if (!survivors.Contains(key)) continue; // removed: nothing left to read
+                            ctx.Get(reader);
+                            var recomputed = valueCounts[key] != valueBase[key];
+                            if (dirty.Contains(key))
+                            {
+                                Assert.True(recomputed, $"{where}: value reader for {key} should have been invalidated");
+                            }
+                            else
+                            {
+                                Assert.False(
+                                    recomputed,
+                                    $"{where}: value reader for {key} should have stayed cached - " +
+                                    "per-entry independence is the whole point");
+                            }
+                        }
 
-                ctx.Get(membership);
-                ctx.Get(order);
-                Assert.Equal(
-                    invalidates.TryGetProperty("membership", out var m) && m.GetBoolean(),
-                    membershipCount != membershipBase);
-                Assert.Equal(
-                    invalidates.TryGetProperty("order", out var o) && o.GetBoolean(),
-                    orderCount != orderBase);
+                        ctx.Get(membership);
+                        ctx.Get(order);
+                        Assert.Equal(
+                            invalidates.TryGetProperty("membership", out var m) && m.GetBoolean(),
+                            membershipCount != membershipBase);
+                        Assert.Equal(
+                            invalidates.TryGetProperty("order", out var o) && o.GetBoolean(),
+                            orderCount != orderBase);
+                    });
 
                 // `membership` is the ORDER-INDEPENDENT key set. It is not implied by
                 // `order`: a shell that dropped a key and re-appended it lands the same
                 // ordered list only if the drop and the append cancel, and the membership
                 // set is what says whether the key was ever absent.
-                if (expected.TryGetProperty("membership", out var wantMembership))
-                {
-                    Assert.Equal(
+                expected.TryAssertKeyWith(
+                    "membership",
+                    wantMembership => Assert.Equal(
                         wantMembership.EnumerateArray()
                             .Select(value => value.GetString()!)
                             .Order(StringComparer.Ordinal),
-                        map.PresentKeys().Order(StringComparer.Ordinal));
-                }
+                        map.PresentKeys().Order(StringComparer.Ordinal)));
 
                 // Handle stability: the law separating an atomic move from a
                 // remove + re-mint. A reorder keeps the entry's node.
-                if (expected.TryGetProperty("handle_stable", out var stable))
-                {
-                    foreach (var entry in stable.EnumerateObject())
+                expected.TryAssertKeyWith(
+                    "handle_stable",
+                    stable =>
                     {
-                        var after = map.TryGetHandle(entry.Name, out var h) ? h : null;
-                        handlesBefore.TryGetValue(entry.Name, out var before);
-                        if (entry.Value.GetBoolean())
+                        foreach (var entry in stable.EnumerateObject())
                         {
-                            Assert.NotNull(before);
-                            Assert.Same(before, after);
+                            var after = map.TryGetHandle(entry.Name, out var h) ? h : null;
+                            handlesBefore.TryGetValue(entry.Name, out var before);
+                            if (entry.Value.GetBoolean())
+                            {
+                                Assert.NotNull(before);
+                                Assert.Same(before, after);
+                            }
+                            else
+                            {
+                                Assert.NotSame(before, after);
+                            }
                         }
-                        else
-                        {
-                            Assert.NotSame(before, after);
-                        }
-                    }
-                }
+                    });
 
                 expected.Verify();
             }

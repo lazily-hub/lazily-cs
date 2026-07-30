@@ -24,22 +24,22 @@ public sealed class CrdtPlaneConformanceTests
                 scenario,
                 "expect",
                 $"distributed/anti_entropy_converge.json scenario {scenario.GetProperty("name").GetString()}");
-            Assert.Equal(expected.GetProperty("applied_count").GetInt32(), applied);
+            expected.AssertKey("applied_count", applied);
             assertions++;
 
-            AssertConverged(expected.GetProperty("converged"), runtime.Converged());
+            expected.AssertKeyWith("converged", want => AssertConverged(want, runtime.Converged()));
             assertions++;
 
             if (scenario.TryGetProperty("redeliver", out var redeliver)
             && redeliver.GetBoolean())
             {
-                Assert.Equal(
-                expected.GetProperty("redeliver_applied_count").GetInt32(),
-                runtime.Ingest(new CrdtSyncMessage(operations)));
+                expected.AssertKey(
+                    "redeliver_applied_count",
+                    runtime.Ingest(new CrdtSyncMessage(operations)));
                 assertions++;
             }
 
-            var declaresOrderIndependent = expected.TryGetProperty("order_independent", out var independent);
+            var declaresOrderIndependent = expected.TryGetProperty("order_independent", out _);
             if (declaresOrderIndependent
             || (scenario.TryGetProperty("reverse_order_equivalent", out var reverse) && reverse.GetBoolean()))
             {
@@ -47,11 +47,13 @@ public sealed class CrdtPlaneConformanceTests
                 Assert.Equal(
                 operations.Length,
                 reversed.Ingest(new CrdtSyncMessage(operations.Reverse().ToArray())));
-                AssertConverged(expected.GetProperty("converged"), reversed.Converged());
+                expected.AssertKeyWith(
+                    "converged",
+                    want => AssertConverged(want, reversed.Converged()));
                 if (declaresOrderIndependent)
                 {
-                    Assert.Equal(
-                        independent.GetBoolean(),
+                    expected.AssertKey(
+                        "order_independent",
                         Equivalent(runtime.Converged(), reversed.Converged()));
                 }
 
@@ -63,21 +65,26 @@ public sealed class CrdtPlaneConformanceTests
             // the label: every converged entry must carry the state of the highest-stamped
             // op for its node. Comparing the label alone would pass against a plane that
             // resolved by arrival order and happened to agree.
-            Assert.Equal("max_stamp", expected.GetProperty("resolution").GetString());
-            foreach (var entry in runtime.Converged())
-            {
-                var rivals = operations.Where(operation => operation.Node == entry.Node).ToArray();
-                Assert.NotEmpty(rivals);
-                var winner = rivals
-                    .OrderByDescending(operation => operation.Stamp.WallTime)
-                    .ThenByDescending(operation => operation.Stamp.Logical)
-                    .ThenByDescending(operation => operation.Stamp.Peer)
-                    .First();
-                Assert.Equal(
-                    Assert.IsType<IpcValue.Inline>(winner.State).Bytes,
-                    Assert.IsType<IpcValue.Inline>(entry.State).Bytes);
-                assertions++;
-            }
+            expected.AssertKeyWith(
+                "resolution",
+                want =>
+                {
+                    Assert.Equal("max_stamp", want.GetString());
+                    foreach (var entry in runtime.Converged())
+                    {
+                        var rivals = operations.Where(operation => operation.Node == entry.Node).ToArray();
+                        Assert.NotEmpty(rivals);
+                        var winner = rivals
+                            .OrderByDescending(operation => operation.Stamp.WallTime)
+                            .ThenByDescending(operation => operation.Stamp.Logical)
+                            .ThenByDescending(operation => operation.Stamp.Peer)
+                            .First();
+                        Assert.Equal(
+                            Assert.IsType<IpcValue.Inline>(winner.State).Bytes,
+                            Assert.IsType<IpcValue.Inline>(entry.State).Bytes);
+                        assertions++;
+                    }
+                });
 
             expected.Verify();
         }

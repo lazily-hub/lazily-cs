@@ -154,19 +154,22 @@ public sealed class QueueCellConformanceTests
                 var expected = FixtureAssertions.Of(step, "expected", $"{fixture} step {i}");
 
                 // Invalidation FIRST — reading a reader revalidates it.
-                if (expected.TryGetProperty("invalidates", out var invalidates))
-                {
-                    foreach (var probe in invalidates.EnumerateObject())
+                var stepIndex = i;
+                expected.TryAssertKeyWith(
+                    "invalidates",
+                    invalidates =>
                     {
-                        var wasInvalidated = !readers.StillValid(probe.Name);
-                        Assert.True(
-                            wasInvalidated == probe.Value.GetBoolean(),
-                            $"{fixture} step {i}: invalidates.{probe.Name} — expected " +
-                            $"{probe.Value.GetBoolean()}, got {wasInvalidated}. Reader kinds are " +
-                            "independent: a push onto a non-empty queue must not touch head.");
-                        invalidationChecks++;
-                    }
-                }
+                        foreach (var probe in invalidates.EnumerateObject())
+                        {
+                            var wasInvalidated = !readers.StillValid(probe.Name);
+                            Assert.True(
+                                wasInvalidated == probe.Value.GetBoolean(),
+                                $"{fixture} step {stepIndex}: invalidates.{probe.Name} — expected " +
+                                $"{probe.Value.GetBoolean()}, got {wasInvalidated}. Reader kinds are " +
+                                "independent: a push onto a non-empty queue must not touch head.");
+                            invalidationChecks++;
+                        }
+                    });
 
                 if (step.TryGetProperty("returns", out var wantReturn) &&
                     wantReturn.ValueKind == JsonValueKind.String)
@@ -174,29 +177,23 @@ public sealed class QueueCellConformanceTests
                     Assert.Equal(wantReturn.GetString(), returned);
                 }
 
-                if (expected.TryGetProperty("len", out var wantLen))
-                    Assert.Equal(wantLen.GetInt32(), queue.Len());
-                if (expected.TryGetProperty("is_empty", out var wantEmpty))
-                    Assert.Equal(wantEmpty.GetBoolean(), queue.IsEmpty());
-                if (expected.TryGetProperty("is_full", out var wantFull))
-                    Assert.Equal(wantFull.GetBoolean(), queue.IsFull());
-                if (expected.TryGetProperty("closed", out var wantClosed))
-                    Assert.Equal(wantClosed.GetBoolean(), queue.IsClosed());
-                if (expected.TryGetProperty("head", out var wantHead))
-                {
-                    Assert.Equal(
-                        wantHead.ValueKind == JsonValueKind.Null ? null : wantHead.GetString(),
-                        queue.Head());
-                }
+                expected.TryAssertKeyWith("len", want => Assert.Equal(want.GetInt32(), queue.Len()));
+                expected.TryAssertKeyWith("is_empty", want => Assert.Equal(want.GetBoolean(), queue.IsEmpty()));
+                expected.TryAssertKeyWith("is_full", want => Assert.Equal(want.GetBoolean(), queue.IsFull()));
+                expected.TryAssertKeyWith("closed", want => Assert.Equal(want.GetBoolean(), queue.IsClosed()));
+                expected.TryAssertKeyWith(
+                    "head",
+                    want => Assert.Equal(
+                        want.ValueKind == JsonValueKind.Null ? null : want.GetString(),
+                        queue.Head()));
 
                 // `elements` pins the whole FIFO body, which the scalar reads above cannot:
                 // `len` plus `head` is satisfied by a queue that reordered its tail.
-                if (expected.TryGetProperty("elements", out var wantElements))
-                {
-                    Assert.Equal(
-                        wantElements.EnumerateArray().Select(value => value.GetString()),
-                        queue.Elements());
-                }
+                expected.TryAssertKeyWith(
+                    "elements",
+                    want => Assert.Equal(
+                        want.EnumerateArray().Select(value => value.GetString()),
+                        queue.Elements()));
 
                 expected.Verify();
                 i++;

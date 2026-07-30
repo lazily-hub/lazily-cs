@@ -17,25 +17,35 @@ public sealed class CausalReceiptConformanceTests
         var wire = root.GetProperty("wire");
         var message = CausalReceiptWire.Deserialize(wire.GetRawText());
         var projection = new ReceiptProjection();
+        // Both are scenario inputs that select what is observed, not observations: the
+        // generation the projection folds at, and the causation whose terminal is looked
+        // up. What each one implies IS asserted below — stale_receipt_ids for the
+        // generation, terminal_outcome for the causation.
+        var generation = expected.GetProperty("current_generation").GetUInt64();
+        expected.ExcuseKey(
+            "current_generation",
+            "input: the generation the projection observes at; its effect is asserted as stale_receipt_ids");
+        var causationId = expected.GetProperty("causation_id").GetString()!;
+        expected.ExcuseKey(
+            "causation_id",
+            "input: selects which causation's terminal is read; its effect is asserted as terminal_outcome");
+
         var statuses = message.Receipts
-            .Select(
-                receipt => projection.Observe(
-                    expected.GetProperty("current_generation").GetUInt64(),
-                    receipt))
+            .Select(receipt => projection.Observe(generation, receipt))
             .ToArray();
 
-        Assert.Equal(expected.GetProperty("receipt_count").GetInt32(), projection.ReceiptCount);
+        expected.AssertKey("receipt_count", projection.ReceiptCount);
         Assert.Equal(3, statuses.Count(status => status is ReceiptApplyStatus.Recorded));
         Assert.IsType<ReceiptApplyStatus.StaleGeneration>(statuses[3]);
-        Assert.Equal(
-            expected.GetProperty("terminal_outcome").GetString(),
-            OutcomeName(projection.TerminalFor(expected.GetProperty("causation_id").GetString()!)!.Outcome));
-        Assert.Equal(
-            expected.GetProperty("stale_receipt_ids").EnumerateArray().Select(item => item.GetString()),
-            projection.StaleReceiptIds);
-        Assert.All(
-            expected.GetProperty("nonterminal_outcomes").EnumerateArray(),
-            item => Assert.False(ParseOutcome(item.GetString()!).IsTerminal()));
+        expected.AssertKey(
+            "terminal_outcome",
+            OutcomeName(projection.TerminalFor(causationId)!.Outcome));
+        expected.AssertKey("stale_receipt_ids", projection.StaleReceiptIds);
+        expected.AssertKeyWith(
+            "nonterminal_outcomes",
+            want => Assert.All(
+                want.EnumerateArray(),
+                item => Assert.False(ParseOutcome(item.GetString()!).IsTerminal())));
 
         var actualJson = CausalReceiptWire.Serialize(message);
         Assert.True(

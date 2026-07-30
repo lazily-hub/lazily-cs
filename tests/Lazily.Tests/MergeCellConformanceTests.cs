@@ -32,8 +32,8 @@ public sealed class MergeCellConformanceTests
                     step,
                     "expected",
                     $"collections/mergecell_algebra.json scenario {policyName}");
-                Assert.Equal(expected.GetProperty("value").GetInt64(), after);
-                Assert.Equal(expected.GetProperty("invalidates").GetBoolean(), before != after);
+                expected.AssertKey("value", after);
+                expected.AssertKey("invalidates", before != after);
                 expected.Verify();
                 assertions += 2;
             }

@@ -71,8 +71,9 @@ public sealed class CommandPlaneConformanceTests
         FixtureAssertions expected,
         string label,
         JsonSchema schema,
-        ref int assertions)
+        ref int assertionsOut)
     {
+        var assertions = 0;
         var projection = new CommandProjection();
         var ignored = new List<int>();
         var terminalAfter = -1;
@@ -139,72 +140,90 @@ public sealed class CommandPlaneConformanceTests
                 terminalAfter = frameIndex;
             }
 
-            if (expected.TryGetProperty("rpc", out var rpc))
-            {
-                var commandId = rpc.GetProperty("command_id").GetString()!;
-                var unresolved = rpc.GetProperty("unresolved_after_frame_indices")
-                    .EnumerateArray()
-                    .Select(item => item.GetInt32())
-                    .Contains(frameIndex);
-                if (unresolved)
+            var atFrame = frameIndex;
+            expected.TryAssertKeyWith(
+                "rpc",
+                rpc =>
                 {
-                    Assert.False(projection.TryGetTerminal(commandId, out _));
-                    assertions++;
-                }
-            }
+                    var commandId = rpc.GetProperty("command_id").GetString()!;
+                    var unresolved = rpc.GetProperty("unresolved_after_frame_indices")
+                        .EnumerateArray()
+                        .Select(item => item.GetInt32())
+                        .Contains(atFrame);
+                    if (unresolved)
+                    {
+                        Assert.False(projection.TryGetTerminal(commandId, out _));
+                        assertions++;
+                    }
+                });
 
             frameIndex++;
         }
 
-        if (expected.TryGetProperty("projection", out var expectedProjection))
-        {
-            AssertProjection(expectedProjection, projection.ToImage(), label);
-            assertions += expectedProjection.GetProperty("commands").GetArrayLength() * 7 + 1;
-        }
+        expected.TryAssertKeyWith(
+            "projection",
+            expectedProjection =>
+            {
+                AssertProjection(expectedProjection, projection.ToImage(), label);
+                assertions += expectedProjection.GetProperty("commands").GetArrayLength() * 7 + 1;
+            });
 
-        if (expected.TryGetProperty("ignored_frame_indices", out var ignoredFrames))
-        {
-            Assert.Equal(
-                ignoredFrames.EnumerateArray().Select(item => item.GetInt32()).ToArray(),
-                ignored);
-            assertions++;
-        }
+        expected.TryAssertKeyWith(
+            "ignored_frame_indices",
+            ignoredFrames =>
+            {
+                Assert.Equal(
+                    ignoredFrames.EnumerateArray().Select(item => item.GetInt32()).ToArray(),
+                    ignored);
+                assertions++;
+            });
 
-        if (expected.TryGetProperty("terminal_after_frame_index", out var terminal))
-        {
-            Assert.Equal(terminal.GetInt32(), terminalAfter);
-            assertions++;
-        }
+        expected.TryAssertKeyWith(
+            "terminal_after_frame_index",
+            terminal =>
+            {
+                Assert.Equal(terminal.GetInt32(), terminalAfter);
+                assertions++;
+            });
 
-        if (expected.TryGetProperty("rpc", out var expectedRpc))
-        {
-            Assert.Equal(
-                expectedRpc.GetProperty("resolves_after_frame_index").GetInt32(),
-                terminalAfter);
-            var terminalEntry = Assert.Single(projection.ToImage().Commands);
-            Assert.Equal(
-                expectedRpc.GetProperty("terminal_status").GetString(),
-                StatusWire(terminalEntry.Status));
-            assertions += 2;
-        }
+        expected.TryAssertKeyWith(
+            "rpc",
+            expectedRpc =>
+            {
+                Assert.Equal(
+                    expectedRpc.GetProperty("resolves_after_frame_index").GetInt32(),
+                    terminalAfter);
+                var terminalEntry = Assert.Single(projection.ToImage().Commands);
+                Assert.Equal(
+                    expectedRpc.GetProperty("terminal_status").GetString(),
+                    StatusWire(terminalEntry.Status));
+                assertions += 2;
+            });
 
-        if (expected.TryGetProperty("conflict", out var conflictExpected)
-            && conflictExpected.GetBoolean())
+        // `conflict` used to GATE the three assertions below and never be asserted itself,
+        // so a fixture flipped to false silently retired all four checks. It is now an
+        // observation in its own right: did a terminal conflict actually happen?
+        var sawConflict = conflictAfter >= 0;
+        var declaresConflict = expected.TryAssertKeyWith(
+            "conflict",
+            want =>
+            {
+                Assert.Equal(want.GetBoolean(), sawConflict);
+                assertions++;
+            });
+
+        if (declaresConflict && sawConflict)
         {
-            Assert.Equal(
-                expected.GetProperty("conflict_after_frame_index").GetInt32(),
-                conflictAfter);
-            Assert.Equal(
-                expected.GetProperty("conflict_command_id").GetString(),
-                conflictCommandId);
+            expected.AssertKey("conflict_after_frame_index", conflictAfter);
+            expected.AssertKey("conflict_command_id", conflictCommandId);
             Assert.NotNull(beforeConflict);
-            AssertProjection(
-                expected.GetProperty("projection_before_conflict"),
-                beforeConflict!,
-                label + " before conflict");
+            expected.AssertKeyWith(
+                "projection_before_conflict",
+                want => AssertProjection(want, beforeConflict!, label + " before conflict"));
             assertions += 3;
         }
 
+        assertionsOut += assertions;
         expected.Verify();
     }
 

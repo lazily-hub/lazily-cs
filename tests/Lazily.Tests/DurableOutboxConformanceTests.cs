@@ -86,16 +86,20 @@ public sealed class DurableOutboxConformanceTests
                 scenario,
                 "expect",
                 $"reliable-sync/{fixture} scenario {scenario.GetProperty("name").GetString()}");
-            if (expected.TryGetProperty("retained_after_ack", out var retainedAfterAck))
+            if (expected.TryGetProperty("retained_after_ack", out _))
             {
-                Assert.Equal(Epochs(retainedAfterAck), restarted.RetainedEpochs);
+                expected.AssertKeyWith(
+                    "retained_after_ack",
+                    want => Assert.Equal(Epochs(want), restarted.RetainedEpochs));
                 var cursor = scenario.GetProperty("reconnect_cursor").GetUInt64();
                 var replayed = restarted.ReplayFrom(cursor).Select(entry => entry.Epoch).ToArray();
-                Assert.Equal(Epochs(expected.GetProperty("replayed_from_cursor")), replayed);
+                expected.AssertKeyWith(
+                    "replayed_from_cursor",
+                    want => Assert.Equal(Epochs(want), replayed));
                 // `replay_order` is not a duplicate of `replayed_from_cursor`: the SET can be
                 // right while the order is wrong, and a receiver that folds a later epoch
                 // first sees a gap it can never close.
-                Assert.Equal(Epochs(expected.GetProperty("replay_order")), replayed);
+                expected.AssertKeyWith("replay_order", want => Assert.Equal(Epochs(want), replayed));
 
                 // The receiver half: at-least-once on the wire, exactly-once in effect.
                 var coordinator = new ResyncCoordinator(cursor);
@@ -108,10 +112,8 @@ public sealed class DurableOutboxConformanceTests
                     }
                 }
 
-                Assert.Equal(Epochs(expected.GetProperty("receiver_applies")), applied);
-                Assert.Equal(
-                    expected.GetProperty("receiver_last_epoch_after").GetUInt64(),
-                    coordinator.LastEpoch);
+                expected.AssertKeyWith("receiver_applies", want => Assert.Equal(Epochs(want), applied));
+                expected.AssertKey("receiver_last_epoch_after", coordinator.LastEpoch);
 
                 var ackedThrough = scenario.GetProperty("ack_through").GetUInt64();
                 var owed = scenario.GetProperty("appended")
@@ -121,21 +123,28 @@ public sealed class DurableOutboxConformanceTests
                     .ToArray();
                 var lost = owed.Count(epoch => !applied.Contains(epoch));
                 var doubled = applied.Count - applied.Distinct().Count();
-                Assert.Equal(expected.GetProperty("ops_lost").GetInt32(), lost);
-                Assert.Equal(expected.GetProperty("ops_doubled").GetInt32(), doubled);
-                Assert.Equal(
-                    expected.GetProperty("exactly_once_effect").GetBoolean(),
-                    lost == 0 && doubled == 0);
+                expected.AssertKey("ops_lost", lost);
+                expected.AssertKey("ops_doubled", doubled);
+                expected.AssertKey("exactly_once_effect", lost == 0 && doubled == 0);
             }
             else
             {
-                Assert.True(expected.GetProperty("frame_retained_after_failed_send").GetBoolean());
-                Assert.Equal(Epochs(expected.GetProperty("retained")), restarted.RetainedEpochs);
+                // This used to read the key and assert it against the literal `true` — the
+                // fixture's own value, which is true by construction. It is now compared
+                // against whether the journal ACTUALLY still holds the unsent frame.
+                expected.AssertKey(
+                    "frame_retained_after_failed_send",
+                    restarted.RetainedEpochs.Any());
+                expected.AssertKeyWith(
+                    "retained",
+                    want => Assert.Equal(Epochs(want), restarted.RetainedEpochs));
                 var resent = restarted.ReplayFrom(0).Select(entry => entry.Epoch).ToArray();
-                Assert.Equal(Epochs(expected.GetProperty("resent_on_next_tick")), resent);
+                expected.AssertKeyWith(
+                    "resent_on_next_tick",
+                    want => Assert.Equal(Epochs(want), resent));
                 // A retained frame is a DELAY, not a hole: the next tick replays it, so the
                 // receiver never sees an epoch it can no longer obtain.
-                Assert.Equal(expected.GetProperty("permanent_gap").GetBoolean(), resent.Length == 0);
+                expected.AssertKey("permanent_gap", resent.Length == 0);
             }
 
             expected.Verify();
@@ -177,42 +186,43 @@ public sealed class DurableOutboxConformanceTests
             $"reliable-sync/outbox_store_protocol.json scenario {scenario.GetProperty("name").GetString()}");
         var restarted = new DurableOutbox<FileOutboxStore>(new FileOutboxStore(path));
 
-        if (expected.TryGetProperty("epochs", out var epochs))
+        expected.TryAssertKeyWith(
+            "epochs",
+            epochs =>
+            {
+                var cursor = scenario.GetProperty("scan_after").GetUInt64();
+                Assert.Equal(
+                    Epochs(epochs),
+                    restarted.Store.ScanAfter(cursor).Select(entry => entry.Epoch));
+            });
+
+        if (expected.TryAssertKeyWith(
+                "cursor",
+                cursorExpected => Assert.Equal(cursorExpected.GetUInt64(), restarted.AckedThrough)))
         {
-            var cursor = scenario.GetProperty("scan_after").GetUInt64();
-            Assert.Equal(
-                Epochs(epochs),
-                restarted.Store.ScanAfter(cursor).Select(entry => entry.Epoch));
+            expected.AssertKeyWith(
+                "replay_from_zero",
+                want => Assert.Equal(
+                    Epochs(want),
+                    restarted.ReplayFrom(0).Select(entry => entry.Epoch)));
         }
 
-        if (expected.TryGetProperty("cursor", out var cursorExpected))
-        {
-            Assert.Equal(cursorExpected.GetUInt64(), restarted.AckedThrough);
-            Assert.Equal(
-                Epochs(expected.GetProperty("retained")),
-                restarted.RetainedEpochs);
-            Assert.Equal(
-                Epochs(expected.GetProperty("replay_from_zero")),
-                restarted.ReplayFrom(0).Select(entry => entry.Epoch));
-        }
-
-        if (expected.TryGetProperty("loaded_cursor", out var loaded))
-        {
-            Assert.Equal(loaded.GetUInt64(), restarted.AckedThrough);
-        }
+        expected.TryAssertKeyWith(
+            "loaded_cursor",
+            loaded => Assert.Equal(loaded.GetUInt64(), restarted.AckedThrough));
 
         // `retained` is asserted for EVERY scenario that carries it. Reading it only inside
         // the `cursor` branch above meant the restart scenario — the one whose whole point
         // is that the unacked suffix survives a reopen — never checked the suffix at all.
-        if (expected.TryGetProperty("retained", out var retained))
-        {
-            Assert.Equal(Epochs(retained), restarted.RetainedEpochs);
-        }
+        expected.TryAssertKeyWith(
+            "retained",
+            retained => Assert.Equal(Epochs(retained), restarted.RetainedEpochs));
 
-        if (expected.TryGetProperty("replay", out var replay))
-        {
-            Assert.Equal(Epochs(replay), restarted.ReplayFrom(0).Select(entry => entry.Epoch));
-        }
+        expected.TryAssertKeyWith(
+            "replay",
+            replay => Assert.Equal(
+                Epochs(replay),
+                restarted.ReplayFrom(0).Select(entry => entry.Epoch)));
 
         expected.Verify();
     }

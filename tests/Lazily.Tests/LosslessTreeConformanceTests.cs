@@ -248,39 +248,45 @@ public sealed class LosslessTreeConformanceTests
     private static void AssertExpectations(
         World world,
         FixtureAssertions expect,
-        ref int assertions)
+        ref int assertionsOut)
     {
-        if (expect.TryGetProperty("render", out var render))
-        {
+        var assertions = 0;
+
+        if (expect.TryAssertKeyWith(
+                "render",
+                render => Assert.Equal(render.GetString(), world.Replicas["a"].Render())))
             assertions++;
-            Assert.Equal(render.GetString(), world.Replicas["a"].Render());
-        }
 
-        if (expect.TryGetProperty("render_on", out var renderOn))
-        {
-            foreach (var property in renderOn.EnumerateObject())
+        expect.TryAssertKeyWith(
+            "render_on",
+            renderOn =>
             {
-                assertions++;
-                Assert.Equal(property.Value.GetString(), world.Replicas[property.Name].Render());
-            }
-        }
+                foreach (var property in renderOn.EnumerateObject())
+                {
+                    assertions++;
+                    Assert.Equal(property.Value.GetString(), world.Replicas[property.Name].Render());
+                }
+            });
 
-        if (expect.TryGetProperty("live_nodes", out var liveNodes))
-        {
+        if (expect.TryAssertKeyWith(
+                "live_nodes",
+                liveNodes => Assert.Equal(liveNodes.GetInt32(), world.Replicas["a"].LiveNodeCount)))
             assertions++;
-            Assert.Equal(liveNodes.GetInt32(), world.Replicas["a"].LiveNodeCount);
-        }
 
-        if (expect.TryGetProperty("converged", out var converged))
-        {
-            var names = converged.EnumerateArray().Select(value => value.GetString()!).ToArray();
-            var expected = world.Replicas[names[0]].Render();
-            foreach (var name in names.Skip(1))
+        expect.TryAssertKeyWith(
+            "converged",
+            converged =>
             {
-                assertions++;
-                Assert.Equal(expected, world.Replicas[name].Render());
-            }
-        }
+                var names = converged.EnumerateArray().Select(value => value.GetString()!).ToArray();
+                var expected = world.Replicas[names[0]].Render();
+                foreach (var name in names.Skip(1))
+                {
+                    assertions++;
+                    Assert.Equal(expected, world.Replicas[name].Render());
+                }
+            });
+
+        assertionsOut += assertions;
     }
 
     private sealed record World(

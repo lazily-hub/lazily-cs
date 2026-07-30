@@ -102,26 +102,30 @@ public sealed class MaterializationConformanceTests
             // `default_mode` names the strategy the fixture was authored against. Assert the
             // BEHAVIOUR it implies, not the label: under "eager" the pre-mint build must hold
             // every key at build time, under "lazy" it must not.
-            if (expected.TryGetProperty("default_mode", out var defaultMode))
-            {
-                using var defaults = NewModel(model);
-                foreach (var e in entries.Where(e => e.Kind == EntryKind.Source)) defaults.SeedCell(e.Key, e.Value);
-                var presentAtBuild = keys.Count(defaults.IsPresent);
-                Check(
-                    "default_mode",
-                    defaultMode.GetString() switch
-                    {
-                        "eager" => presentAtBuild == entries.Count(e => e.Kind == EntryKind.Source),
-                        "lazy" => presentAtBuild == 0,
-                        var other => throw new InvalidOperationException($"unknown default_mode {other}"),
-                    },
-                    true);
-            }
+            expected.TryAssertKeyWith(
+                "default_mode",
+                defaultMode =>
+                {
+                    using var defaults = NewModel(model);
+                    foreach (var e in entries.Where(e => e.Kind == EntryKind.Source)) defaults.SeedCell(e.Key, e.Value);
+                    var presentAtBuild = keys.Count(defaults.IsPresent);
+                    Check(
+                        "default_mode",
+                        defaultMode.GetString() switch
+                        {
+                            "eager" => presentAtBuild == entries.Count(e => e.Kind == EntryKind.Source),
+                            "lazy" => presentAtBuild == 0,
+                            var other => throw new InvalidOperationException($"unknown default_mode {other}"),
+                        },
+                        true);
+                });
 
-            Check(
+            expected.AssertKeyWith(
                 "eager_present",
-                Join(keys.Where(eager.IsPresent)),
-                Join(expected.GetProperty("eager_present").EnumerateArray().Select(x => x.GetString()!)));
+                want => Check(
+                    "eager_present",
+                    Join(keys.Where(eager.IsPresent)),
+                    Join(want.EnumerateArray().Select(x => x.GetString()!))));
 
             // ---- LAZY: mint-on-access, nothing pre-minted. ---------------------------------
             using var lazy = NewModel(model);
@@ -130,13 +134,12 @@ public sealed class MaterializationConformanceTests
             // orthogonality the entry-kind fixture pins. Slot entries stay absent until read.
             foreach (var e in entries.Where(e => e.Kind == EntryKind.Source)) lazy.SeedCell(e.Key, e.Value);
 
-            if (expected.TryGetProperty("lazy_present_at_build", out var atBuild))
-            {
-                Check(
+            expected.TryAssertKeyWith(
+                "lazy_present_at_build",
+                atBuild => Check(
                     "lazy_present_at_build",
                     Join(keys.Where(lazy.IsPresent)),
-                    Join(atBuild.EnumerateArray().Select(x => x.GetString()!)));
-            }
+                    Join(atBuild.EnumerateArray().Select(x => x.GetString()!))));
 
             // The read sequence, with the cumulative present-set size sampled after each read.
             // Monotone by construction and unchanged by a re-read — a map that re-minted on every
@@ -148,26 +151,32 @@ public sealed class MaterializationConformanceTests
                 sizes.Add(lazy.PresentCount);
             }
 
-            if (expected.TryGetProperty("present_after_each_read", out var afterEach))
-            {
-                Check(
+            expected.TryAssertKeyWith(
+                "present_after_each_read",
+                afterEach => Check(
                     "present_after_each_read",
                     string.Join(",", sizes),
-                    string.Join(",", afterEach.EnumerateArray().Select(x => x.GetInt32())));
-            }
+                    string.Join(",", afterEach.EnumerateArray().Select(x => x.GetInt32()))));
 
-            Check(
+            expected.AssertKeyWith(
                 "lazy_present_after_reads",
-                Join(keys.Where(lazy.IsPresent)),
-                Join(expected.GetProperty("lazy_present_after_reads").EnumerateArray().Select(x => x.GetString()!)));
+                want => Check(
+                    "lazy_present_after_reads",
+                    Join(keys.Where(lazy.IsPresent)),
+                    Join(want.EnumerateArray().Select(x => x.GetString()!))));
 
             // ---- Observational transparency: identical values from both builds. -------------
-            foreach (var want in expected.GetProperty("observe").EnumerateObject())
-            {
-                var key = want.Name;
-                Check($"observe.eager.{key}", eager.GetOrInsert(key, k => canonical[k]), want.Value.GetInt32());
-                Check($"observe.lazy.{key}", lazy.GetOrInsert(key, k => canonical[k]), want.Value.GetInt32());
-            }
+            expected.AssertKeyWith(
+                "observe",
+                observe =>
+                {
+                    foreach (var want in observe.EnumerateObject())
+                    {
+                        var key = want.Name;
+                        Check($"observe.eager.{key}", eager.GetOrInsert(key, k => canonical[k]), want.Value.GetInt32());
+                        Check($"observe.lazy.{key}", lazy.GetOrInsert(key, k => canonical[k]), want.Value.GetInt32());
+                    }
+                });
 
             // Materializing one node never changes another's observed value: after the lazy session
             // has pulled everything, every key still reads canonically.

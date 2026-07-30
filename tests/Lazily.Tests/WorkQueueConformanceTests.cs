@@ -90,27 +90,30 @@ public sealed class WorkQueueConformanceTests
 
                 AssertReturn(fixture, index, step.GetProperty("returns"), returned);
                 var expected = FixtureAssertions.Of(step, "expected", $"{fixture} step {index}");
-                foreach (var probe in expected.GetProperty("invalidates").EnumerateObject())
-                {
-                    var invalidated = !readers.StillValid(probe.Name);
-                    Assert.True(
-                        invalidated == probe.Value.GetBoolean(),
-                        $"{fixture} step {index}: invalidates.{probe.Name}");
-                    invalidationChecks++;
-                }
+                var at = index;
+                expected.AssertKeyWith(
+                    "invalidates",
+                    want =>
+                    {
+                        foreach (var probe in want.EnumerateObject())
+                        {
+                            var invalidated = !readers.StillValid(probe.Name);
+                            Assert.True(
+                                invalidated == probe.Value.GetBoolean(),
+                                $"{fixture} step {at}: invalidates.{probe.Name}");
+                            invalidationChecks++;
+                        }
+                    });
 
-                Assert.Equal(
-                    expected.GetProperty("reads").GetProperty("pending_len").GetInt32(),
-                    queue.PendingLen());
-                Assert.Equal(
-                    expected.GetProperty("reads").GetProperty("is_empty").GetBoolean(),
-                    queue.IsEmpty());
-                Assert.Equal(
-                    expected.GetProperty("reads").GetProperty("in_flight_len").GetInt32(),
-                    queue.InFlightLen());
-                Assert.Equal(
-                    expected.GetProperty("reads").GetProperty("dead_letter_len").GetInt32(),
-                    queue.DeadLetterLen());
+                expected.AssertKeyWith(
+                    "reads",
+                    reads =>
+                    {
+                        Assert.Equal(reads.GetProperty("pending_len").GetInt32(), queue.PendingLen());
+                        Assert.Equal(reads.GetProperty("is_empty").GetBoolean(), queue.IsEmpty());
+                        Assert.Equal(reads.GetProperty("in_flight_len").GetInt32(), queue.InFlightLen());
+                        Assert.Equal(reads.GetProperty("dead_letter_len").GetInt32(), queue.DeadLetterLen());
+                    });
                 AssertSnapshots(expected, queue);
                 expected.Verify();
                 steps++;
@@ -149,32 +152,47 @@ public sealed class WorkQueueConformanceTests
 
     private static void AssertSnapshots(FixtureAssertions expected, WorkQueueCell<string> queue)
     {
-        var pending = expected.GetProperty("pending").EnumerateArray().ToArray();
-        Assert.Equal(pending.Length, queue.Pending().Count);
-        for (var i = 0; i < pending.Length; i++)
-        {
-            Assert.Equal(pending[i].GetProperty("item_id").GetInt64(), queue.Pending()[i].ItemId);
-            Assert.Equal(pending[i].GetProperty("value").GetString(), queue.Pending()[i].Value);
-            Assert.Equal(pending[i].GetProperty("attempts").GetInt32(), queue.Pending()[i].Attempts);
-        }
+        expected.AssertKeyWith(
+            "pending",
+            want =>
+            {
+                var pending = want.EnumerateArray().ToArray();
+                Assert.Equal(pending.Length, queue.Pending().Count);
+                for (var i = 0; i < pending.Length; i++)
+                {
+                    Assert.Equal(pending[i].GetProperty("item_id").GetInt64(), queue.Pending()[i].ItemId);
+                    Assert.Equal(pending[i].GetProperty("value").GetString(), queue.Pending()[i].Value);
+                    Assert.Equal(pending[i].GetProperty("attempts").GetInt32(), queue.Pending()[i].Attempts);
+                }
+            });
 
-        var inFlight = expected.GetProperty("in_flight").EnumerateArray().ToArray();
-        Assert.Equal(inFlight.Length, queue.InFlight().Count);
-        for (var i = 0; i < inFlight.Length; i++)
-            AssertDelivery(inFlight[i], queue.InFlight()[i], $"in_flight[{i}]");
+        expected.AssertKeyWith(
+            "in_flight",
+            want =>
+            {
+                var inFlight = want.EnumerateArray().ToArray();
+                Assert.Equal(inFlight.Length, queue.InFlight().Count);
+                for (var i = 0; i < inFlight.Length; i++)
+                    AssertDelivery(inFlight[i], queue.InFlight()[i], $"in_flight[{i}]");
+            });
 
-        var deadLetters = expected.GetProperty("dead_letters").EnumerateArray().ToArray();
-        Assert.Equal(deadLetters.Length, queue.DeadLetters().Count);
-        for (var i = 0; i < deadLetters.Length; i++)
-        {
-            var actual = queue.DeadLetters()[i];
-            Assert.Equal(deadLetters[i].GetProperty("item_id").GetInt64(), actual.ItemId);
-            Assert.Equal(deadLetters[i].GetProperty("value").GetString(), actual.Value);
-            Assert.Equal(deadLetters[i].GetProperty("attempts").GetInt32(), actual.Attempts);
-            Assert.Equal(
-                deadLetters[i].GetProperty("reason").GetString(),
-                actual.Reason.ToString().ToLowerInvariant());
-        }
+        expected.AssertKeyWith(
+            "dead_letters",
+            want =>
+            {
+                var deadLetters = want.EnumerateArray().ToArray();
+                Assert.Equal(deadLetters.Length, queue.DeadLetters().Count);
+                for (var i = 0; i < deadLetters.Length; i++)
+                {
+                    var actual = queue.DeadLetters()[i];
+                    Assert.Equal(deadLetters[i].GetProperty("item_id").GetInt64(), actual.ItemId);
+                    Assert.Equal(deadLetters[i].GetProperty("value").GetString(), actual.Value);
+                    Assert.Equal(deadLetters[i].GetProperty("attempts").GetInt32(), actual.Attempts);
+                    Assert.Equal(
+                        deadLetters[i].GetProperty("reason").GetString(),
+                        actual.Reason.ToString().ToLowerInvariant());
+                }
+            });
     }
 
     private static void AssertDelivery(

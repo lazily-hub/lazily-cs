@@ -167,49 +167,58 @@ public sealed class CollectionsConformanceTests
             var where = $"#{stepIndex}";
             var expected = FixtureAssertions.Of(step, "expected", where);
 
-            check(
-                $"{where}:order",
-                string.Join(",", map.PresentKeys()),
-                string.Join(",", expected.GetProperty("order").EnumerateArray().Select(x => x.GetString()!)));
+            expected.AssertKeyWith(
+                "order",
+                want => check(
+                    $"{where}:order",
+                    string.Join(",", map.PresentKeys()),
+                    string.Join(",", want.EnumerateArray().Select(x => x.GetString()!))));
 
-            if (expected.TryGetProperty("membership", out var membership))
-            {
-                check(
+            expected.TryAssertKeyWith(
+                "membership",
+                membership => check(
                     $"{where}:membership",
                     string.Join(",", map.PresentKeys().Order(StringComparer.Ordinal)),
-                    string.Join(",", membership.EnumerateArray().Select(x => x.GetString()!).Order(StringComparer.Ordinal)));
-            }
+                    string.Join(",", membership.EnumerateArray().Select(x => x.GetString()!).Order(StringComparer.Ordinal))));
 
-            if (expected.TryGetProperty("values", out var wantValues))
-            {
-                foreach (var v in wantValues.EnumerateObject())
+            expected.TryAssertKeyWith(
+                "values",
+                wantValues =>
                 {
-                    check($"{where}:value.{v.Name}", map.TryObserve(v.Name, out var got) ? got : null, v.Value.GetInt32());
-                }
-            }
+                    foreach (var v in wantValues.EnumerateObject())
+                    {
+                        check($"{where}:value.{v.Name}", map.TryObserve(v.Name, out var got) ? got : null, v.Value.GetInt32());
+                    }
+                });
 
-            var invalidates = expected.GetProperty("invalidates");
-            check(
-                $"{where}:invalidates.membership",
-                recomputed.Membership,
-                invalidates.GetProperty("membership").GetBoolean());
-            check(
-                $"{where}:invalidates.order",
-                recomputed.Order,
-                invalidates.GetProperty("order").GetBoolean());
-            check(
-                $"{where}:invalidates.value",
-                string.Join(",", recomputed.Values.Order(StringComparer.Ordinal)),
-                string.Join(",", invalidates.GetProperty("value").EnumerateArray().Select(x => x.GetString()!).Order(StringComparer.Ordinal)));
-
-            if (expected.TryGetProperty("handle_stable", out var stable))
-            {
-                foreach (var s in stable.EnumerateObject())
+            expected.AssertKeyWith(
+                "invalidates",
+                invalidates =>
                 {
-                    var same = map.TryGetHandle(s.Name, out var after) && ReferenceEquals(handleBefore, after);
-                    check($"{where}:handle_stable.{s.Name}", same, s.Value.GetBoolean());
-                }
-            }
+                    check(
+                        $"{where}:invalidates.membership",
+                        recomputed.Membership,
+                        invalidates.GetProperty("membership").GetBoolean());
+                    check(
+                        $"{where}:invalidates.order",
+                        recomputed.Order,
+                        invalidates.GetProperty("order").GetBoolean());
+                    check(
+                        $"{where}:invalidates.value",
+                        string.Join(",", recomputed.Values.Order(StringComparer.Ordinal)),
+                        string.Join(",", invalidates.GetProperty("value").EnumerateArray().Select(x => x.GetString()!).Order(StringComparer.Ordinal)));
+                });
+
+            expected.TryAssertKeyWith(
+                "handle_stable",
+                stable =>
+                {
+                    foreach (var s in stable.EnumerateObject())
+                    {
+                        var same = map.TryGetHandle(s.Name, out var after) && ReferenceEquals(handleBefore, after);
+                        check($"{where}:handle_stable.{s.Name}", same, s.Value.GetBoolean());
+                    }
+                });
 
             expected.Verify();
             probes.Rearm();
@@ -240,24 +249,33 @@ public sealed class CollectionsConformanceTests
 
         var ops = map.Reconcile(targetOrder, targetValues);
 
-        check(
+        expected.AssertKeyWith(
             "ops",
-            string.Join(";", ops.Select(Describe)),
-            string.Join(";", expected.GetProperty("ops").EnumerateArray().Select(DescribeExpected)));
+            want => check(
+                "ops",
+                string.Join(";", ops.Select(Describe)),
+                string.Join(";", want.EnumerateArray().Select(DescribeExpected))));
 
-        check(
+        expected.AssertKeyWith(
             "result_order",
-            string.Join(",", map.PresentKeys()),
-            string.Join(",", expected.GetProperty("result_order").EnumerateArray().Select(x => x.GetString()!)));
+            want => check(
+                "result_order",
+                string.Join(",", map.PresentKeys()),
+                string.Join(",", want.EnumerateArray().Select(x => x.GetString()!))));
 
         // The LIS keys must not have been touched at all. Asserted on the reader counters, because
         // their VALUES are identical whether or not they were invalidated — a binding that re-minted
         // every key would return the same numbers here and recompute every reader.
         var recomputed = probes.Recomputed();
-        foreach (var key in expected.GetProperty("stable_keys_not_invalidated").EnumerateArray().Select(x => x.GetString()!))
-        {
-            check($"stable_keys_not_invalidated.{key}", recomputed.Values.Contains(key), false);
-        }
+        expected.AssertKeyWith(
+            "stable_keys_not_invalidated",
+            want =>
+            {
+                foreach (var key in want.EnumerateArray().Select(x => x.GetString()!))
+                {
+                    check($"stable_keys_not_invalidated.{key}", recomputed.Values.Contains(key), false);
+                }
+            });
     }
 
     private static string Describe<TKey, TValue>(DiffOp<TKey, TValue> op)

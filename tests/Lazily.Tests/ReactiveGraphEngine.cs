@@ -232,66 +232,70 @@ public sealed class ReactiveGraphEngine
         _model.Settle();
         var observation = new List<string> { $"cleanup_order={string.Join(",", _model.CleanupLog)}" };
 
-        if (expected.TryGetProperty("final_state", out var fin))
-        {
-            if (fin.TryGetProperty("dependents_of", out var deps))
+        expected.TryAssertKeyWith(
+            "final_state",
+            fin =>
             {
-                foreach (var p in deps.EnumerateObject())
+                if (fin.TryGetProperty("dependents_of", out var deps))
                 {
-                    var got = _model.DependentCount(_nodes[p.Name]);
-                    Check($"final.dependents_of.{p.Name}", got, p.Value.GetInt32());
-                    observation.Add($"dependents_of.{p.Name}={got}");
+                    foreach (var p in deps.EnumerateObject())
+                    {
+                        var got = _model.DependentCount(_nodes[p.Name]);
+                        Check($"final.dependents_of.{p.Name}", got, p.Value.GetInt32());
+                        observation.Add($"dependents_of.{p.Name}={got}");
+                    }
                 }
-            }
-            if (fin.TryGetProperty("readable", out var readable))
-            {
-                foreach (var p in readable.EnumerateObject())
+                if (fin.TryGetProperty("readable", out var readable))
                 {
-                    var alive = Readable(p.Name);
-                    Check($"final.readable.{p.Name}", alive, p.Value.GetBoolean());
-                    observation.Add($"readable.{p.Name}={alive}");
+                    foreach (var p in readable.EnumerateObject())
+                    {
+                        var alive = Readable(p.Name);
+                        Check($"final.readable.{p.Name}", alive, p.Value.GetBoolean());
+                        observation.Add($"readable.{p.Name}={alive}");
+                    }
                 }
-            }
-            if (fin.TryGetProperty("read", out var reads))
-            {
-                foreach (var p in reads.EnumerateObject())
+                if (fin.TryGetProperty("read", out var reads))
                 {
-                    var r = Read(p.Name);
-                    Check<long?>($"final.read.{p.Name}", r.Ok ? r.Value : null, p.Value.GetInt64());
-                    observation.Add($"read.{p.Name}={(r.Ok ? r.Value : null)}");
+                    foreach (var p in reads.EnumerateObject())
+                    {
+                        var r = Read(p.Name);
+                        Check<long?>($"final.read.{p.Name}", r.Ok ? r.Value : null, p.Value.GetInt64());
+                        observation.Add($"read.{p.Name}={(r.Ok ? r.Value : null)}");
+                    }
                 }
-            }
-        }
+            });
 
-        if (expected.TryGetProperty("after_publish", out var publish) &&
-            publish.TryGetProperty("op", out var pop))
-        {
-            var before = _model.RunLog.Count;
-            _model.SetCell(_nodes[Str(pop, "id")!], Num(pop, "value") ?? 0);
-            _model.Settle();
-            var observed = _model.RunLog.Skip(before).ToList();
-            observation.Add($"after_publish.observed_by={string.Join(",", observed)}");
-            if (publish.TryGetProperty("observed_by", out var wantObserved))
-                Check("after_publish.observed_by", string.Join(",", observed), string.Join(",", Strings(wantObserved)));
-            if (publish.TryGetProperty("read", out var pReads))
+        expected.TryAssertKeyWith(
+            "after_publish",
+            publish =>
             {
-                foreach (var p in pReads.EnumerateObject())
+                if (!publish.TryGetProperty("op", out var pop)) return;
+                var before = _model.RunLog.Count;
+                _model.SetCell(_nodes[Str(pop, "id")!], Num(pop, "value") ?? 0);
+                _model.Settle();
+                var observed = _model.RunLog.Skip(before).ToList();
+                observation.Add($"after_publish.observed_by={string.Join(",", observed)}");
+                if (publish.TryGetProperty("observed_by", out var wantObserved))
+                    Check("after_publish.observed_by", string.Join(",", observed), string.Join(",", Strings(wantObserved)));
+                if (publish.TryGetProperty("read", out var pReads))
                 {
-                    var r = Read(p.Name);
-                    Check<long?>($"after_publish.read.{p.Name}", r.Ok ? r.Value : null, p.Value.GetInt64());
-                    observation.Add($"after_publish.read.{p.Name}={(r.Ok ? r.Value : null)}");
+                    foreach (var p in pReads.EnumerateObject())
+                    {
+                        var r = Read(p.Name);
+                        Check<long?>($"after_publish.read.{p.Name}", r.Ok ? r.Value : null, p.Value.GetInt64());
+                        observation.Add($"after_publish.read.{p.Name}={(r.Ok ? r.Value : null)}");
+                    }
                 }
-            }
-            if (publish.TryGetProperty("dependents_of", out var pDeps))
-            {
-                foreach (var p in pDeps.EnumerateObject())
+                if (publish.TryGetProperty("dependents_of", out var pDeps))
                 {
-                    var got = _model.DependentCount(_nodes[p.Name]);
-                    Check($"after_publish.dependents_of.{p.Name}", got, p.Value.GetInt32());
-                    observation.Add($"after_publish.dependents_of.{p.Name}={got}");
+                    foreach (var p in pDeps.EnumerateObject())
+                    {
+                        var got = _model.DependentCount(_nodes[p.Name]);
+                        Check($"after_publish.dependents_of.{p.Name}", got, p.Value.GetInt32());
+                        observation.Add($"after_publish.dependents_of.{p.Name}={got}");
+                    }
                 }
-            }
-        }
+            });
 
         expected.Verify();
         return observation;

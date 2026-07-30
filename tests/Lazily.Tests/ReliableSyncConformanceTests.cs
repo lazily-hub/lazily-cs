@@ -52,11 +52,10 @@ public sealed class ReliableSyncConformanceTests
                 scenario,
                 "expect",
                 $"reliable-sync/resync_gap_converge.json scenario {scenario.GetProperty("name").GetString()}");
-            Assert.Equal(expected.GetProperty("final_last_epoch").GetUInt64(), coordinator.LastEpoch);
-            Assert.Equal(expected.GetProperty("resync_requests_emitted").GetInt32(), requests);
-            if (expected.TryGetProperty("converged_nodes", out var converged))
+            expected.AssertKey("final_last_epoch", coordinator.LastEpoch);
+            expected.AssertKey("resync_requests_emitted", requests);
+            if (expected.TryAssertKeyWith("converged_nodes", graph.AssertNodes))
             {
-                graph.AssertNodes(converged);
 
                 // `equals_no_drop_receiver`: recovery is state-equivalent, not lossy. The
                 // covering Snapshot IS the sender's whole state at the final epoch, so a
@@ -74,8 +73,8 @@ public sealed class ReliableSyncConformanceTests
                     else deltasOnly.Apply(replayed);
                 }
 
-                Assert.Equal(
-                    expected.GetProperty("equals_no_drop_receiver").GetBoolean(),
+                expected.AssertKey(
+                    "equals_no_drop_receiver",
                     graph.State.SequenceEqual(sender.State));
                 Assert.NotEqual(sender.State, deltasOnly.State);
             }
@@ -107,10 +106,10 @@ public sealed class ReliableSyncConformanceTests
                 scenario,
                 "expect",
                 $"reliable-sync/idempotent_redelivery.json scenario {scenario.GetProperty("name").GetString()}");
-            Assert.Equal(expected.GetProperty("final_last_epoch").GetUInt64(), coordinator.LastEpoch);
-            graph.AssertState(expected.GetProperty("state_after"));
-            Assert.Equal(
-                expected.GetProperty("net_effect_unchanged").GetBoolean(),
+            expected.AssertKey("final_last_epoch", coordinator.LastEpoch);
+            expected.AssertKeyWith("state_after", graph.AssertState);
+            expected.AssertKey(
+                "net_effect_unchanged",
                 graph.State.SequenceEqual(GraphProjector.FromState(scenario.GetProperty("state_before")).State));
             expected.Verify();
         }
@@ -125,7 +124,6 @@ public sealed class ReliableSyncConformanceTests
             root,
             "assertions",
             "reliable-sync/multi_epoch_delta.json");
-        Assert.Equal(3, rootAssertions.GetProperty("span").GetInt32());
         var scenarios = root.GetProperty("scenarios").EnumerateArray().ToArray();
         Assert.Equal(2, scenarios.Length);
 
@@ -133,12 +131,13 @@ public sealed class ReliableSyncConformanceTests
         var delta = ParseDelta(spanScenario.GetProperty("delta"));
         // The fixture-level assertions describe the span itself, so they are pinned against
         // the decoded delta rather than left as prose.
-        Assert.Equal(rootAssertions.GetProperty("base_epoch").GetUInt64(), delta.BaseEpoch);
-        Assert.Equal(rootAssertions.GetProperty("epoch").GetUInt64(), delta.Epoch);
-        Assert.Equal(
-            rootAssertions.GetProperty("is_multi_epoch").GetBoolean(),
-            delta.Epoch > delta.BaseEpoch + 1);
-        Assert.Equal(rootAssertions.GetProperty("op_count").GetInt32(), delta.Ops.Count);
+        // `span` used to be compared against the literal 3 — the fixture asserted against a
+        // number typed into the runner, not against the delta it describes.
+        rootAssertions.AssertKey("span", (int)(delta.Epoch - delta.BaseEpoch));
+        rootAssertions.AssertKey("base_epoch", delta.BaseEpoch);
+        rootAssertions.AssertKey("epoch", delta.Epoch);
+        rootAssertions.AssertKey("is_multi_epoch", delta.Epoch > delta.BaseEpoch + 1);
+        rootAssertions.AssertKey("op_count", delta.Ops.Count);
         rootAssertions.Verify();
         var coordinator = new ResyncCoordinator(
         spanScenario.GetProperty("receiver_last_epoch").GetUInt64());
@@ -148,12 +147,10 @@ public sealed class ReliableSyncConformanceTests
             "reliable-sync/multi_epoch_delta.json scenario span_3_applies_equal_to_unit_fold");
         var startEpoch = coordinator.LastEpoch;
         var decision = coordinator.Ingest(delta);
-        Assert.Equal(
-            Enum.Parse<ResyncAction>(spanExpected.GetProperty("action").GetString()!),
-            decision.Action);
-        Assert.Equal(
-            spanExpected.GetProperty("applied").GetBoolean(),
-            decision.Action == ResyncAction.Apply);
+        spanExpected.AssertKeyWith(
+            "action",
+            want => Assert.Equal(Enum.Parse<ResyncAction>(want.GetString()!), decision.Action));
+        spanExpected.AssertKey("applied", decision.Action == ResyncAction.Apply);
         var batched = new GraphProjector();
         batched.Apply(delta);
 
@@ -167,18 +164,16 @@ public sealed class ReliableSyncConformanceTests
         }
 
         Assert.Equal(delta.Epoch, coordinator.LastEpoch);
-        Assert.Equal(
-            spanExpected.GetProperty("receiver_last_epoch_after").GetUInt64(),
-            coordinator.LastEpoch);
+        spanExpected.AssertKey("receiver_last_epoch_after", coordinator.LastEpoch);
         // `atomic_advance`: the whole span lands in ONE ingest — the cursor never rests on
         // an intermediate epoch.
-        Assert.Equal(
-            spanExpected.GetProperty("atomic_advance").GetBoolean(),
+        spanExpected.AssertKey(
+            "atomic_advance",
             coordinator.LastEpoch - startEpoch == delta.Epoch - delta.BaseEpoch);
         // `fold_equivalent`: the same span folded as unit deltas lands on the same cursor
         // AND the same graph, so a span is an optimization and not a different protocol.
-        Assert.Equal(
-            spanExpected.GetProperty("fold_equivalent").GetBoolean(),
+        spanExpected.AssertKey(
+            "fold_equivalent",
             coordinator.LastEpoch == unitCoordinator.LastEpoch && unit.State.SequenceEqual(batched.State));
         Assert.Equal(coordinator.LastEpoch, unitCoordinator.LastEpoch);
         Assert.Equal(unit.State, batched.State);
@@ -191,16 +186,12 @@ public sealed class ReliableSyncConformanceTests
             gapScenario,
             "expect",
             "reliable-sync/multi_epoch_delta.json scenario gap_rule_unchanged_under_span");
-        Assert.Equal(
-            Enum.Parse<ResyncAction>(gapExpected.GetProperty("action").GetString()!),
-            gapDecision.Action);
-        Assert.Equal(
-            gapExpected.GetProperty("applied").GetBoolean(),
-            gapDecision.Action == ResyncAction.Apply);
-        Assert.Equal(gapExpected.GetProperty("request_from").GetUInt64(), gapDecision.FromEpoch);
-        Assert.Equal(
-            gapExpected.GetProperty("receiver_last_epoch_after").GetUInt64(),
-            gap.LastEpoch);
+        gapExpected.AssertKeyWith(
+            "action",
+            want => Assert.Equal(Enum.Parse<ResyncAction>(want.GetString()!), gapDecision.Action));
+        gapExpected.AssertKey("applied", gapDecision.Action == ResyncAction.Apply);
+        gapExpected.AssertKey("request_from", gapDecision.FromEpoch);
+        gapExpected.AssertKey("receiver_last_epoch_after", gap.LastEpoch);
         gapExpected.Verify();
     }
 
@@ -219,18 +210,14 @@ public sealed class ReliableSyncConformanceTests
         var set = new OrSet();
         var operations = addWins.GetProperty("ops").EnumerateArray().ToArray();
         foreach (var operation in operations) ApplyOrSet(set, operation);
-        Assert.Equal(addExpect.GetProperty("present").GetBoolean(), set.Present);
+        addExpect.AssertKey("present", set.Present);
         var reverse = new OrSet();
         foreach (var operation in operations.Reverse()) ApplyOrSet(reverse, operation);
         // `order_independent`: an OrSet join is commutative, so the reversed transcript
         // must reach the same verdict.
-        Assert.Equal(
-            addExpect.GetProperty("order_independent").GetBoolean(),
-            set.Present == reverse.Present);
+        addExpect.AssertKey("order_independent", set.Present == reverse.Present);
         var redeliveryApplied = operations.Count(operation => ApplyOrSet(set, operation));
-        Assert.Equal(
-        addExpect.GetProperty("redeliver_applied_count").GetInt32(),
-        redeliveryApplied);
+        addExpect.AssertKey("redeliver_applied_count", redeliveryApplied);
         // `reason` is the corpus's prose for WHY the set stays present. Holding it to the
         // tag the replay actually computes stops the explanation drifting from its data.
         var addedTags = operations
@@ -244,8 +231,11 @@ public sealed class ReliableSyncConformanceTests
             .ToHashSet(StringComparer.Ordinal);
         addedTags.ExceptWith(observedTags);
         Assert.Equal(addedTags.Count > 0, set.Present);
-        var reason = addExpect.GetProperty("reason").GetString()!;
-        Assert.All(addedTags, tag => Assert.Contains(tag, reason, StringComparison.Ordinal));
+        addExpect.AssertKeyWith(
+            "reason",
+            want => Assert.All(
+                addedTags,
+                tag => Assert.Contains(tag, want.GetString()!, StringComparison.Ordinal)));
         addExpect.Verify();
 
         var lwwScenario = scenarios[1];
@@ -264,10 +254,10 @@ public sealed class ReliableSyncConformanceTests
             ParseStamp(write.GetProperty("stamp")),
             write.GetProperty("value").GetBoolean());
         }
-        Assert.Equal(lwwExpect.GetProperty("value").GetBoolean(), register.Value);
+        lwwExpect.AssertKey("value", register.Value);
         // `resolution` names the conflict rule. Assert the RULE, not the label: the value
         // that survives must be the one carried by the highest-stamped write.
-        Assert.Equal("max_stamp", lwwExpect.GetProperty("resolution").GetString());
+        lwwExpect.AssertKeyWith("resolution", want => Assert.Equal("max_stamp", want.GetString()));
         var winner = writes
             .OrderByDescending(write => ParseStamp(write.GetProperty("stamp")).WallTime)
             .ThenByDescending(write => ParseStamp(write.GetProperty("stamp")).Logical)
@@ -284,9 +274,7 @@ public sealed class ReliableSyncConformanceTests
             ParseStamp(write.GetProperty("stamp")),
             write.GetProperty("value").GetBoolean());
         }
-        Assert.Equal(
-            lwwExpect.GetProperty("order_independent").GetBoolean(),
-            reversedRegister.Value == register.Value);
+        lwwExpect.AssertKey("order_independent", reversedRegister.Value == register.Value);
         lwwExpect.Verify();
 
         var cascade = scenarios[2];
@@ -311,10 +299,10 @@ public sealed class ReliableSyncConformanceTests
             new WireStamp(1, 0, 0));
         }
         var liveBefore = registry.LiveDocuments().ToArray();
-        Assert.Equal(Strings(cascadeExpect.GetProperty("live_docs_before")), liveBefore);
+        cascadeExpect.AssertKeyWith("live_docs_before", want => Assert.Equal(Strings(want), liveBefore));
         ApplyLiveness(registry, cascade.GetProperty("op"));
         var liveAfter = registry.LiveDocuments().ToArray();
-        Assert.Equal(Strings(cascadeExpect.GetProperty("live_docs_after")), liveAfter);
+        cascadeExpect.AssertKeyWith("live_docs_after", want => Assert.Equal(Strings(want), liveAfter));
         // `cascade`: ONE process death dropped MORE THAN ONE document, and left every other
         // process's documents alone. Either half on its own is satisfied by an unrelated
         // single drop.
@@ -326,8 +314,8 @@ public sealed class ReliableSyncConformanceTests
             .Where(entry => NormalizeProcess(entry.Second) != deadProcess)
             .Select(entry => entry.First)
             .ToArray();
-        Assert.Equal(
-            cascadeExpect.GetProperty("cascade").GetBoolean(),
+        cascadeExpect.AssertKey(
+            "cascade",
             liveBefore.Except(liveAfter, StringComparer.Ordinal).Count() > 1
                 && survivors.All(document => liveAfter.Contains(document, StringComparer.Ordinal)));
         cascadeExpect.Verify();
@@ -343,19 +331,17 @@ public sealed class ReliableSyncConformanceTests
         foreach (var operation in livenessOps) ApplyLiveness(forward, operation);
         foreach (var operation in livenessOps.Reverse()) ApplyLiveness(backward, operation);
         var duplicateChanges = livenessOps.Count(operation => ApplyLiveness(forward, operation));
-        Assert.Equal(
-        convergeExpect.GetProperty("redeliver_applied_count").GetInt32(),
-        duplicateChanges);
-        Assert.Equal(
-            convergeExpect.GetProperty("order_independent").GetBoolean(),
+        convergeExpect.AssertKey("redeliver_applied_count", duplicateChanges);
+        convergeExpect.AssertKey(
+            "order_independent",
             forward.LiveDocuments().SequenceEqual(backward.LiveDocuments(), StringComparer.Ordinal));
-        Assert.Equal(
-        Strings(convergeExpect.GetProperty("converged_live_docs")),
-        forward.LiveDocuments());
+        convergeExpect.AssertKeyWith(
+            "converged_live_docs",
+            want => Assert.Equal(Strings(want), forward.LiveDocuments()));
         // `per_doc_isolation`: the aggregate is per document, so one document's retry
         // convergence never rewrites another's.
-        Assert.Equal(
-            convergeExpect.GetProperty("per_doc_isolation").GetBoolean(),
+        convergeExpect.AssertKey(
+            "per_doc_isolation",
             forward.LiveDocuments().Distinct(StringComparer.Ordinal).Count()
                 == forward.LiveDocuments().Count);
         convergeExpect.Verify();
@@ -424,16 +410,17 @@ public sealed class ReliableSyncConformanceTests
             ackScenario,
             "expect",
             $"reliable-sync/coalesce scenario {ackScenario.GetProperty("name").GetString()}");
-        var retainedEpochs = Ulongs(ackExpect.GetProperty("retained_epochs_after"));
-        Assert.Equal(retainedEpochs, ackOutbox.RetainedEpochs);
+        ackExpect.AssertKeyWith(
+            "retained_epochs_after",
+            want => Assert.Equal(Ulongs(want), ackOutbox.RetainedEpochs));
         // `retained_after_ack` is the DEPTH the ack leaves behind — the bound the scenario
         // exists to pin. The epoch list alone does not state that the bound was respected.
-        Assert.Equal(ackExpect.GetProperty("retained_after_ack").GetInt32(), ackOutbox.RetainedEpochs.Count);
+        ackExpect.AssertKey("retained_after_ack", ackOutbox.RetainedEpochs.Count);
         // `dequeue_is_fifo_front`: replay hands frames back in ascending epoch order, so the
         // cursor queue drains from the front rather than from wherever the ack landed.
         var replayOrder = ackOutbox.ReplayFrom(0).Select(entry => entry.Epoch).ToArray();
-        Assert.Equal(
-            ackExpect.GetProperty("dequeue_is_fifo_front").GetBoolean(),
+        ackExpect.AssertKey(
+            "dequeue_is_fifo_front",
             replayOrder.SequenceEqual(replayOrder.Order()));
         ackExpect.Verify();
     }
@@ -455,9 +442,9 @@ public sealed class ReliableSyncConformanceTests
             slow,
             "expect",
             $"reliable-sync/liveness_lease_eviction.json scenario {slow.GetProperty("name").GetString()}");
-        Assert.Equal(slowExpect.GetProperty("rung").GetString(), rung.ToString().ToLowerInvariant());
-        Assert.Equal(slowExpect.GetProperty("B_is_full").GetBoolean(), isFullB);
-        Assert.Equal(slowExpect.GetProperty("B_evicted").GetBoolean(), rung == PeerEscalationRung.Evict);
+        slowExpect.AssertKey("rung", rung.ToString().ToLowerInvariant());
+        slowExpect.AssertKey("B_is_full", isFullB);
+        slowExpect.AssertKey("B_evicted", rung == PeerEscalationRung.Evict);
         // `A_stalled_by_B`: escalation is PER PEER. A's rung is computed from A's own
         // health and must be unaffected by B's — that isolation is the whole claim, and
         // asserting it needs A evaluated, not B's rung reinterpreted.
@@ -466,9 +453,7 @@ public sealed class ReliableSyncConformanceTests
         new PeerHealth(
         peerA.GetProperty("lease_fresh").GetBoolean(),
         IsFull: peerA.GetProperty("retained").GetInt32() >= 3));
-        Assert.Equal(
-            slowExpect.GetProperty("A_stalled_by_B").GetBoolean(),
-            rungA != PeerEscalationRung.Healthy);
+        slowExpect.AssertKey("A_stalled_by_B", rungA != PeerEscalationRung.Healthy);
         slowExpect.Verify();
 
         var expired = scenarios[1];

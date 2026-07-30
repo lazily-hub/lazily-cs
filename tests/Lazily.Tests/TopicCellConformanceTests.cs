@@ -68,16 +68,23 @@ public sealed class TopicCellConformanceTests
                 if (step.TryGetProperty("returns", out var expectedReturn))
                     AssertReturn(fixture, index, expectedReturn, returned);
 
-                foreach (var probe in invalidates.EnumerateObject())
-                {
-                    var handle = before[probe.Name] ?? topic.ReaderHandle(probe.Name);
-                    Assert.NotNull(handle);
-                    var invalidated = !handle!.Peek(out _);
-                    Assert.True(
-                        invalidated == probe.Value.GetBoolean(),
-                        $"{fixture} step {index}: invalidates.{probe.Name}");
-                    invalidationChecks++;
-                }
+                var at = index;
+                var topicAtStep = topic;
+                expected.AssertKeyWith(
+                    "invalidates",
+                    want =>
+                    {
+                        foreach (var probe in want.EnumerateObject())
+                        {
+                            var handle = before[probe.Name] ?? topicAtStep.ReaderHandle(probe.Name);
+                            Assert.NotNull(handle);
+                            var invalidated = !handle!.Peek(out _);
+                            Assert.True(
+                                invalidated == probe.Value.GetBoolean(),
+                                $"{fixture} step {at}: invalidates.{probe.Name}");
+                            invalidationChecks++;
+                        }
+                    });
 
                 AssertState(fixture, index, expected, topic);
                 expected.Verify();
@@ -155,32 +162,39 @@ public sealed class TopicCellConformanceTests
         FixtureAssertions expected,
         TopicCell<string> topic)
     {
-        Assert.Equal(expected.GetProperty("base_offset").GetInt64(), topic.BaseOffset);
-        Assert.Equal(
-            expected.GetProperty("elements").EnumerateArray().Select(value => value.GetString()),
-            topic.Elements());
+        expected.AssertKey("base_offset", topic.BaseOffset);
+        expected.AssertKey("elements", topic.Elements());
 
-        var expectedSubscriptions = expected.GetProperty("subscriptions");
-        Assert.Equal(
-            expectedSubscriptions.EnumerateObject().Select(pair => pair.Name).Order(),
-            topic.SubscriptionIds());
-        foreach (var pair in expectedSubscriptions.EnumerateObject())
-        {
-            var actual = topic.SubscriptionState(pair.Name);
-            Assert.NotNull(actual);
-            Assert.Equal(pair.Value.GetProperty("cursor").GetInt64(), actual!.Cursor);
-            Assert.Equal(
-                ParseDurability(pair.Value.GetProperty("durability").GetString()!),
-                actual.Durability);
-            Assert.Equal(pair.Value.GetProperty("connected").GetBoolean(), actual.Connected);
-        }
+        expected.AssertKeyWith(
+            "subscriptions",
+            expectedSubscriptions =>
+            {
+                Assert.Equal(
+                    expectedSubscriptions.EnumerateObject().Select(pair => pair.Name).Order(),
+                    topic.SubscriptionIds());
+                foreach (var pair in expectedSubscriptions.EnumerateObject())
+                {
+                    var actual = topic.SubscriptionState(pair.Name);
+                    Assert.NotNull(actual);
+                    Assert.Equal(pair.Value.GetProperty("cursor").GetInt64(), actual!.Cursor);
+                    Assert.Equal(
+                        ParseDurability(pair.Value.GetProperty("durability").GetString()!),
+                        actual.Durability);
+                    Assert.Equal(pair.Value.GetProperty("connected").GetBoolean(), actual.Connected);
+                }
+            });
 
-        foreach (var read in expected.GetProperty("reads").EnumerateObject())
-        {
-            Assert.Equal(
-                read.Value.EnumerateArray().Select(value => value.GetString()),
-                topic.ReadStream(read.Name));
-        }
+        expected.AssertKeyWith(
+            "reads",
+            reads =>
+            {
+                foreach (var read in reads.EnumerateObject())
+                {
+                    Assert.Equal(
+                        read.Value.EnumerateArray().Select(value => value.GetString()),
+                        topic.ReadStream(read.Name));
+                }
+            });
 
         Assert.True(topic.EndOffset == topic.BaseOffset + topic.Elements().Count);
     }
