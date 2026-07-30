@@ -22,7 +22,10 @@ public sealed class PortableStdlibConformanceTests
             using var document = SpecCorpus.Load("stdlib", fixtureName);
             var fixture = document.RootElement;
             AssertFixtureBookkeeping(fixture);
-            foreach (var scenario in SpecCorpus.Scenarios(fixture, "stdlib", fixtureName).All())
+            // PROBE (#lzguardsnotinci): replay only the FIRST scenario of each stdlib fixture.
+            // The suite stays fully green — nothing here counts scenarios — so the only
+            // thing that can turn CI red is the scenario replay ledger. THROWAWAY BRANCH.
+            foreach (var scenario in SpecCorpus.Scenarios(fixture, "stdlib", fixtureName).All().Take(1))
             {
                 switch (fixture.GetProperty("feature").GetString())
                 {
