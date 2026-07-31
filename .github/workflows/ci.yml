@@ -125,6 +125,22 @@ jobs:
           grep -qE 'scenario replay coverage OK: [1-9][0-9]*/[0-9]+ scenarios across [1-9][0-9]* opened fixtures' <<< "$out" \
             || { echo "::error::scenario replay ledger reported no replayed scenarios"; exit 1; }
 
+      # The gate that keeps every step above honest (#lzcheckcireachguard). It
+      # compares `make check`'s prerequisite closure against the run: bodies in
+      # this file and fails on any target CI does not reach. Comments inside run:
+      # bodies are stripped first — a naive grep for "make check" reported all
+      # nine bindings as covered and every one of those hits was a comment.
+      # scripts/ci-reach.conf deliberately does NOT list release.yml: a gate
+      # reached only when you cut a tag is not reached.
+      - name: CI-reachability guard (#lzcheckcireachguard)
+        run: |
+          out=$(./scripts/check-ci-reach.sh 2>&1) || { echo "$out"; echo "::error::a make check gate is unreachable from CI"; exit 1; }
+          echo "$out"
+          grep -q "check-ci-reach: OK" <<< "$out" || {
+            echo "::error::the CI-reachability guard exited 0 without reaching its verdict"
+            exit 1
+          }
+
   format:
     runs-on: ubuntu-latest
     steps:

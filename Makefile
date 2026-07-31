@@ -1,6 +1,6 @@
 # lazily-cs — build, test, and verification targets.
 
-.PHONY: all restore build test format format-check conformance pack package-check ffi-check interop-peer-check check clean conformance-coverage
+.PHONY: all restore build test format format-check conformance pack package-check ffi-check interop-peer-check check clean conformance-coverage ci-reach
 
 DOTNET ?= dotnet
 
@@ -45,8 +45,15 @@ interop-peer-check:
 	$(DOTNET) run --project src/Lazily.InteropPeer/Lazily.InteropPeer.csproj --no-build -- --self-check
 
 # Full local gate — run before committing.
-check: build test conformance-coverage package-check ffi-check interop-peer-check
+check: build test conformance-coverage package-check ffi-check interop-peer-check ci-reach
 	@echo "lazily-cs: check OK"
+
+# CI-reachability guard (#lzcheckcireachguard). Fails when a target above runs a
+# gate no CI workflow step reaches — the drift that hid #lzinteroppeerci in every
+# binding for months. It guards itself: `ci-reach` is in `check`, so CI has to run
+# it too or this target reports itself missing.
+ci-reach:
+	./scripts/check-ci-reach.sh
 
 clean:
 	$(DOTNET) clean --nologo
