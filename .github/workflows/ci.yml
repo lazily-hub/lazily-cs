@@ -64,6 +64,20 @@ jobs:
       - name: test
         run: dotnet test --no-build --nologo --verbosity normal
 
+      # Three gates `make check` runs that no CI job reached (#lzinteroppeerci).
+      # The interop peer is the cross-binding wire-compatibility check — nine
+      # bindings must agree on a byte layout — and it ran on a laptop and nowhere
+      # else. The package and FFI scripts are the same category: a check that
+      # only ever runs locally is a check that rots.
+      - name: Package layout check (#lzinteroppeerci)
+        run: ./scripts/check-package.sh
+
+      - name: FFI surface check (#lzinteroppeerci)
+        run: ./scripts/check-ffi.sh
+
+      - name: Interop peer self-check (#lzinteroppeerci)
+        run: dotnet run --project src/Lazily.InteropPeer/Lazily.InteropPeer.csproj --no-build -- --self-check
+
       # "Green" and "ran nothing" must not be indistinguishable. The conformance test
       # asserts a positive fixture and assertion count internally; this step asserts
       # from the outside that the conformance tests were actually selected and passed.
