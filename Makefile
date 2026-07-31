@@ -20,10 +20,14 @@ test:
 	@mkdir -p build && : > build/conformance-fixtures-loaded.txt
 	LAZILY_CONFORMANCE_MANIFEST=$(CURDIR)/build/conformance-fixtures-loaded.txt $(DOTNET) test --nologo
 
+# The repairing form. Deliberately NOT in `check` (#lzruffautofixvacuity): a
+# formatter that rewrites the tree it is judging exits 0 no matter what it
+# found, so putting this in a gate makes the gate unfailable.
 format:
 	$(DOTNET) format
 
-# Formatting is verified, not applied, in CI.
+# The GATE. Verified, not applied — and now in `check`, so a developer runs
+# locally what CI enforces instead of discovering the difference on push.
 format-check:
 	$(DOTNET) format --verify-no-changes
 
@@ -45,7 +49,7 @@ interop-peer-check:
 	$(DOTNET) run --project src/Lazily.InteropPeer/Lazily.InteropPeer.csproj --no-build -- --self-check
 
 # Full local gate — run before committing.
-check: build test conformance-coverage package-check ffi-check interop-peer-check ci-reach
+check: format-check build test conformance-coverage package-check ffi-check interop-peer-check ci-reach
 	@echo "lazily-cs: check OK"
 
 # CI-reachability guard (#lzcheckcireachguard). Fails when a target above runs a
