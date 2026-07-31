@@ -39,6 +39,14 @@ fi
 # Fixtures deliberately not covered by this binding yet. Keep this explicit even
 # while empty: any future entry is a reviewed finding, never a silent skip.
 KNOWN_UNCOVERED=(
+  # msgpack is a protocol.md MUST that lazily-cs does not implement
+  # (#lzmsgpackparity). The gap was already declared, but only in the
+  # interop peer's `carve_outs` — a place no parity surface reads. It belongs
+  # here, beside every other declared gap: the `json` half of the codec
+  # obligation IS replayed (CodecConformanceTests.cs), so this entry names
+  # exactly what is missing rather than the whole obligation. Closing it
+  # means encoding/decoding IpcMessage as a named-field MessagePack map.
+  "codec/frame_roundtrip_msgpack.json"
 )
 
 # Scenarios deliberately not replayed, one per line as
