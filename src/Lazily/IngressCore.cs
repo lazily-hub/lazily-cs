@@ -447,7 +447,14 @@ public sealed class IngressChange<TKey>
         {
             case IngressReceiptChannel.Accepted: AcceptedReceipts = true; break;
             case IngressReceiptChannel.Dropped: DroppedReceipts = true; break;
-            default: ErrorReceipts = true; break;
+            case IngressReceiptChannel.Error: ErrorReceipts = true; break;
+            default:
+                // A channel is which READER the shell must invalidate. Folding an unrecognised
+                // channel into `Error` would dirty the wrong reader: a receipt would be appended
+                // to a channel whose version source never bumped, so its reader would serve a
+                // cached list that is missing it, permanently.
+                throw new ArgumentOutOfRangeException(
+                    nameof(channel), channel, "Unknown ingress receipt channel.");
         }
     }
 }
@@ -491,9 +498,15 @@ public readonly record struct IngressScopeView(
         IngressLifecycle.Closed => IngressReadiness.Closed,
         IngressLifecycle.Suspended => IngressReadiness.Suspended,
         IngressLifecycle.Opening => IngressReadiness.Warming,
-        _ => DeliveredThrough is null
+        IngressLifecycle.Live => DeliveredThrough is null
             ? IngressReadiness.Warming
             : IsFresh ? IngressReadiness.Ready : IngressReadiness.Stale,
+
+        // Readiness is the answer to "can a consumer trust this scope right now?". A lifecycle
+        // this build does not know must not be answered `Ready` on the strength of a watermark,
+        // which is what the old catch-all did for every future non-Live state.
+        _ => throw new ArgumentOutOfRangeException(
+            nameof(Lifecycle), Lifecycle, "Unknown ingress lifecycle has no readiness."),
     };
 
     /// <summary>Derived authority. A closed scope claims none.</summary>
@@ -1050,7 +1063,7 @@ public sealed class IngressCore<TKey, TValue>
                     return (change, IngressAdmission.Buffered(decision.GapFrom));
                 }
 
-            default:
+            case DecisionKind.Delivered:
                 change.Mark(key, IngressScopeChange.All);
                 change.MarkChannel(PushReceipt(
                     key,
@@ -1063,6 +1076,13 @@ public sealed class IngressCore<TKey, TValue>
                         ? IngressAdmission.Conflated(decision.DeliveredThrough)
                         : IngressAdmission.Accepted(decision.DeliveredThrough);
                 return (change, admission);
+
+            default:
+                // The old catch-all made Delivered the ASSUMED LAST VARIANT: any decision kind
+                // added to the algebra without a case here would mint an ACCEPTED receipt and
+                // advance the watermark for an envelope that was never merged.
+                throw new ArgumentOutOfRangeException(
+                    nameof(envelope), decision.Kind, "Unknown ingress decision kind.");
         }
     }
 
@@ -1137,10 +1157,20 @@ public sealed class IngressCore<TKey, TValue>
                     scope.Window = default!;
                     scope.WindowDepth = 0;
                     break;
-                default:
+                case RelayOverflow.Conflate:
+                case RelayOverflow.Spill:
                     // Conflate IS the bound; Spill degrades to it until a durable tail is wired,
-                    // exactly as RelayCell does.
+                    // exactly as RelayCell does. Both are now named rather than absorbed.
                     break;
+                default:
+                    // `Overflow` is a caller-supplied policy value that survives an unchecked cast
+                    // from int. Absorbing an unknown one into "conflate" silently disables the
+                    // bound the caller asked for — the scope grows without limit and reports no
+                    // backpressure at all.
+                    throw new ArgumentOutOfRangeException(
+                        nameof(envelope),
+                        _policy.Overflow,
+                        "Unknown ingress overflow policy.");
             }
         }
 

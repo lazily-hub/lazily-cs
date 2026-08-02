@@ -150,6 +150,15 @@ public static class LazilyFfi
             CrdtSyncMessage => LazilyFfiMessageKind.CrdtSync,
             ResyncRequestMessage => LazilyFfiMessageKind.ResyncRequest,
             OutboxAckMessage => LazilyFfiMessageKind.OutboxAck,
+
+            // INTENTIONAL leniency, and it is the FFI's published contract: `LazilyFfiMessageKind`
+            // ships an `Unknown` member precisely so a foreign caller can classify a frame this
+            // build does not name without the call failing. The frame already DECODED — status is
+            // Ok and the bytes round-trip — so the correct report is "valid frame, kind I do not
+            // recognise", which a C caller can act on. Collapsing that into an error status would
+            // make a newer peer's frame indistinguishable from malformed JSON, and would unwind a
+            // .NET exception toward an ABI boundary that has no channel for one.
+            // Pinned by `AnUnknownFrameClassifiesAsUnknownNotAsInvalid`.
             _ => LazilyFfiMessageKind.Unknown,
         };
 }

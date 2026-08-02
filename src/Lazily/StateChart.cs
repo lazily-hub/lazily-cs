@@ -118,9 +118,30 @@ public sealed class ChartDef
     /// <returns>The kind.</returns>
     public StateKind Kind(string id)
     {
+        // An id absent from `States` is a PSEUDO-ID, not a typo: `PathBelow` and the entry walk
+        // both call `Kind` on region and ancestor ids the chart names only as a parent, and a node
+        // with no definition has no children and no history, which is exactly Atomic. Deliberate
+        // leniency, pinned by `KindOfAnUndeclaredIdIsAtomic`.
         if (!States.TryGetValue(id, out var sd)) return StateKind.Atomic;
-        if (sd.History is "shallow") return StateKind.HistoryShallow;
-        if (sd.History is "deep") return StateKind.HistoryDeep;
+
+        // `history` is a CLOSED two-value wire enum carried as a string by every binding's chart
+        // fixture. It is NOT forward-compatible: a chart is authored data, and no producer
+        // legitimately emits a third history kind, so an unrecognised spelling is a typo that
+        // would otherwise demote a history pseudo-state to an ordinary compound state and
+        // silently lose every resume. Fail closed, naming the value.
+        if (sd.History is { } history)
+        {
+            return history switch
+            {
+                "shallow" => StateKind.HistoryShallow,
+                "deep" => StateKind.HistoryDeep,
+                _ => throw new ArgumentOutOfRangeException(
+                    nameof(id),
+                    history,
+                    $"State '{id}' declares an unknown history kind; expected 'shallow' or 'deep'."),
+            };
+        }
+
         if (sd.Final) return StateKind.Final;
         if (sd.Parallel) return StateKind.Parallel;
         return Children(id).Count > 0 ? StateKind.Compound : StateKind.Atomic;
@@ -457,7 +478,18 @@ public sealed class StateChart
                 foreach (var region in Def.Children(state)) EnterSubtree(region, enter, actions);
                 break;
 
+            case StateKind.Atomic:
+            case StateKind.Final:
+            case StateKind.Compound: // compound WITHOUT an initial child — see the guard above
+            case StateKind.HistoryShallow:
+            case StateKind.HistoryDeep:
             default:
+                // INTENTIONAL: entering a leaf descends no further, and the two history kinds are
+                // resolved by `RestoreViaHistory` before this walk ever sees them. `Kind` already
+                // fails closed on an unrecognised history spelling, so the only value that can
+                // reach `default` is a StateKind added to the enum without updating this walk —
+                // which must degrade to "leaf", never to a throw, because entry runs on the hot
+                // transition path. Pinned by `EnteringALeafDescendsNoFurther`.
                 break;
         }
     }

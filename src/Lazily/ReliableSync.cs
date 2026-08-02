@@ -75,6 +75,15 @@ public sealed class ResyncCoordinator
         {
             SnapshotMessage snapshot => Ingest(snapshot),
             DeltaMessage delta => Ingest(delta),
+
+            // INTENTIONAL leniency. This coordinator owns exactly ONE thing: the epoch cursor on
+            // the snapshot/delta plane. Every other frame on the wire — resync requests, outbox
+            // acks, CRDT sync, and any frame kind a newer peer introduces — carries no epoch, so
+            // "ignore" is not a guess, it is the complete and correct answer for a message with
+            // nothing for this cursor to fold. A shared socket multiplexes all of those planes, so
+            // throwing on an unrecognised frame would let an unrelated plane's forward-compatible
+            // extension kill sync. Ignore does NOT suppress a gap: LastEpoch is untouched, so the
+            // next delta still detects the hole. Pinned by `AnUnknownIpcFrameIsIgnoredNotFolded`.
             _ => new ResyncDecision(ResyncAction.Ignore),
         };
     }

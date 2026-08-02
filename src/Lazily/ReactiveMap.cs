@@ -319,14 +319,19 @@ public sealed class SourceMap<TKey, TValue> : ReactiveMap<TKey, TValue, Source<T
     /// <returns>Whether a new entry was created.</returns>
     public bool Insert(TKey key, TValue value, InsertAt at = InsertAt.End, int index = 0, TKey? anchor = default)
     {
+        // Validated BEFORE the mint, so a refused placement leaves the map untouched rather than
+        // holding an entry at the wrong index.
+        Lazily.Reconcile.RequirePlacement(at, anchor);
         if (IsPresent(key)) return false;
         Entry(key, value);            // mints at the end and bumps membership
         switch (at)
         {
+            case InsertAt.End: break; // already appended by Entry
             case InsertAt.Index: MoveTo(key, index); break;
-            case InsertAt.Before when anchor is not null: MoveBefore(key, anchor); break;
-            case InsertAt.After when anchor is not null: MoveAfter(key, anchor); break;
-            default: break;           // End: already appended
+            case InsertAt.Before: MoveBefore(key, anchor!); break;
+            case InsertAt.After: MoveAfter(key, anchor!); break;
+            default:
+                throw new ArgumentOutOfRangeException(nameof(at), at, "Unknown insert position.");
         }
 
         return true;
@@ -365,7 +370,13 @@ public sealed class SourceMap<TKey, TValue> : ReactiveMap<TKey, TValue, Source<T
                 case DiffOpRemove<TKey, TValue> rem: Remove(rem.Key); break;
                 case DiffOpMove<TKey, TValue> mv: MoveTo(mv.Key, mv.To); break;
                 case DiffOpUpdate<TKey, TValue> upd: Set(upd.Key, upd.Value); break;
-                default: break;
+
+                // `Reconcile` returns `ops` as the record of what it APPLIED. A silently skipped
+                // op would be reported as applied, so the caller's next diff would be computed
+                // against a state the map never reached.
+                default:
+                    throw new ArgumentOutOfRangeException(
+                        nameof(targetOrder), op.GetType().Name, "Unknown reconciliation op.");
             }
         }
 

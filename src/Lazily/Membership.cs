@@ -124,7 +124,16 @@ public sealed class MembershipCell
         {
             null => [new PeerChange("Joined", peer)],
             PeerState.Alive => [],
-            _ => [new PeerChange("StateChanged", peer, previous, PeerState.Alive)],
+
+            // Every non-Alive state is a REVIVAL, and they report identically by construction:
+            // the change carries `previous` verbatim, so the three are distinguishable to a reader
+            // without three arms here. Named rather than absorbed so a state added later has to be
+            // classified deliberately instead of silently reported as a revival to Alive.
+            PeerState.Suspect or PeerState.Dead or PeerState.Left =>
+                [new PeerChange("StateChanged", peer, previous, PeerState.Alive)],
+
+            _ => throw new ArgumentOutOfRangeException(
+                nameof(peer), previous, "Unknown prior peer state."),
         };
     }
 

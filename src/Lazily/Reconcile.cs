@@ -74,6 +74,43 @@ public sealed record DiffOpUpdate<TKey, TValue>(TKey Key, TValue Value) : DiffOp
 /// </remarks>
 public static class Reconcile
 {
+    /// <summary>
+    /// Refuses an insert placement no map flavor can honour, BEFORE the entry is minted.
+    /// </summary>
+    /// <remarks>
+    /// Two shapes are refused here, and both used to be absorbed by a <c>default: break</c> that
+    /// appended silently and still reported success. `at` survives an unchecked cast from
+    /// <c>int</c>, and an anchored placement with no anchor is the ordinary caller mistake — each
+    /// produced a correct membership set at a WRONG index, and ordering is the only thing these
+    /// maps add over a dictionary. Shared so the synchronous, thread-safe, and async flavors
+    /// cannot disagree about which placements exist.
+    /// </remarks>
+    /// <typeparam name="TKey">The key type.</typeparam>
+    /// <param name="at">The requested placement.</param>
+    /// <param name="anchor">The anchor, required by <see cref="InsertAt.Before"/> / <see cref="InsertAt.After"/>.</param>
+    internal static void RequirePlacement<TKey>(InsertAt at, TKey? anchor)
+    {
+        switch (at)
+        {
+            case InsertAt.End:
+            case InsertAt.Index:
+                return;
+
+            case InsertAt.Before:
+            case InsertAt.After:
+                if (anchor is null)
+                {
+                    throw new ArgumentNullException(
+                        nameof(anchor), $"InsertAt.{at} requires an anchor key.");
+                }
+
+                return;
+
+            default:
+                throw new ArgumentOutOfRangeException(nameof(at), at, "Unknown insert position.");
+        }
+    }
+
     /// <summary>Computes the minimal op set from <paramref name="prior"/> to <paramref name="target"/>.</summary>
     /// <typeparam name="TKey">The key type.</typeparam>
     /// <typeparam name="TValue">The value type.</typeparam>

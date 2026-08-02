@@ -188,6 +188,10 @@ where TStore : IOutboxStore
     /// <inheritdoc />
     public void ReclaimUnacked() => Store.DeleteAfter(AckedThrough);
 
+    // INTENTIONAL: null means "not a queue op", which is the whole question this predicate asks.
+    // Fusion is an OPTIMIZATION over a suffix of unacked deltas — a null signature disables fusion
+    // for that op and the delta is replayed verbatim, which is always correct. Failing closed here
+    // would make every non-queue delta unsendable. Pinned by `FusionSkipsANonQueueDeltaOp`.
     private static (Type Type, ulong Node)? QueueSignature(DeltaOp operation) =>
     operation switch
     {
@@ -319,6 +323,22 @@ public sealed class FileOutboxStore : IOutboxStore
                     }
                     entries[record.Epoch] = record.Frame;
                     break;
+
+                case "cursor":
+                    // Read by LoadCursor, not by the entry fold. Explicit so "ignored here" is
+                    // distinguishable from "nobody recognised it".
+                    break;
+
+                default:
+                    // The journal is an on-disk format that a DIFFERENT build of this library may
+                    // have written. Silently ignoring an op this build does not know is not
+                    // forward-compat, it is corruption: a `delete_after` a newer writer emitted
+                    // would be dropped and the pruned suffix would resurrect as live outbox
+                    // entries. A malformed known op (a `put` or `replace_after` missing its
+                    // payload) lands here too and is equally a truncated journal, not a no-op.
+                    throw new InvalidDataException(
+                        $"Outbox journal '{_path}' carries an unsupported record " +
+                        $"'{record.Op}' at epoch {record.Epoch}.");
             }
         }
 
@@ -382,8 +402,15 @@ public sealed class FileOutboxStore : IOutboxStore
                 }
                 catch (JsonException)
                 {
-                    // A crash can leave one incomplete trailing record. Earlier fsynced records
-                    // remain authoritative and replayable.
+                    // INTENTIONAL leniency, and the ONE decode failure this store absorbs. The
+                    // journal is appended with a single fsynced write per record, so a crash
+                    // between the write and the flush can leave exactly one torn TRAILING line.
+                    // Every earlier record was fsynced whole and stays authoritative and
+                    // replayable, so refusing the whole journal over a torn tail would turn a
+                    // recoverable crash into permanent data loss. Note the narrow catch: a
+                    // well-formed record carrying an op this build does not know is NOT absorbed
+                    // here — it reaches ScanAfter's fail-closed default below. Pinned by
+                    // `ATornTrailingJournalRecordIsSkipped`.
                 }
             }
 

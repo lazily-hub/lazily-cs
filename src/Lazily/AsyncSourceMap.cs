@@ -181,14 +181,20 @@ where TKey : notnull
         int index = 0,
         TKey? anchor = default)
     {
+        // Same verdict as the synchronous SourceMap, through the same shared guard: an unknown
+        // position and a missing anchor both used to degrade to "append", reporting a successful
+        // insert at the wrong index. Validated before the mint so a refusal leaves no entry behind.
+        Reconcile.RequirePlacement(at, anchor);
         if (IsPresent(key)) return false;
         Entry(key, value);
         switch (at)
         {
+            case InsertAt.End: break; // already appended by Entry
             case InsertAt.Index: MoveTo(key, index); break;
-            case InsertAt.Before when anchor is not null: MoveBefore(key, anchor); break;
-            case InsertAt.After when anchor is not null: MoveAfter(key, anchor); break;
-            default: break;
+            case InsertAt.Before: MoveBefore(key, anchor!); break;
+            case InsertAt.After: MoveAfter(key, anchor!); break;
+            default:
+                throw new ArgumentOutOfRangeException(nameof(at), at, "Unknown insert position.");
         }
 
         return true;

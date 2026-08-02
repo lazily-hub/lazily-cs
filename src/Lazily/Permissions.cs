@@ -199,6 +199,15 @@ public sealed class PeerPermissions
             DeltaOp.QueuePush op => IsAllowed(peer, RemoteOp.Read(op.Node)),
             DeltaOp.QueuePop op => IsAllowed(peer, RemoteOp.Read(op.Node)),
             DeltaOp.QueueClose op => IsAllowed(peer, RemoteOp.Read(op.Node)),
+
+            // INTENTIONAL leniency, and the only safe direction. `operation` is decoded from a
+            // frame a REMOTE PEER wrote, so the op set a sender uses is not the op set this
+            // receiver knows — that skew is normal in a mixed-version mesh and is exactly what a
+            // wire enum is forward-compatible for. `false` means DENY: an op this build cannot
+            // interpret is withheld from the peer rather than forwarded on an unchecked guess, so
+            // leniency about the op is strictness about the disclosure. Throwing instead would let
+            // any peer take the whole plane down by sending one frame from a newer build.
+            // Pinned by `AnUnknownDeltaOpIsNotReadableByAnyPeer`.
             _ => false,
         };
 }

@@ -955,6 +955,13 @@ public static class BlobTransport
                     })
                     .ToArray(),
             },
+
+            // INTENTIONAL leniency. Spilling is a SIZE OPTIMIZATION, not a semantic step: an
+            // unspilled frame is byte-for-byte the frame the caller handed in and stays fully
+            // decodable by every peer. Resync requests and outbox acks carry no payload at all, so
+            // identity is the correct and complete answer for them, and a frame kind introduced
+            // later is at worst sent inline. Failing closed here would make this transport refuse
+            // to send control frames. Pinned by `AnUnknownFrameIsForwardedUnspilled`.
             _ => message,
         };
 
@@ -1025,6 +1032,12 @@ public static class BlobTransport
             {
                 Payload = SpillAndCount(push.Payload, backend, threshold, ref total),
             },
+
+            // INTENTIONAL, same contract as SpillMessage above: these four are every DeltaOp that
+            // carries bytes. Invalidate, NodeRemove, the edge ops, QueuePop and QueueClose carry
+            // only ids, so there is nothing to page out and identity is exact — and an op variant
+            // a newer peer relays through is forwarded inline rather than dropped.
+            // Pinned by `AnUnknownDeltaOpIsForwardedUnspilled`.
             _ => operation,
         };
     }

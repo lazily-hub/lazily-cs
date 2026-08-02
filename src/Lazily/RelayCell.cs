@@ -324,7 +324,15 @@ public sealed class RelayCell<T>
             RelayOverflow.Spill =>
                 _spillStore is not null &&
                 (_merge.Idempotent || _spillDeduplicatesReplay),
-            _ => true,
+
+            // These three impose no requirement on the merge policy or on a spill store.
+            RelayOverflow.Block or RelayOverflow.DropOldest or RelayOverflow.DropNewest => true,
+
+            // This predicate is the ADMISSION GATE for a live policy swap. The old catch-all
+            // answered "legal" for anything it did not recognise, which is precisely backwards:
+            // an unknown overflow is the one value whose requirements cannot be checked.
+            _ => throw new ArgumentOutOfRangeException(
+                nameof(overflow), overflow, "Unknown relay overflow policy."),
         };
     }
 

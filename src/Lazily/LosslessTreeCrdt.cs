@@ -191,7 +191,18 @@ public sealed record TreeOp(TreeOpId Id, TreeOperation Operation)
                     edit with { Delta = edit.Delta.ToArray() },
                 SplitLeafOperation split =>
                     split with { Position = split.Position.Copy() },
-                _ => Operation,
+
+                // Tombstone and Merge carry only value-typed ids, so identity IS the deep copy.
+                TombstoneNodeOperation or MergeLeavesOperation => Operation,
+
+                // `TreeOperation` is a public, non-sealed base. A variant this build does not know
+                // may carry a mutable payload, and returning it by identity would let the
+                // "defensive copy" in TreeUpdate silently alias a caller's buffer — the exact
+                // aliasing this method exists to prevent.
+                _ => throw new ArgumentOutOfRangeException(
+                    nameof(Operation),
+                    Operation.GetType().Name,
+                    "Unknown tree operation variant cannot be defensively copied."),
             });
 }
 
@@ -342,6 +353,12 @@ public sealed class TreeException : InvalidOperationException
                 TreeError.NonScalarBoundary =>
                     "offset out of range or not on a UTF-8 scalar boundary",
                 TreeError.NotAdjacent => "leaves are not adjacent live siblings",
+
+                // INTENTIONAL: this is a MESSAGE formatter running inside an exception
+                // constructor. The machine-readable verdict is `Error`, which is preserved
+                // verbatim below, so nothing dispatches on this string; throwing here would
+                // replace the caller's real rejection with an unrelated failure and destroy the
+                // reason they were about to read. Pinned by `AnUnknownTreeErrorStillCarriesItsCode`.
                 _ => "tree mutation rejected",
             })
     {
@@ -737,7 +754,15 @@ public sealed class LosslessTreeCrdt
                 && _nodes.ContainsKey(merge.Right)
                 && _frontier.Contains(merge.PreviousLeft)
                 && _frontier.Contains(merge.PreviousRight),
-            _ => false,
+
+            // `false` here does NOT mean "reject": it means "buffer and retry when the frontier
+            // grows". An op whose variant nobody recognises can never become ready, so the lenient
+            // answer parks it in `_buffered` forever — an unbounded silent leak that also stalls
+            // every later op depending on it, with no error anywhere. Fail closed.
+            _ => throw new ArgumentOutOfRangeException(
+                nameof(operation),
+                operation.Operation.GetType().Name,
+                "Unknown tree operation variant has no dependency rule."),
         };
 
     private void ApplyOperation(TreeOp operation)
@@ -796,6 +821,16 @@ public sealed class LosslessTreeCrdt
             case MergeLeavesOperation merge:
                 ApplyMerge(merge, operation.Id);
                 break;
+
+            default:
+                // Reached only after DependenciesReady said yes, so an unrecognised variant here
+                // would be RECORDED into the frontier while applying nothing — the peer would
+                // then believe the op landed and never resend it. Silent divergence is strictly
+                // worse than a rejected update.
+                throw new ArgumentOutOfRangeException(
+                    nameof(operation),
+                    operation.Operation.GetType().Name,
+                    "Unknown tree operation variant cannot be applied.");
         }
     }
 

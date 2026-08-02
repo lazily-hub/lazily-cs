@@ -453,7 +453,18 @@ public sealed class CommandProjection
             CommandStatus.Submitted => 0,
             CommandStatus.Accepted => 1,
             CommandStatus.Running => 2,
-            _ => 3,
+
+            // Rank 3 is TERMINAL, and these five are every terminal status. The old catch-all made
+            // "terminal" the assumed answer for anything unrecognised, so a non-terminal status
+            // added later would outrank Running and freeze the projection at it.
+            CommandStatus.Applied
+                or CommandStatus.Rejected
+                or CommandStatus.Cancelled
+                or CommandStatus.Superseded
+                or CommandStatus.TimedOut => 3,
+
+            _ => throw new ArgumentOutOfRangeException(
+                nameof(status), status, "Unknown command status has no phase rank."),
         };
 
     private static CommandStatus TerminalStatus(CausalReceipt receipt) =>
@@ -999,7 +1010,13 @@ public sealed class CommandRpcClient
         {
             CommandMessage.Submit submit => submit.Value.CommandId,
             CommandMessage.Cancel cancel => cancel.Value.CommandId,
-            _ => null,
+
+            // An event batch and a reconnect projection carry MANY commands, so neither names one
+            // waiter to complete; the receipt overload does that. Named rather than absorbed.
+            CommandMessage.Events or CommandMessage.Projection => null,
+
+            _ => throw new ArgumentOutOfRangeException(
+                nameof(message), message.GetType().Name, "Unknown command frame."),
         });
         return result;
     }
