@@ -80,16 +80,19 @@ public sealed class CrdtConformanceTests
 
         foreach (var scenario in scenarios.All())
         {
-            var name = scenario.GetProperty("name").GetString();
+            // Dispatch on `id`, the canonical scenario identity
+            // (#recommendedconformanceco). `name` is a prose label, so keying on
+            // it means a copy-edit upstream silently drops through to `default`.
+            var name = scenario.GetProperty("id").GetString();
             switch (name)
             {
-                case "merge algebra is order and duplication independent":
+                case "merge_is_order_and_duplication_independent":
                     ReplayMergeAlgebra(scenario, ref assertions);
                     break;
-                case "empty frontier snapshot preserves lineage":
+                case "empty_frontier_snapshot_preserves_lineage":
                     ReplaySnapshotLineage(scenario, ref assertions);
                     break;
-                case "own frontier emits an empty delta":
+                case "own_frontier_emits_empty_delta":
                     ReplayOwnFrontier(scenario, ref assertions);
                     break;
                 default:
