@@ -72,10 +72,11 @@ KNOWN_UNCOVERED=(
 # (#lzspecdecoderbound) — lazily-cs is one of the three bindings that decodes the
 # whole u64 range, so it asserts the `exact` branch for every scenario, PLUS ONE
 # for codec/nodekey_null_leniency.json, the NodeKey null-leniency rule
-# (#lzkeynullstrict). NEVER lower this to make the gate green: a drop means a
-# replay was removed, renamed, or short-circuited, and that is the finding, not
-# the floor.
-MIN_FIXTURES="${MIN_FIXTURES:-138}"
+# (#lzkeynullstrict), PLUS ONE for codec/blob_backend_discriminator.json, the
+# blob-backend discriminator strictness rule (#lzblobbackendstrict). NEVER lower
+# this to make the gate green: a drop means a replay was removed, renamed, or
+# short-circuited, and that is the finding, not the floor.
+MIN_FIXTURES="${MIN_FIXTURES:-139}"
 
 # Scenarios deliberately not replayed, one per line as
 #   corpus/fixture.json|scenario-id|reason
@@ -104,13 +105,15 @@ KNOWN_UNREPLAYED_SCENARIOS=(
 # at 138/138 and then prints "0/0 scenarios across 0 opened fixtures" and exits 0.
 # That was reproducible on this script before this constant existed.
 #
-# 120 = calibrated from the observed run at the time of writing, which replayed
-# 125/125 scenarios across 35 opened fixtures. Deliberately set slightly below the
-# real number so ordinary corpus churn does not trip it, and far enough above zero
-# that a detached ledger or a dispatch that stopped matching cannot slip through.
-# NEVER lower this to make the gate green: a drop means scenarios stopped being
-# reached, and that is the finding, not the floor.
-MIN_SCENARIOS="${MIN_SCENARIOS:-120}"
+# 128 = calibrated from the observed run at the time of writing, which replayed
+# 133/133 scenarios across 36 opened fixtures — the 125 replayed when this floor
+# was first written, PLUS the eight scenarios of
+# codec/blob_backend_discriminator.json (#lzblobbackendstrict). Deliberately set
+# slightly below the real number so ordinary corpus churn does not trip it, and
+# far enough above zero that a detached ledger or a dispatch that stopped matching
+# cannot slip through. NEVER lower this to make the gate green: a drop means
+# scenarios stopped being reached, and that is the finding, not the floor.
+MIN_SCENARIOS="${MIN_SCENARIOS:-128}"
 
 MANIFEST="${LAZILY_CONFORMANCE_MANIFEST:-build/conformance-fixtures-loaded.txt}"
 TEST_DIRS=("tests")

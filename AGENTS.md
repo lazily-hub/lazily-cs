@@ -50,8 +50,8 @@ reported green while testing nothing.
   produce an unreplayed scenario. A loop that finds no problems cannot tell "nothing is wrong"
   from "nothing was examined", so the magnitude is asserted explicitly before anything prints OK
   (`#lzvacuousrun`). Rung 1 fails on a corpus listing zero fixtures and on `covered <
-  MIN_FIXTURES` (138); rung 4 fails on zero scenarios across the opened fixtures and on
-  `replayed < MIN_SCENARIOS` (120, calibrated below the observed 125). Both floors are
+  MIN_FIXTURES` (139); rung 4 fails on zero scenarios across the opened fixtures and on
+  `replayed < MIN_SCENARIOS` (128, calibrated below the observed 133). Both floors are
   env-overridable so they can be mutation-checked, and neither is ever lowered to make a red run
   green — a drop is the finding. The scenario guard also refuses to run at all if `MIN_SCENARIOS`
   is not passed through to it: a floor that cannot be read is not a floor, and "cannot check"

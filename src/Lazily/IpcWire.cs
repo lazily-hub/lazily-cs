@@ -435,8 +435,30 @@ frontier);
     {
         RequireObject(body, "ShmBlobRef");
         BlobBackendKind? backend = null;
+
+        // #lzblobbackendstrict. An OMITTED `backend` is the forward-compatibility channel — it
+        // carries every descriptor minted before the field existed — and only that. A PRESENT
+        // value outside the enum is a different fact and gets the opposite answer: refuse the
+        // frame and NAME the token. Normalizing an unknown backend to `shm` (five bindings did,
+        // each calling it forward-compat) routes a non-shm descriptor into the shm table, which
+        // is the misroute `resolve_wrong_backend` discharges STRUCTURALLY by routing on kind;
+        // leniency downgrades that to a probabilistic guarantee riding on a 64-bit checksum
+        // against a backend this build genuinely resolves — so a collision returns BYTES, where
+        // a refusal is a visible protocol error the peer recovers from by resync.
         if (body.TryGetProperty("backend", out var backendElement))
         {
+            // A non-string `backend` used to escape as InvalidOperationException out of
+            // GetString(), which is outside this codec's declared failure mode (JsonException,
+            // so a caller can handle both MUST-level codecs through one catch) — and an explicit
+            // `backend: null` reached the switch as a null string and was refused as the token
+            // `''`, naming nothing. Both are rejections either way; neither said what was wrong.
+            if (backendElement.ValueKind != JsonValueKind.String)
+            {
+                throw new JsonException(
+                    $"Blob backend must be one of 'shm', 'arrow', or 'in_process', not the "
+                    + $"{backendElement.ValueKind} value '{backendElement}'.");
+            }
+
             backend = backendElement.GetString() switch
             {
                 "shm" => BlobBackendKind.Shm,
