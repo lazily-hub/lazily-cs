@@ -74,12 +74,20 @@ reported green while testing nothing.
   scenarios can be PARTIALLY replayed while the coverage guard stays green — it asks only whether
   the FILE was opened, and one scenario answers yes; the key trackers only bind blocks a runner
   reaches, so a scenario nobody reached contributes no unconsumed and no unasserted key. Reach
-  every scenario through `SpecCorpus.Scenarios(...)`, whose indexer and iterators record each one
-  in the runtime ledger at the point of replay. `scripts/check-conformance-coverage.sh` verifies
+  every scenario through `SpecCorpus.Scenarios(...)`, which hands back a `Scenario` booked on the
+  first read of its PAYLOAD — never at the yield (`#lzscenariobodyskip`). Yielding is not
+  replaying: an iterator cannot tell a loop body that ran from one that `continue`d, so the
+  yield-time booking this replaced credited exactly the skip this rung exists to catch, which
+  lazily-py demonstrated against the contract's own probe. `id`/`name`/`description` and the rest
+  of `ScenarioSet.LabelKeys` stay silent, so a dispatch chain that reads the label and matches no
+  arm books nothing; `.Value` (and the implicit `JsonElement` conversion) books, because handing
+  the whole object to a replay helper is the strongest statement that a replay is happening, and
+  `.Peek` is the escape hatch that does not. `scripts/check-conformance-coverage.sh` verifies
   that ledger against the ids on disk (`id`, else `name`, else positional `#<n>`), and
   `KNOWN_UNREPLAYED_SCENARIOS` sits beside `KNOWN_UNCOVERED` so there is one place to read what
   this binding does not prove. Naming a scenario is not replaying it: `IdAt` deliberately records
-  nothing, and neither does a bookkeeping read of the raw array.
+  nothing, and neither does a bookkeeping read of the raw array. Give every scenario dispatch
+  chain a fail-closed `default`/`else` so an unmatched shape throws instead of passing.
 - **A guard CI does not run is not a guard.** The four conformance rungs do not all execute the
   same way, and CI enforced only half of them until `#lzguardsnotinci`. The unconsumed-key and
   read-but-not-asserted gates are raised by `FixtureAssertions.Verify()` *inside the test host*, so

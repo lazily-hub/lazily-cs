@@ -89,24 +89,34 @@ public sealed class ScenarioSet
     /// </remarks>
     public string IdAt(int index) => IdOf(_scenarios[index], index);
 
-    /// <summary>The scenario at <paramref name="index"/>, recorded as replayed.</summary>
-    public JsonElement this[int index]
-    {
-        get
-        {
-            var scenario = _scenarios[index];
-            SpecCorpus.RecordScenario(_fixture, IdOf(scenario, index));
-            return scenario;
-        }
-    }
-
-    /// <summary>Every scenario in order, recorded one at a time as it is yielded.</summary>
+    /// <summary>
+    /// Keys that IDENTIFY or narrate a scenario rather than drive one
+    /// (<c>#lzscenariobodyskip</c>).
+    /// </summary>
     /// <remarks>
-    /// Lazy on purpose. Materializing the whole array up front would record scenarios a
-    /// runner then walks past — which is exactly the defect being guarded — so a consumer
-    /// that stops early records only what it actually took.
+    /// Reading only these is looking at the LABEL, not replaying: a dispatch chain that
+    /// reads <c>name</c>, matches no arm and falls through has replayed nothing, and a
+    /// by-name lookup walks past every scenario ahead of its match. Booking on those reads
+    /// is what let a skipped body book itself. No scenario in the corpus carries only these,
+    /// so every one is reachable through some payload key.
     /// </remarks>
-    public IEnumerable<JsonElement> All()
+    public static readonly IReadOnlySet<string> LabelKeys = new HashSet<string>(StringComparer.Ordinal)
+    {
+        "comment", "description", "id", "label", "name", "note", "notes", "reason", "why",
+    };
+
+    /// <summary>The scenario at <paramref name="index"/>, booked when its PAYLOAD is read.</summary>
+    public Scenario this[int index] => new(_scenarios[index], _fixture, IdOf(_scenarios[index], index));
+
+    /// <summary>Every scenario in order.</summary>
+    /// <remarks>
+    /// Lazy on purpose, and no longer booking at the yield (<c>#lzscenariobodyskip</c>).
+    /// An iterator cannot tell a loop body that ran from one that skipped past — both just
+    /// come back for the next item — so booking here called a skipped scenario covered,
+    /// which is the defect this rung exists for. Each <see cref="Scenario"/> books itself
+    /// when the runner reads its payload.
+    /// </remarks>
+    public IEnumerable<Scenario> All()
     {
         for (var index = 0; index < _scenarios.Length; index++)
         {
@@ -115,11 +125,116 @@ public sealed class ScenarioSet
     }
 
     /// <summary><see cref="All"/> with each scenario's position and ledger id.</summary>
-    public IEnumerable<(int Index, string Id, JsonElement Scenario)> Indexed()
+    public IEnumerable<(int Index, string Id, Scenario Scenario)> Indexed()
     {
         for (var index = 0; index < _scenarios.Length; index++)
         {
             yield return (index, IdAt(index), this[index]);
         }
     }
+}
+
+/// <summary>
+/// One scenario, booked as replayed on the first read of its PAYLOAD
+/// (<c>#lzscenariobodyskip</c>).
+/// </summary>
+/// <remarks>
+/// <para>
+/// Yielding is not replaying. The ledger used to book at the point <see cref="ScenarioSet"/>
+/// handed a scenario over, which cannot distinguish a loop body that ran from one that
+/// skipped past. lazily-py proved that empirically against the contract's own probe: with
+/// yield-time booking, a <c>continue</c> at the top of the loop body still booked the
+/// scenario and the replay guard stayed silent.
+/// </para>
+/// <para>
+/// Booking on payload access tells them apart. The <c>steps</c>/<c>ops</c>/<c>frames</c>/
+/// <c>expect</c> of a scenario are read only by a runner about to replay it, while
+/// <c>id</c> and <c>name</c> are what a skip reads on its way past — see
+/// <see cref="ScenarioSet.LabelKeys"/>.
+/// </para>
+/// </remarks>
+public readonly struct Scenario : IEquatable<Scenario>
+{
+    private readonly JsonElement _scenario;
+    private readonly string _fixture;
+    private readonly string _id;
+
+    internal Scenario(JsonElement scenario, string fixture, string id)
+    {
+        _scenario = scenario;
+        _fixture = fixture;
+        _id = id;
+    }
+
+    private void Book() => SpecCorpus.RecordScenario(_fixture, _id);
+
+    private void Touch(string key)
+    {
+        if (!ScenarioSet.LabelKeys.Contains(key))
+        {
+            Book();
+        }
+    }
+
+    /// <summary>The ledger id. A label read: never books.</summary>
+    public string Id => _id;
+
+    /// <summary>The raw element WITHOUT booking, for inspecting a label before deciding to replay.</summary>
+    /// <remarks>
+    /// Use it only where a read really is a look. Reaching the payload through this is the
+    /// skip this rung exists to catch.
+    /// </remarks>
+    public JsonElement Peek => _scenario;
+
+    /// <summary>The whole scenario, BOOKED — for handing the payload to a replay helper.</summary>
+    /// <remarks>
+    /// Reaching for the entire object is the strongest statement a runner can make that it is
+    /// about to replay this scenario, so it books unconditionally. The implicit conversion to
+    /// <see cref="JsonElement"/> goes through here for the same reason.
+    /// </remarks>
+    public JsonElement Value
+    {
+        get
+        {
+            Book();
+            return _scenario;
+        }
+    }
+
+    public JsonElement this[string key]
+    {
+        get
+        {
+            Touch(key);
+            return _scenario.GetProperty(key);
+        }
+    }
+
+    public JsonElement GetProperty(string key)
+    {
+        Touch(key);
+        return _scenario.GetProperty(key);
+    }
+
+    public bool TryGetProperty(string key, out JsonElement value)
+    {
+        Touch(key);
+        return _scenario.TryGetProperty(key, out value);
+    }
+
+    public JsonValueKind ValueKind => _scenario.ValueKind;
+
+    public static implicit operator JsonElement(Scenario scenario) => scenario.Value;
+
+    public bool Equals(Scenario other) =>
+        string.Equals(_fixture, other._fixture, StringComparison.Ordinal)
+        && string.Equals(_id, other._id, StringComparison.Ordinal);
+
+    public override bool Equals(object? obj) => obj is Scenario other && Equals(other);
+
+    public override int GetHashCode() => HashCode.Combine(_fixture, _id);
+
+    public static bool operator ==(Scenario left, Scenario right) => left.Equals(right);
+
+    public static bool operator !=(Scenario left, Scenario right) => !left.Equals(right);
 }
