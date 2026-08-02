@@ -95,6 +95,33 @@ internal sealed class InteropPeer
             StdlibFeatures.All(advertised.Contains),
             "stdlib feature advertisement self-check failed");
 
+        // The advertised `codecs` list is a literal in `hello`, so it can drift from what this
+        // binding can actually encode — and advertising a codec whose BYTES are wrong is the
+        // same defect as advertising one that does not exist. Pin the list, then prove the
+        // msgpack half is the externally tagged spec wire rather than some private framing
+        // that happens to use MessagePack (#lzmsgpackseven).
+        var codecs = hello["codecs"]?.AsArray()
+            .Select(codec => codec?.GetValue<string>() ?? string.Empty)
+            .ToArray()
+            ?? throw new InvalidOperationException("hello self-check returned no codecs");
+        Require(
+            codecs.Length == 2 && codecs[0] == "json" && codecs[1] == "msgpack",
+            "hello no longer advertises exactly the codec tokens this binding can dispatch");
+
+        var probe = new CrdtSyncMessage(
+            [new CrdtOp(1, null, new WireStamp(5, 0, 1), new IpcValue.Inline([1]))]);
+        var packed = MsgPackWire.Serialize(probe);
+        Require(
+            IpcWire.Serialize(MsgPackWire.Deserialize(packed)) == IpcWire.Serialize(probe),
+            "advertised msgpack codec does not round-trip");
+        using (var view = MsgPackWire.Inspect(packed))
+        {
+            var tags = view.RootElement.EnumerateObject().Select(member => member.Name).ToArray();
+            Require(
+                tags.Length == 1 && tags[0] == "CrdtSync",
+                "advertised msgpack codec is not the externally tagged spec wire");
+        }
+
         var local = peer.Handle(
             new JsonObject
             {
@@ -205,11 +232,15 @@ internal sealed class InteropPeer
                 "stdlib_timer_v1",
                 "stdlib_timeout_v1",
                 "stdlib_revision_barrier_v1"),
-            ["codecs"] = StringArray("json"),
+            // Both MUST-level frame codecs are implemented and replayed through
+            // codec/frame_roundtrip_{json,msgpack}.json (#lzmsgpackseven). `msgpack` sat in
+            // `carve_outs` until MsgPackWire landed; leaving it there would understate this
+            // binding to every peer that reads the handshake.
+            ["codecs"] = StringArray("json", "msgpack"),
             ["channels"] = new JsonArray(),
             ["channel_variants"] = new JsonObject(),
             ["platform_profile"] = "portable",
-            ["carve_outs"] = StringArray("msgpack", "transport_links"),
+            ["carve_outs"] = StringArray("transport_links"),
         };
     }
 

@@ -39,15 +39,22 @@ fi
 # Fixtures deliberately not covered by this binding yet. Keep this explicit even
 # while empty: any future entry is a reviewed finding, never a silent skip.
 KNOWN_UNCOVERED=(
-  # msgpack is a protocol.md MUST that lazily-cs does not implement
-  # (#lzmsgpackparity). The gap was already declared, but only in the
-  # interop peer's `carve_outs` — a place no parity surface reads. It belongs
-  # here, beside every other declared gap: the `json` half of the codec
-  # obligation IS replayed (CodecConformanceTests.cs), so this entry names
-  # exactly what is missing rather than the whole obligation. Closing it
-  # means encoding/decoding IpcMessage as a named-field MessagePack map.
-  "codec/frame_roundtrip_msgpack.json"
 )
+
+# Minimum DISTINCT canonical fixtures this binding must be observed OPENING.
+#
+# The per-fixture check below is exact in one direction only: it fails on a
+# fixture the corpus HAS that the suite did not open. It cannot fail on a suite
+# that opened almost nothing because the corpus itself came up short — that path
+# reports "coverage OK: 2/2" and exits 0, which is the vacuous green #lzvacuousrun
+# named after this binding printed "0/0" on three rungs in a row.
+#
+# 136 = the 135 fixtures replayed before #lzmsgpackseven, PLUS ONE for
+# codec/frame_roundtrip_msgpack.json, whose KNOWN_UNCOVERED entry above is gone
+# now that MsgPackWire implements the wire the `msgpack` token names. NEVER lower
+# this to make the gate green: a drop means a replay was removed, renamed, or
+# short-circuited, and that is the finding, not the floor.
+MIN_FIXTURES="${MIN_FIXTURES:-136}"
 
 # Scenarios deliberately not replayed, one per line as
 #   corpus/fixture.json|scenario-id|reason
@@ -146,13 +153,21 @@ for known in "${KNOWN_UNCOVERED[@]}"; do
   fi
 done
 
+if [ "$covered" -lt "$MIN_FIXTURES" ]; then
+  echo "ERROR: only $covered distinct canonical fixtures were OPENED, expected >= $MIN_FIXTURES." >&2
+  echo "       A replay was removed, renamed, or short-circuited — or the corpus checkout is" >&2
+  echo "       short. Do not lower MIN_FIXTURES to fix this." >&2
+  missing=$((missing + 1))
+fi
+
 if [ "$missing" -gt 0 ]; then
   echo "conformance coverage FAILED: $missing problem(s)" >&2
   exit 1
 fi
 
 echo "conformance coverage OK: $covered/$total canonical fixtures OPENED by the suite" \
-     "(${#KNOWN_UNCOVERED[@]} listed as known-uncovered; runtime manifest — these bytes were really read)"
+     "(${#KNOWN_UNCOVERED[@]} listed as known-uncovered; floor $MIN_FIXTURES;" \
+     "runtime manifest — these bytes were really read)"
 
 # -- Per-scenario replay accounting (#lzscenariocoverage) ---------------------
 #

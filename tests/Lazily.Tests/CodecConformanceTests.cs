@@ -18,21 +18,29 @@ namespace Lazily.Tests;
 /// could carve out a MUST-level codec and stay green on every rung.
 /// </para>
 /// <para>
-/// lazily-cs implements the <c>json</c> half. <c>msgpack</c> is an explicit carve-out
-/// (declared in the interop peer and now in <c>scripts/check-conformance-coverage.sh</c>),
-/// so <c>codec/frame_roundtrip_msgpack.json</c> is listed as known-uncovered rather than
-/// silently ignored.
+/// lazily-cs implements BOTH halves (<c>#lzmsgpackseven</c>). <c>msgpack</c> was an explicit
+/// carve-out until <see cref="MsgPackWire"/> landed; the <c>KNOWN_UNCOVERED</c> entry in
+/// <c>scripts/check-conformance-coverage.sh</c> is gone with it, because an allowlist that
+/// outlives its gap understates coverage silently.
 /// </para>
 /// <para>
 /// The runner decodes <c>wire</c>, RE-ENCODES the decoded message, decodes again, and checks
 /// every <c>expect</c> key against that second decode. Asserting against the fixture literal
 /// would prove nothing: the literal never passed through an encoder.
 /// </para>
+/// <para>
+/// The msgpack half additionally introspects the ENCODED BYTES schema-lessly through
+/// <see cref="MsgPackWire.Inspect"/>. The named-field rule is a property of the ENCODING and
+/// is therefore invisible to every assertion over a decoded <c>IpcMessage</c>: a positional
+/// encoder round-trips each value correctly and is still speaking a private framing no peer
+/// that negotiated <c>msgpack</c> could read.
+/// </para>
 /// </remarks>
 public sealed class CodecConformanceTests
 {
     private const string Corpus = "codec";
     private const string JsonFixture = "frame_roundtrip_json.json";
+    private const string MsgPackFixture = "frame_roundtrip_msgpack.json";
 
     private static string VariantOf(IpcMessage message) => message switch
     {
@@ -165,6 +173,206 @@ public sealed class CodecConformanceTests
         }
 
         Assert.Equal(3, replayed);
+    }
+
+    [Fact]
+    public void Msgpack_frames_round_trip_through_the_cross_language_binary_default()
+    {
+        if (SpecCorpus.Root is null) return;
+
+        using var document = SpecCorpus.Load(Corpus, MsgPackFixture);
+        var root = document.RootElement;
+        Assert.Equal(1, root.GetProperty("protocol_version").GetInt32());
+        Assert.Equal("FrameCodecRoundTrip", root.GetProperty("kind").GetString());
+        Assert.Equal("msgpack", root.GetProperty("codec").GetString());
+
+        // `byte_canonical: false` is the whole reason this fixture pins decoded values and
+        // encoded FIELD NAMES instead of golden bytes: a MessagePack map's key order is
+        // encoder-defined, so two conforming bindings MAY emit byte-different frames for the
+        // same IpcMessage.
+        var meta = FixtureAssertions.Of(root, "assertions", $"{Corpus}/{MsgPackFixture} assertions");
+        meta.AssertKey("codec", "msgpack");
+        meta.AssertKey("self_describing", true);
+        meta.AssertKey("byte_canonical", false);
+        meta.AssertKey("required_of_binding", "MUST");
+        meta.AssertKey("role", "cross_language_binary_default");
+        meta.AssertKey("scenario_count", root.GetProperty("scenarios").GetArrayLength());
+        meta.ExcuseKey(
+            "note",
+            "prose: restates the named-field rule the encoded_* keys below verify executably");
+        meta.Verify();
+
+        var scenarios = SpecCorpus.Scenarios(root, Corpus, MsgPackFixture);
+        var replayed = 0;
+        var encodingKeys = 0;
+        foreach (var scenario in scenarios.All())
+        {
+            var where = scenario.GetProperty("id").GetString()!;
+
+            // `wire` is written in the REFERENCE json form — the same three values the json
+            // fixture carries — so the msgpack half starts from the identical message and
+            // differs only in how it is serialized.
+            var source = IpcWire.Deserialize(scenario.GetProperty("wire").GetRawText());
+            Assert.Equal(scenario.GetProperty("variant").GetString(), VariantOf(source));
+
+            var frame = MsgPackWire.Serialize(source);
+            var expect = FixtureAssertions.Of(scenario, "expect", $"{Corpus}/{MsgPackFixture} {where}");
+
+            // Encoding first, decoded values second. A positional encoder decodes back to an
+            // equal message under a matching positional decoder and is still non-conforming,
+            // so the named-field rule is checked where it lives: in the bytes.
+            encodingKeys += AssertEncoding(expect, frame);
+
+            var roundTripped = MsgPackWire.Deserialize(frame);
+            expect.AssertKey("round_trip_equals_source", RoundTripEqual(roundTripped, source));
+            AssertValues(expect, roundTripped);
+            expect.Verify();
+            replayed += 1;
+        }
+
+        // Non-zero, expected magnitude (#lzvacuousrun). "Three green rungs over nothing" is
+        // the failure this suite has actually shipped before: a runner that replayed no
+        // scenario, or reached no encoded_* key, would otherwise report OK over an empty set.
+        Assert.Equal(3, replayed);
+        Assert.Equal(3, scenarios.Count);
+        // 2 envelope/body keys per scenario, plus first_node (Snapshot) and first_op/second_op
+        // (CrdtSync). Exact, not a floor: a runner that quietly reached fewer would pass one.
+        Assert.Equal(9, encodingKeys);
+    }
+
+    /// <summary>
+    /// The fixture pins three variants; <c>msgpack</c> is MUST-level for the whole family.
+    /// </summary>
+    [Fact]
+    public void Msgpack_covers_the_frames_the_fixture_does_not_carry()
+    {
+        var request = new ResyncRequestMessage(12);
+        Assert.Equal(request, MsgPackWire.Deserialize(MsgPackWire.Serialize(request)));
+        var ack = new OutboxAckMessage(41);
+        Assert.Equal(ack, MsgPackWire.Deserialize(MsgPackWire.Serialize(ack)));
+
+        using var view = MsgPackWire.Inspect(MsgPackWire.Serialize(request));
+        Assert.Equal(new[] { "ResyncRequest" }, SortedFieldNames(view.RootElement));
+        Assert.Equal(
+            new[] { "from_epoch" },
+            SortedFieldNames(view.RootElement.GetProperty("ResyncRequest")));
+
+        // SharedBlob is the other externally tagged NodeState/IpcValue arm, and a NodeSnapshot
+        // WITH a key is the other side of the omit-when-absent rule.
+        var blob = new ShmBlobRef(8, 16, 1, 2, 99, BlobBackendKind.Arrow);
+        var snapshot = new SnapshotMessage(
+            3,
+            [new NodeSnapshot(1, "blob", new NodeState.SharedBlob(blob), "scores/alice")],
+            [],
+            [1]);
+        Assert.Equal(
+            IpcWire.Serialize(snapshot),
+            IpcWire.Serialize(MsgPackWire.Deserialize(MsgPackWire.Serialize(snapshot))));
+
+        using var encoded = MsgPackWire.Inspect(MsgPackWire.Serialize(snapshot));
+        var node = encoded.RootElement.GetProperty("Snapshot").GetProperty("nodes")[0];
+        Assert.Equal(new[] { "key", "node", "state", "type_tag" }, SortedFieldNames(node));
+        Assert.Equal(new[] { "SharedBlob" }, SortedFieldNames(node.GetProperty("state")));
+    }
+
+    /// <summary>
+    /// The frames a conforming peer never sends are REJECTED, not read leniently.
+    /// </summary>
+    /// <remarks>
+    /// Accepting them would make this binding read frames no conforming peer produces — a
+    /// private extension wearing the <c>msgpack</c> token, which is the defect protocol.md
+    /// § Frame codecs names outright.
+    /// </remarks>
+    [Fact]
+    public void Msgpack_rejects_frames_outside_the_wire()
+    {
+        // `bin` in a byte-payload position. The reference encoder writes Vec<u8> through
+        // serde's default seq impl, so a byte payload is an ARRAY OF INTEGERS; MessagePack
+        // libraries that map byte[] to `bin` by default are not speaking this wire.
+        // {"Delta":{"base_epoch":0,"epoch":1,"ops":[{"CellSet":{"node":1,"payload":{"Inline":bin[10]}}}]}}
+        var binPayload = new List<byte>
+        {
+            0x81, 0xa5, 0x44, 0x65, 0x6c, 0x74, 0x61,           // {"Delta":
+            0x83,                                                //   3-entry map
+            0xaa, 0x62, 0x61, 0x73, 0x65, 0x5f, 0x65, 0x70, 0x6f, 0x63, 0x68, 0x00,
+            0xa5, 0x65, 0x70, 0x6f, 0x63, 0x68, 0x01,
+            0xa3, 0x6f, 0x70, 0x73, 0x91,                        //   "ops": [
+            0x81, 0xa7, 0x43, 0x65, 0x6c, 0x6c, 0x53, 0x65, 0x74, // {"CellSet":
+            0x82,
+            0xa4, 0x6e, 0x6f, 0x64, 0x65, 0x01,
+            0xa7, 0x70, 0x61, 0x79, 0x6c, 0x6f, 0x61, 0x64,
+            0x81, 0xa6, 0x49, 0x6e, 0x6c, 0x69, 0x6e, 0x65,
+            0xc4, 0x01, 0x0a,                                    // bin8 [10]  <- not this wire
+        };
+        Assert.Throws<JsonException>(() => MsgPackWire.Deserialize([.. binPayload]));
+
+        // A positional struct: [1, "i32", …] where the wire requires a named-field map.
+        Assert.Throws<JsonException>(() => MsgPackWire.Deserialize([0x81, 0xa9, 0x4f, 0x75, 0x74,
+            0x62, 0x6f, 0x78, 0x41, 0x63, 0x6b, 0x91, 0x29]));
+
+        // An integer-keyed map is the discriminator framing protocol.md excludes outright.
+        Assert.Throws<JsonException>(() => MsgPackWire.Deserialize([0x81, 0x00, 0x01]));
+
+        var ack = MsgPackWire.Serialize(new OutboxAckMessage(41));
+        Assert.Throws<JsonException>(() => MsgPackWire.Deserialize(ack[..^1]));
+        Assert.Throws<JsonException>(() => MsgPackWire.Deserialize([.. ack, 0x00]));
+    }
+
+    /// <summary>
+    /// Assert the fixture's <c>encoded_*</c> keys against a schema-less view of the FRAME BYTES.
+    /// </summary>
+    /// <returns>How many <c>encoded_*</c> keys this scenario actually reached.</returns>
+    /// <remarks>
+    /// Nothing here touches the decoded <c>IpcMessage</c>. These are the only assertions that
+    /// can see the difference between the <c>msgpack</c> wire and a private MessagePack
+    /// framing that carries the same values.
+    /// </remarks>
+    private static int AssertEncoding(FixtureAssertions expect, byte[] frame)
+    {
+        using var encoded = MsgPackWire.Inspect(frame);
+        var envelope = encoded.RootElement;
+
+        // Externally tagged: exactly one entry, whose KEY is the variant name. An internally
+        // tagged {"type": 0, "value": …} frame has two.
+        Assert.Equal(JsonValueKind.Object, envelope.ValueKind);
+        var tagged = Assert.Single(envelope.EnumerateObject());
+
+        expect.AssertKey("encoded_envelope_key", tagged.Name);
+        expect.AssertKey("encoded_body_field_names", SortedFieldNames(tagged.Value));
+        var reached = 2;
+
+        reached += AssertNestedFieldNames(expect, "first_node_encoded_field_names", tagged.Value, "nodes", 0);
+        reached += AssertNestedFieldNames(expect, "first_op_encoded_field_names", tagged.Value, "ops", 0);
+        reached += AssertNestedFieldNames(expect, "second_op_encoded_field_names", tagged.Value, "ops", 1);
+        return reached;
+    }
+
+    private static int AssertNestedFieldNames(
+        FixtureAssertions expect,
+        string key,
+        JsonElement body,
+        string collection,
+        int index) =>
+        expect.TryAssertKeyWith(
+            key,
+            want => Assert.Equal(
+                want.EnumerateArray().Select(item => item.GetString()!).ToArray(),
+                SortedFieldNames(body.GetProperty(collection)[index])))
+            ? 1
+            : 0;
+
+    /// <summary>
+    /// The field names of one encoded struct, SORTED.
+    /// </summary>
+    /// <remarks>
+    /// Sorted because a MessagePack map's key order is encoder-defined — the fixture pins the
+    /// SET of names, never their order. The <c>Object</c> requirement is the assertion a
+    /// positional encoder fails: it hands back an array with no names at all.
+    /// </remarks>
+    private static string[] SortedFieldNames(JsonElement map)
+    {
+        Assert.Equal(JsonValueKind.Object, map.ValueKind);
+        return [.. map.EnumerateObject().Select(member => member.Name).Order(StringComparer.Ordinal)];
     }
 
     /// <summary>
