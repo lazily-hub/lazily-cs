@@ -54,10 +54,12 @@ KNOWN_UNCOVERED=(
 # now that MsgPackWire implements the wire the `msgpack` token names), PLUS ONE
 # for codec/nodeid_exact_range.json, the NodeId exact-representation bound
 # (#lzspecdecoderbound) — lazily-cs is one of the three bindings that decodes the
-# whole u64 range, so it asserts the `exact` branch for every scenario. NEVER
-# lower this to make the gate green: a drop means a replay was removed, renamed,
-# or short-circuited, and that is the finding, not the floor.
-MIN_FIXTURES="${MIN_FIXTURES:-137}"
+# whole u64 range, so it asserts the `exact` branch for every scenario, PLUS ONE
+# for codec/nodekey_null_leniency.json, the NodeKey null-leniency rule
+# (#lzkeynullstrict). NEVER lower this to make the gate green: a drop means a
+# replay was removed, renamed, or short-circuited, and that is the finding, not
+# the floor.
+MIN_FIXTURES="${MIN_FIXTURES:-138}"
 
 # Scenarios deliberately not replayed, one per line as
 #   corpus/fixture.json|scenario-id|reason
