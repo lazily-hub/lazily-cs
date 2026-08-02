@@ -192,6 +192,35 @@ for known in "${KNOWN_UNCOVERED[@]}"; do
   fi
 done
 
+# ---- The evidence channel guards itself ----
+#
+# Everything above asks "did the suite open fixture X?" and answers it out of the
+# manifest. Nothing yet asks whether the manifest is describing THIS corpus. A
+# recorded id that names no file under $SPEC_DIR means the evidence file was
+# truncated, interleaved by concurrent test hosts appending at process exit, or
+# carried over from a run against a different corpus — and coverage computed from
+# it cannot be trusted in EITHER direction: the count is inflated by ids nobody
+# can resolve, while a real fixture the suite stopped opening can hide behind
+# them. This is the fixture twin of the ledger self-check the scenario leg below
+# already makes (an id the fixture does not carry), and lazily-rs has carried it
+# on this rung since the manifest replaced the static grep.
+#
+# Scenario records ride in the same file, distinguished by a TAB (see
+# SpecCorpus.RecordScenario). They name an id inside a fixture, not a path, so
+# they are skipped here and checked against the fixture's own scenarios by the
+# python leg further down.
+while IFS= read -r id; do
+  [ -n "$id" ] || continue
+  case "$id" in *"$(printf '\t')"*) continue ;; esac
+  if [ ! -f "$SPEC_DIR/$id" ]; then
+    echo "ERROR: manifest records '$id', which names no file in $SPEC_DIR." >&2
+    echo "       The recorder is dropping or interleaving writes, or this evidence" >&2
+    echo "       file was written against a different corpus; coverage computed from" >&2
+    echo "       this manifest cannot be trusted." >&2
+    missing=$((missing + 1))
+  fi
+done <<< "$OPENED"
+
 # ---- Positive-evidence floor (#lzvacuousrun) ----
 # Every check above reasons about fixtures the corpus LISTED and the run OPENED,
 # so all of it is vacuously satisfied by an empty population: zero fixtures means

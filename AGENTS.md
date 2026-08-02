@@ -56,6 +56,14 @@ reported green while testing nothing.
   green — a drop is the finding. The scenario guard also refuses to run at all if `MIN_SCENARIOS`
   is not passed through to it: a floor that cannot be read is not a floor, and "cannot check"
   must never share a branch with "nothing to check".
+- **The evidence channel guards itself.** A floor asserts the manifest is big enough; it cannot
+  say the manifest describes THIS corpus. Every bare id recorded in the manifest is resolved
+  against `$SPEC_DIR`, and one that names no file there fails the build: the recorder truncated or
+  interleaved its writes (several test hosts append at process exit), or the evidence file is
+  left over from a run against a different corpus. Either way the count is inflated by ids nobody
+  can resolve, and a fixture the suite stopped opening can hide behind them. The scenario leg makes
+  the same check one rung down — an id the fixture does not carry means the runner and the corpus
+  disagree about how a scenario is named.
 - **Ledgers are two-directional.** `Unsupported` names fixtures this binding cannot execute *and
   the exact op or assertion that blocks it*; `KnownDivergences` names assertions it does not
   satisfy. Both are asserted to match the observed set EXACTLY — a new entry fails the build, and
