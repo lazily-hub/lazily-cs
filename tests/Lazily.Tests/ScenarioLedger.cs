@@ -53,33 +53,47 @@ public sealed class ScenarioSet
     public int Count => _scenarios.Length;
 
     /// <summary>
-    /// Resolve a scenario's ledger id: <c>id</c>, else <c>name</c>, else the positional
-    /// index spelled <c>#&lt;n&gt;</c>.
+    /// Resolve a scenario's ledger id: <c>id</c>, else <c>name</c>. There is no third option.
     /// </summary>
     /// <remarks>
-    /// The corpus is not uniform — 28 fixtures identify a scenario by <c>name</c>, the three
-    /// <c>stdlib</c> ones by <c>id</c>, and <c>collections/mergecell_algebra.json</c> carries
-    /// no identifier at all. The positional fallback exists so this guard is not blocked on a
-    /// shared-corpus edit; the coverage script REPORTS every id that fell back, because that
-    /// visibility is what makes the corpus gap fixable upstream later. Resolution order is
-    /// fixed and identical in every binding.
+    /// <para>
+    /// The positional <c>#&lt;n&gt;</c> fallback is GONE (<c>#lzspecscenarioids</c>). It let the
+    /// ledger record a scenario BY POSITION, where inserting one ahead of it silently rebinds
+    /// that entry — and any excuse naming it — to a different scenario, with nothing turning
+    /// red: the guard compares "index 1 was replayed" against whatever now sits at index 1 and
+    /// agrees with itself.
+    /// </para>
+    /// <para>
+    /// It was load-bearing for exactly one fixture,
+    /// <c>collections/mergecell_algebra.json</c>, whose scenarios were distinguishable only by
+    /// <c>policy</c>. They carry ids now, and lazily-spec's <c>scenario-identity-check</c> keeps
+    /// every scenario identified — so this is a hole with no users, which is one waiting to
+    /// become load-bearing again. An unidentified scenario throws. A BLANK identifier is refused
+    /// for the same reason: it would file every blank-id scenario under one ledger entry, which
+    /// reads as "replayed" the moment any one of them runs.
+    /// </para>
+    /// <para>Resolution order is fixed and identical in every binding.</para>
     /// </remarks>
     public static string IdOf(JsonElement scenario, int index)
     {
         if (scenario.ValueKind == JsonValueKind.Object)
         {
-            if (scenario.TryGetProperty("id", out var id) && id.ValueKind == JsonValueKind.String)
+            foreach (var key in new[] { "id", "name" })
             {
-                return id.GetString()!;
-            }
-
-            if (scenario.TryGetProperty("name", out var name) && name.ValueKind == JsonValueKind.String)
-            {
-                return name.GetString()!;
+                if (scenario.TryGetProperty(key, out var value)
+                    && value.ValueKind == JsonValueKind.String
+                    && !string.IsNullOrWhiteSpace(value.GetString()))
+                {
+                    return value.GetString()!;
+                }
             }
         }
 
-        return "#" + index.ToString(CultureInfo.InvariantCulture);
+        throw new InvalidOperationException(
+            $"scenario at index {index.ToString(CultureInfo.InvariantCulture)} carries neither "
+            + "`id` nor `name`. The replay ledger would have to record it by POSITION, where "
+            + "inserting a scenario ahead of it silently rebinds that entry to a different "
+            + "scenario. Give it a stable id upstream in lazily-spec (#lzspecscenarioids).");
     }
 
     /// <summary>The ledger id of the scenario at <paramref name="index"/>, WITHOUT recording it.</summary>

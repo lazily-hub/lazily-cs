@@ -267,11 +267,11 @@ echo "conformance coverage OK: $covered/$total canonical fixtures OPENED by the 
 # that resolves an id wrongly shows up as a mismatch rather than agreeing with
 # itself.
 #
-# Id resolution is the fixed order every binding uses: `id`, else `name`, else the
-# positional index spelled `#<n>`. Every id that fell back to a position is
-# REPORTED below rather than silently accepted — the fallback exists so this guard
-# is not blocked on a shared-corpus edit, and that visibility is what makes the
-# corpus gap fixable upstream later.
+# Id resolution is the fixed order every binding uses: `id`, else
+# `name`. There is no positional fallback (#lzspecscenarioids): an id derived from
+# a POSITION silently rebinds to a different scenario when the corpus array is
+# reordered, so an unidentified scenario is an error here rather than an invented
+# id.
 command -v python3 >/dev/null 2>&1 || {
   echo "FAIL: python3 is required to read scenario ids out of the corpus." >&2
   echo "      Without it the scenario ledger cannot be verified, and passing in" >&2
@@ -322,7 +322,16 @@ with open(manifest_path, encoding="utf-8") as handle:
 
 
 def ids_of(path):
-    """`id`, else `name`, else the positional index — the fixed resolution order."""
+    """`id`, else `name` — the fixed resolution order, with no third step.
+
+    The positional `#<n>` fallback is gone (#lzspecscenarioids). It let the ledger
+    identify a scenario BY POSITION, which silently rebinds to a different scenario
+    when the corpus array is reordered -- the ledger says "index 1 was replayed",
+    this reader looks at whatever now sits at index 1, and the two agree with each
+    other about the wrong thing. An unidentified scenario is reported, never given
+    an invented id. A blank identifier is refused too: it would file every blank-id
+    scenario under a single ledger entry.
+    """
     with open(path, encoding="utf-8") as handle:
         document = json.load(handle)
     scenarios = document.get("scenarios") if isinstance(document, dict) else None
@@ -330,14 +339,14 @@ def ids_of(path):
         return []
     resolved = []
     for index, scenario in enumerate(scenarios):
+        identifier = None
         if isinstance(scenario, dict):
-            if isinstance(scenario.get("id"), str):
-                resolved.append((scenario["id"], False))
-                continue
-            if isinstance(scenario.get("name"), str):
-                resolved.append((scenario["name"], False))
-                continue
-        resolved.append((f"#{index}", True))
+            for key in ("id", "name"):
+                value = scenario.get(key)
+                if isinstance(value, str) and value.strip():
+                    identifier = value
+                    break
+        resolved.append((identifier if identifier is not None else f"#{index}", identifier is None))
     return resolved
 
 
@@ -353,14 +362,18 @@ for root, _, files in os.walk(spec_dir):
             on_disk[key] = found
 
 errors = list(excuse_errors)
-positional = []
+unidentified = []
 fixtures_checked = 0
 scenarios_total = 0
 scenarios_replayed = 0
 
 for fixture in sorted(on_disk):
     found = on_disk[fixture]
-    positional.extend(f"{fixture}#{index}" for index, (_, fell_back) in enumerate(found) if fell_back)
+    unidentified.extend(
+        f"{fixture} scenario at index {index}"
+        for index, (_, missing) in enumerate(found)
+        if missing
+    )
     if fixture not in opened:
         # Not opened at all: the fixture-level guard above already reported it, or
         # KNOWN_UNCOVERED excused the whole file. Either way the scenarios inside it
@@ -427,12 +440,11 @@ for (fixture, scenario_id), reason in sorted(excuses.items()):
             "coverage silently."
         )
 
-if positional:
-    print(
-        f"note: {len(positional)} scenario id(s) fell back to a positional #<n> — the "
-        "fixture carries neither an `id` nor a `name` for them, so the ledger cannot say "
-        "WHICH scenario went missing if one ever does. Fix upstream in lazily-spec, not "
-        "here: " + ", ".join(positional)
+for entry in unidentified:
+    errors.append(
+        f"ERROR: {entry} carries neither `id` nor `name`.\n"
+        "       The ledger would record it by POSITION, which silently rebinds on a corpus\n"
+        "       reorder. Give it a stable id upstream in lazily-spec (#lzspecscenarioids)."
     )
 
 if errors:
