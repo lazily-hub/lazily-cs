@@ -23,8 +23,23 @@ if [ ! -d "$SPEC_DIR" ]; then
   # for a working copy with no sibling checkout, where the alternative is a guard
   # that cannot be run at all. It is NOT acceptable where the corpus is supposed to
   # be there: a clone step that silently no-ops would turn every rung below into a
-  # green that proves nothing (#lzguardsnotinci). CI sets LAZILY_CONFORMANCE_STRICT
-  # so the skip becomes a failure there.
+  # green that proves nothing (#lzguardsnotinci).
+  #
+  # The skip is split by CONTEXT, not by opt-in (#lzvacuousrun). This repo's own CI
+  # sets LAZILY_CONFORMANCE_STRICT, but a flag only this workflow remembers to set
+  # is not a guard — a new job, a reusable workflow, or a fork that forgets it gets
+  # the local behaviour and reports conformance OK having examined zero fixtures.
+  # `CI` is set by every mainstream runner and by nothing on a laptop, so an absent
+  # corpus under CI is read as missing EVIDENCE (the checkout is wrong) rather than
+  # evidence of absence. LAZILY_CONFORMANCE_STRICT is kept as the explicit override
+  # for environments that assert presence without setting CI.
+  if [ -n "${CI:-}" ]; then
+    echo "ERROR: canonical corpus not found at $SPEC_DIR, and CI is set." >&2
+    echo "       Under CI this is missing EVIDENCE, not evidence of absence: the" >&2
+    echo "       checkout is wrong, not the corpus. Exiting 0 here would report" >&2
+    echo "       conformance OK having examined zero fixtures (#lzvacuousrun)." >&2
+    exit 1
+  fi
   if [ -n "${LAZILY_CONFORMANCE_STRICT:-}" ]; then
     echo "FAIL: canonical corpus not found at $SPEC_DIR, and LAZILY_CONFORMANCE_STRICT is set." >&2
     echo "      Skipping here would report OK while checking nothing. The corpus is" >&2
@@ -33,6 +48,7 @@ if [ ! -d "$SPEC_DIR" ]; then
     exit 1
   fi
   echo "SKIP: canonical corpus not found at $SPEC_DIR (clone the lazily-spec sibling)" >&2
+  echo "      Local checkout only — this is a hard failure under CI." >&2
   exit 0
 fi
 
@@ -77,6 +93,24 @@ MIN_FIXTURES="${MIN_FIXTURES:-138}"
 # cannot express, not that nobody got to it.
 KNOWN_UNREPLAYED_SCENARIOS=(
 )
+
+# Minimum DISTINCT scenarios this binding must be observed REPLAYING — the
+# scenario twin of MIN_FIXTURES, and the floor whose absence was #lzvacuousrun's
+# last live hole in this repo.
+#
+# The scenario rung walks the scenarios that OPENED fixtures carry, so it is
+# vacuously green over an empty population in a way MIN_FIXTURES cannot see: a
+# corpus of 138 fixtures that carry no `scenarios` array at all satisfies rung 1
+# at 138/138 and then prints "0/0 scenarios across 0 opened fixtures" and exits 0.
+# That was reproducible on this script before this constant existed.
+#
+# 120 = calibrated from the observed run at the time of writing, which replayed
+# 125/125 scenarios across 35 opened fixtures. Deliberately set slightly below the
+# real number so ordinary corpus churn does not trip it, and far enough above zero
+# that a detached ledger or a dispatch that stopped matching cannot slip through.
+# NEVER lower this to make the gate green: a drop means scenarios stopped being
+# reached, and that is the finding, not the floor.
+MIN_SCENARIOS="${MIN_SCENARIOS:-120}"
 
 MANIFEST="${LAZILY_CONFORMANCE_MANIFEST:-build/conformance-fixtures-loaded.txt}"
 TEST_DIRS=("tests")
@@ -157,6 +191,27 @@ for known in "${KNOWN_UNCOVERED[@]}"; do
     missing=$((missing + 1))
   fi
 done
+
+# ---- Positive-evidence floor (#lzvacuousrun) ----
+# Every check above reasons about fixtures the corpus LISTED and the run OPENED,
+# so all of it is vacuously satisfied by an empty population: zero fixtures means
+# zero uncovered fixtures and zero stale excuses. The loop cannot tell "nothing is
+# wrong" from "nothing was examined", so the magnitude is asserted explicitly
+# before anything reports OK.
+#
+# MIN_FIXTURES below happens to catch an empty corpus too, but only as a side
+# effect of the floor being large; it would stop catching it the moment anyone
+# passed MIN_FIXTURES=0, and its message ("a replay was removed") would misname
+# the fault. An empty CORPUS is a different finding from a short SUITE and gets
+# its own check.
+if [ "$total" -eq 0 ]; then
+  echo "ERROR: the corpus at $SPEC_DIR listed ZERO fixtures." >&2
+  echo "       Every check above is vacuously green over an empty population —" >&2
+  echo "       zero fixtures cannot produce an uncovered one (#lzvacuousrun)." >&2
+  echo "       The checkout is wrong, or LAZILY_SPEC_CONFORMANCE_DIR points at the" >&2
+  echo "       wrong directory. Do not treat this as coverage." >&2
+  missing=$((missing + 1))
+fi
 
 if [ "$covered" -lt "$MIN_FIXTURES" ]; then
   echo "ERROR: only $covered distinct canonical fixtures were OPENED, expected >= $MIN_FIXTURES." >&2
@@ -357,14 +412,55 @@ if errors:
     print(f"scenario replay coverage FAILED: {len(errors)} problem(s)", file=sys.stderr)
     sys.exit(1)
 
+# ---- Positive-evidence floor (#lzvacuousrun) ----
+# Everything above walks the scenarios that OPENED fixtures carry, so an empty
+# population satisfies all of it: zero scenarios means zero unreplayed scenarios,
+# zero ledger drift, and zero stale excuses. Assert the magnitude before claiming
+# green — "nothing was wrong" and "nothing was compared" must not print the same
+# line.
+#
+# The floor is REQUIRED, not defaulted. A default here would mean the one case
+# this block exists to catch — the caller failed to pass the floor through —
+# lands in the same branch as "the floor is satisfied", and a guard that cannot
+# read its own threshold must never be the guard that says OK.
+if "MIN_SCENARIOS" not in os.environ:
+    print(
+        "FAIL: MIN_SCENARIOS was not passed through to the scenario guard.\n"
+        "      Without it the positive-evidence floor cannot be evaluated, and a\n"
+        "      floor that cannot be read is not a floor.",
+        file=sys.stderr,
+    )
+    sys.exit(1)
+min_scenarios = int(os.environ["MIN_SCENARIOS"])
+if scenarios_total == 0:
+    print(
+        "ERROR: ZERO scenarios were found across the opened fixtures.\n"
+        "       The rung above is vacuously green over an empty population — no\n"
+        "       scenario can go unreplayed when none exist (#lzvacuousrun). Either\n"
+        "       the corpus carries no `scenarios` arrays, or no scenario-bearing\n"
+        "       fixture was opened. Neither is coverage.",
+        file=sys.stderr,
+    )
+    sys.exit(1)
+if scenarios_replayed < min_scenarios:
+    print(
+        f"ERROR: only {scenarios_replayed} distinct scenarios were REPLAYED, expected "
+        f">= {min_scenarios}.\n"
+        "       A scenario dispatch stopped matching, or the runtime ledger detached\n"
+        "       mid-run. Do not lower MIN_SCENARIOS to fix this.",
+        file=sys.stderr,
+    )
+    sys.exit(1)
+
 print(
     f"scenario replay coverage OK: {scenarios_replayed}/{scenarios_total} scenarios across "
     f"{fixtures_checked} opened fixtures REPLAYED "
-    f"({len(excuses)} listed as known-unreplayed; runtime ledger — these scenarios were "
-    "really reached)"
+    f"({len(excuses)} listed as known-unreplayed; floor {min_scenarios}; runtime ledger — "
+    "these scenarios were really reached)"
 )
 PY
 )"
 
+MIN_SCENARIOS="$MIN_SCENARIOS" \
 python3 -c "$SCENARIO_GUARD_PY" "$SPEC_DIR" "$MANIFEST" \
   ${KNOWN_UNREPLAYED_SCENARIOS[@]+"${KNOWN_UNREPLAYED_SCENARIOS[@]}"}

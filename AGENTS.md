@@ -43,6 +43,19 @@ reported green while testing nothing.
 - **Absence is a failure, not a skip.** The runner asserts the corpus resolved, that a positive
   number of fixtures replayed, and that a floor of assertions actually ran. A skip-if-absent
   runner with no guard is worse than no runner at all.
+- **Every rung carries a positive-evidence floor.** Each rung of
+  `scripts/check-conformance-coverage.sh` reasons about a population — canonical fixtures listed,
+  fixtures opened, scenarios of opened fixtures — and *every one of them is vacuously satisfied by
+  an empty population*: zero fixtures cannot produce an uncovered fixture, zero scenarios cannot
+  produce an unreplayed scenario. A loop that finds no problems cannot tell "nothing is wrong"
+  from "nothing was examined", so the magnitude is asserted explicitly before anything prints OK
+  (`#lzvacuousrun`). Rung 1 fails on a corpus listing zero fixtures and on `covered <
+  MIN_FIXTURES` (138); rung 4 fails on zero scenarios across the opened fixtures and on
+  `replayed < MIN_SCENARIOS` (120, calibrated below the observed 125). Both floors are
+  env-overridable so they can be mutation-checked, and neither is ever lowered to make a red run
+  green — a drop is the finding. The scenario guard also refuses to run at all if `MIN_SCENARIOS`
+  is not passed through to it: a floor that cannot be read is not a floor, and "cannot check"
+  must never share a branch with "nothing to check".
 - **Ledgers are two-directional.** `Unsupported` names fixtures this binding cannot execute *and
   the exact op or assertion that blocks it*; `KnownDivergences` names assertions it does not
   satisfy. Both are asserted to match the observed set EXACTLY — a new entry fails the build, and
@@ -67,10 +80,14 @@ reported green while testing nothing.
   `dotnet test` alone stays green while skipping them silently. CI now invokes the script
   explicitly, with `LAZILY_CONFORMANCE_MANIFEST` set to an ABSOLUTE path and truncated first
   (exactly what the Makefile's `test` target does), and asserts positive fixture and scenario
-  counts from the outside. `LAZILY_CONFORMANCE_STRICT=1` turns the script's "corpus absent, skip"
-  branch into a failure where the corpus is supposed to be present. Evidence a run never wrote is
-  not evidence of absence, and a guard reading an evidence file from an earlier run is not
-  measuring this one.
+  counts from the outside. The script's "corpus absent, skip" branch is split by CONTEXT rather
+  than by opt-in: a non-empty `CI` makes an absent corpus a hard failure, because there it is
+  missing EVIDENCE (the checkout is wrong) rather than evidence of absence. `LAZILY_CONFORMANCE_STRICT=1`
+  remains as the explicit override for an environment that asserts presence without setting `CI`,
+  but it is no longer the only thing standing between a wrong checkout and a green run — a flag
+  only this workflow remembers to set is not a guard, since a new job, a reusable workflow, or a
+  fork that forgets it gets the laptop behaviour. Evidence a run never wrote is not evidence of
+  absence, and a guard reading an evidence file from an earlier run is not measuring this one.
 - **Assert the library, not the runner's bookkeeping.** Counters that pin library behaviour live
   inside the library's own call path — the merge-fold counter is installed *in the merge policy*,
   so `merges_of` counts folds the library performed rather than calls the runner issued. A runner
