@@ -49,12 +49,15 @@ KNOWN_UNCOVERED=(
 # reports "coverage OK: 2/2" and exits 0, which is the vacuous green #lzvacuousrun
 # named after this binding printed "0/0" on three rungs in a row.
 #
-# 136 = the 135 fixtures replayed before #lzmsgpackseven, PLUS ONE for
-# codec/frame_roundtrip_msgpack.json, whose KNOWN_UNCOVERED entry above is gone
-# now that MsgPackWire implements the wire the `msgpack` token names. NEVER lower
-# this to make the gate green: a drop means a replay was removed, renamed, or
-# short-circuited, and that is the finding, not the floor.
-MIN_FIXTURES="${MIN_FIXTURES:-136}"
+# 137 = the 135 fixtures replayed before #lzmsgpackseven, PLUS ONE for
+# codec/frame_roundtrip_msgpack.json (whose KNOWN_UNCOVERED entry above is gone
+# now that MsgPackWire implements the wire the `msgpack` token names), PLUS ONE
+# for codec/nodeid_exact_range.json, the NodeId exact-representation bound
+# (#lzspecdecoderbound) — lazily-cs is one of the three bindings that decodes the
+# whole u64 range, so it asserts the `exact` branch for every scenario. NEVER
+# lower this to make the gate green: a drop means a replay was removed, renamed,
+# or short-circuited, and that is the finding, not the floor.
+MIN_FIXTURES="${MIN_FIXTURES:-137}"
 
 # Scenarios deliberately not replayed, one per line as
 #   corpus/fixture.json|scenario-id|reason
