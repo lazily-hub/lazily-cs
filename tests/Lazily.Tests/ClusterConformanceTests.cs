@@ -225,6 +225,13 @@ public sealed class ClusterConformanceTests
                 case "tick":
                     Assert.Equal(step.GetProperty("returns").GetBoolean(), cell.Tick(now));
                     break;
+                // Fail closed (#lzscenariobodyskip): a C# switch STATEMENT over a string is not
+                // exhaustiveness-checked, so an unmatched op used to run NOTHING while the ledger
+                // still booked the step as replayed — and `expected` was then compared against
+                // state the fixture never asked anyone to reach.
+                default:
+                    throw new InvalidOperationException(
+                        $"{fixture}: unknown lease op in fixture: {operation.GetProperty("type").GetString()}");
             }
             var expected = FixtureAssertions.Of(step, "expected", $"{fixture} step {index}");
             AssertInvalidation(expected, "holder", probe);
@@ -303,6 +310,11 @@ public sealed class ClusterConformanceTests
                 case "tick":
                     Assert.Equal(step.GetProperty("returns").GetBoolean(), cell.Tick(now));
                     break;
+                // Fail closed (#lzscenariobodyskip): unmatched op ran nothing and the step still
+                // booked as replayed.
+                default:
+                    throw new InvalidOperationException(
+                        $"{fixture}: unknown lock op in fixture: {operation.GetProperty("type").GetString()}");
             }
             var expected = FixtureAssertions.Of(step, "expected", $"{fixture} step {index}");
             AssertInvalidation(expected, "is_locked", probe);
@@ -327,6 +339,10 @@ public sealed class ClusterConformanceTests
         foreach (var step in root.GetProperty("steps").EnumerateArray())
         {
             var operation = step.GetProperty("op");
+            // Fail closed (#lzscenariobodyskip): this driver replayed EVERY step as `vote` while
+            // `op.type` sat unread in the fixture — the discriminator nobody read. A corpus that
+            // grows a second quorum op would have been silently replayed as an arrival.
+            AssertOpType(fixture, index, operation, "vote");
             Assert.Equal(
                 step.GetProperty("returns").GetBoolean(),
                 cell.Arrive(operation.GetProperty("peer").GetInt64()));
@@ -353,13 +369,19 @@ public sealed class ClusterConformanceTests
         foreach (var step in root.GetProperty("steps").EnumerateArray())
         {
             var operation = step.GetProperty("op");
-            if (operation.GetProperty("type").GetString() == "acquire")
+            // Fail closed (#lzscenariobodyskip): the final `else` ASSUMED release without checking
+            // it, so any op that was not `acquire` — including a misspelling — released a permit.
+            var semaphoreOp = operation.GetProperty("type").GetString();
+            if (semaphoreOp == "acquire")
                 Assert.Equal(step.GetProperty("returns").GetBoolean(), cell.Acquire());
-            else
+            else if (semaphoreOp == "release")
             {
                 Assert.Equal(JsonValueKind.Null, step.GetProperty("returns").ValueKind);
                 cell.Release();
             }
+            else
+                throw new InvalidOperationException(
+                    $"{fixture} step {index}: unknown semaphore op in fixture: {semaphoreOp}");
             var expected = FixtureAssertions.Of(step, "expected", $"{fixture} step {index}");
             AssertInvalidation(expected, "permits_available", probe);
             expected.AssertKey("permits_available", cell.PermitsAvailable);
@@ -380,16 +402,23 @@ public sealed class ClusterConformanceTests
         foreach (var step in root.GetProperty("steps").EnumerateArray())
         {
             var operation = step.GetProperty("op");
-            if (operation.GetProperty("type").GetString() == "set")
+            // Fail closed (#lzscenariobodyskip): the final `else` ASSUMED tick without checking it.
+            var ephemeralOp = operation.GetProperty("type").GetString();
+            if (ephemeralOp == "set")
             {
                 cell.Set(
                     operation.GetProperty("value").GetString()!,
                     operation.GetProperty("now").GetInt64(),
                     operation.GetProperty("ttl").GetInt64());
             }
-            else
+            else if (ephemeralOp == "tick")
             {
                 cell.Tick(operation.GetProperty("now").GetInt64());
+            }
+            else
+            {
+                throw new InvalidOperationException(
+                    $"{fixture} step {index}: unknown ephemeral op in fixture: {ephemeralOp}");
             }
             var expected = FixtureAssertions.Of(step, "expected", $"{fixture} step {index}");
             AssertInvalidation(expected, "value", probe);
@@ -428,6 +457,11 @@ public sealed class ClusterConformanceTests
                 case "tick":
                     cell.Tick(now);
                     break;
+                // Fail closed (#lzscenariobodyskip): unmatched op ran nothing and the step still
+                // booked as replayed.
+                default:
+                    throw new InvalidOperationException(
+                        $"{fixture}: unknown presence op in fixture: {operation.GetProperty("type").GetString()}");
             }
             var expected = FixtureAssertions.Of(step, "expected", $"{fixture} step {index}");
             AssertInvalidation(expected, "present", probe);
@@ -452,16 +486,23 @@ public sealed class ClusterConformanceTests
         {
             var operation = step.GetProperty("op");
             var now = operation.GetProperty("now").GetInt64();
-            if (operation.GetProperty("type").GetString() == "set")
+            // Fail closed (#lzscenariobodyskip): the final `else` ASSUMED tick without checking it.
+            var awarenessOp = operation.GetProperty("type").GetString();
+            if (awarenessOp == "set")
             {
                 cell.Set(
                     operation.GetProperty("peer").GetInt64(),
                     operation.GetProperty("value").GetString()!,
                     now);
             }
-            else
+            else if (awarenessOp == "tick")
             {
                 cell.Tick(now);
+            }
+            else
+            {
+                throw new InvalidOperationException(
+                    $"{fixture} step {index}: unknown awareness op in fixture: {awarenessOp}");
             }
             var expected = FixtureAssertions.Of(step, "expected", $"{fixture} step {index}");
             AssertInvalidation(expected, "present", probe);
@@ -489,10 +530,16 @@ public sealed class ClusterConformanceTests
         {
             var operation = step.GetProperty("op");
             var now = operation.GetProperty("now").GetInt64();
-            if (operation.GetProperty("type").GetString() == "allow")
+            // Fail closed (#lzscenariobodyskip): the final `else` ASSUMED record without checking
+            // it, so an unrecognised op was fed to the breaker as a success/failure sample.
+            var breakerOp = operation.GetProperty("type").GetString();
+            if (breakerOp == "allow")
                 Assert.Equal(step.GetProperty("returns").GetBoolean(), cell.Allow(now));
-            else
+            else if (breakerOp == "record")
                 cell.Record(operation.GetProperty("success").GetBoolean(), now);
+            else
+                throw new InvalidOperationException(
+                    $"{fixture} step {index}: unknown circuit-breaker op in fixture: {breakerOp}");
             var expected = FixtureAssertions.Of(step, "expected", $"{fixture} step {index}");
             AssertInvalidation(expected, "state", probe);
             expected.AssertKeyWith(
@@ -518,6 +565,9 @@ public sealed class ClusterConformanceTests
         var index = 0;
         foreach (var step in root.GetProperty("steps").EnumerateArray())
         {
+            // Fail closed (#lzscenariobodyskip): this driver replayed EVERY step as `next` and
+            // never opened `op` at all — the discriminator nobody read.
+            AssertOpType(fixture, index, step.GetProperty("op"), "next");
             Assert.Equal(step.GetProperty("returns").GetInt64(), cell.NextDelay());
             var expected = FixtureAssertions.Of(step, "expected", $"{fixture} step {index}");
             AssertInvalidation(expected, "delay", probe);
@@ -541,13 +591,18 @@ public sealed class ClusterConformanceTests
         foreach (var step in root.GetProperty("steps").EnumerateArray())
         {
             var operation = step.GetProperty("op");
-            if (operation.GetProperty("type").GetString() == "acquire")
+            // Fail closed (#lzscenariobodyskip): the final `else` ASSUMED release without checking.
+            var bulkheadOp = operation.GetProperty("type").GetString();
+            if (bulkheadOp == "acquire")
                 Assert.Equal(step.GetProperty("returns").GetBoolean(), cell.Acquire());
-            else
+            else if (bulkheadOp == "release")
             {
                 Assert.Equal(JsonValueKind.Null, step.GetProperty("returns").ValueKind);
                 cell.Release();
             }
+            else
+                throw new InvalidOperationException(
+                    $"{fixture} step {index}: unknown bulkhead op in fixture: {bulkheadOp}");
             var expected = FixtureAssertions.Of(step, "expected", $"{fixture} step {index}");
             AssertInvalidation(expected, "in_use", probe);
             expected.AssertKey("in_use", cell.InUse);
@@ -569,9 +624,16 @@ public sealed class ClusterConformanceTests
         {
             var operation = step.GetProperty("op");
             var now = operation.GetProperty("now").GetInt64();
-            var returned = operation.GetProperty("type").GetString() == "arm"
-                ? cell.Arm(now, operation.GetProperty("timeout").GetInt64())
-                : cell.Tick(now);
+            // Fail closed (#lzscenariobodyskip): the ternary's false arm ASSUMED tick, so any op
+            // other than `arm` — including a misspelling — advanced the clock instead.
+            var timeoutOp = operation.GetProperty("type").GetString();
+            var returned = timeoutOp switch
+            {
+                "arm" => cell.Arm(now, operation.GetProperty("timeout").GetInt64()),
+                "tick" => cell.Tick(now),
+                _ => throw new InvalidOperationException(
+                    $"{fixture} step {index}: unknown timeout op in fixture: {timeoutOp}"),
+            };
             Assert.Equal(step.GetProperty("returns").GetBoolean(), returned);
             var expected = FixtureAssertions.Of(step, "expected", $"{fixture} step {index}");
             AssertInvalidation(expected, "is_timed_out", probe);
@@ -593,6 +655,9 @@ public sealed class ClusterConformanceTests
         foreach (var step in root.GetProperty("steps").EnumerateArray())
         {
             var operation = step.GetProperty("op");
+            // Fail closed (#lzscenariobodyskip): this driver replayed EVERY step as `set` while
+            // `op.type` sat unread in the fixture — the discriminator nobody read.
+            AssertOpType(fixture, index, operation, "set");
             cell.Set(
                 operation.GetProperty("name").GetString()!,
                 operation.GetProperty("up").GetBoolean(),
@@ -619,6 +684,9 @@ public sealed class ClusterConformanceTests
         foreach (var step in root.GetProperty("steps").EnumerateArray())
         {
             var operation = step.GetProperty("op");
+            // Fail closed (#lzscenariobodyskip): this driver replayed EVERY step as `set` while
+            // `op.type` sat unread in the fixture — the discriminator nobody read.
+            AssertOpType(fixture, index, operation, "set");
             cell.Set(
                 operation.GetProperty("name").GetString()!,
                 operation.GetProperty("ready").GetBoolean());
@@ -661,6 +729,11 @@ public sealed class ClusterConformanceTests
                         step.GetProperty("returns").GetString(),
                         cell.Resolve(operation.GetProperty("service").GetString()!));
                     break;
+                // Fail closed (#lzscenariobodyskip): unmatched op ran nothing and the step still
+                // booked as replayed.
+                default:
+                    throw new InvalidOperationException(
+                        $"{fixture}: unknown discovery op in fixture: {operation.GetProperty("type").GetString()}");
             }
             var expected = FixtureAssertions.Of(step, "expected", $"{fixture} step {index}");
             AssertInvalidation(expected, "discovery", probe);
@@ -695,6 +768,11 @@ public sealed class ClusterConformanceTests
                 case "replay":
                     cell.Replay();
                     break;
+                // Fail closed (#lzscenariobodyskip): unmatched op ran nothing and the step still
+                // booked as replayed.
+                default:
+                    throw new InvalidOperationException(
+                        $"{fixture}: unknown service-registry op in fixture: {operation.GetProperty("type").GetString()}");
             }
             var expected = FixtureAssertions.Of(step, "expected", $"{fixture} step {index}");
             AssertInvalidation(expected, "projection", probe);
@@ -713,6 +791,20 @@ public sealed class ClusterConformanceTests
             SpecCorpus.Root is not null,
             $"lazily-spec conformance corpus not found at {SpecCorpus.SiblingRelativePath}");
         Assert.Equal(expected, SpecCorpus.FixtureNames(corpus));
+    }
+
+    /// <summary>
+    /// Fail closed (#lzscenariobodyskip) for a driver whose corpus currently carries exactly ONE
+    /// op shape. Such a driver has no dispatch to give a default to, so the discriminator goes
+    /// unread and a corpus that grows a second op is replayed as the first — silently, with the
+    /// scenario ledger still booking the step. This is the assertion that turns that into a red.
+    /// </summary>
+    private static void AssertOpType(string fixture, int index, JsonElement operation, string only)
+    {
+        var actual = operation.GetProperty("type").GetString();
+        if (!string.Equals(actual, only, StringComparison.Ordinal))
+            throw new InvalidOperationException(
+                $"{fixture} step {index}: unknown op in fixture: {actual} (this driver replays only {only})");
     }
 
     private static void AssertInvalidation<T>(

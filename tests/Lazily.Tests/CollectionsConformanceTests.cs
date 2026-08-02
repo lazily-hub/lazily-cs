@@ -285,7 +285,9 @@ public sealed class CollectionsConformanceTests
             DiffOpMove<TKey, TValue> m => $"move:{m.Key}",
             DiffOpInsert<TKey, TValue> i => $"insert:{i.Key}",
             DiffOpUpdate<TKey, TValue> u => $"update:{u.Key}",
-            _ => "?",
+            // Fail closed (#lzscenariobodyskip): the old `_ => "?"` turned an unrecognised diff op
+            // into a string mismatch whose message named neither the op nor its type.
+            _ => throw new InvalidOperationException($"unknown diff op: {op.GetType().Name}"),
         };
 
     private static string DescribeExpected(JsonElement op) =>

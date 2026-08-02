@@ -190,10 +190,18 @@ public sealed class TemporalRateWindowConformanceTests
                     {
                         expected.AssertKeyWith(
                             "state",
+                            // Fail closed (#lzscenariobodyskip): this is EXPECTATION-side dispatch,
+                            // the nastiest shape. An unrecognised spelling of the expected phase
+                            // did not skip the assertion — it silently asserted `Live` instead,
+                            // so the fixture said one thing and the runner checked another.
                             want => Assert.Equal(
-                                want.GetString() == "Expired"
-                                    ? DeadlinePhase.Expired
-                                    : DeadlinePhase.Live,
+                                want.GetString() switch
+                                {
+                                    "Expired" => DeadlinePhase.Expired,
+                                    "Live" => DeadlinePhase.Live,
+                                    var other => throw new InvalidOperationException(
+                                        $"{fixture}: unknown expected deadline phase in fixture: {other}"),
+                                },
                                 cell.State.Phase));
                         expected.AssertKey("value", cell.State.Value);
                     };
@@ -242,46 +250,69 @@ public sealed class TemporalRateWindowConformanceTests
                 {
                     var cell = new DebounceCell<string>(context, initial.GetProperty("quiet").GetInt64());
                     outputCell = cell.OutputCell;
-                    apply = operation =>
+                    // Fail closed (#lzscenariobodyskip): the fall-through ASSUMED tick, so any op
+                    // that was not `input` advanced the debounce clock instead.
+                    apply = operation => operation.GetProperty("type").GetString() switch
                     {
-                        if (operation.GetProperty("type").GetString() == "input")
-                        {
-                            cell.Input(
-                                operation.GetProperty("now").GetInt64(),
-                                operation.GetProperty("value").GetString()!);
-                            return Optional<string>.None;
-                        }
-                        return cell.Tick(operation.GetProperty("now").GetInt64());
+                        "input" => Input(
+                            cell,
+                            operation.GetProperty("now").GetInt64(),
+                            operation.GetProperty("value").GetString()!),
+                        "tick" => cell.Tick(operation.GetProperty("now").GetInt64()),
+                        var other => throw new InvalidOperationException(
+                            $"{fixture}: unknown rate-shape op in fixture: {other}"),
                     };
                     break;
                 }
             case "ThrottleCell":
                 {
-                    var edge = initial.GetProperty("edge").GetString() == "Leading"
-                        ? ThrottleEdge.Leading
-                        : ThrottleEdge.Trailing;
+                    // Fail closed (#lzscenariobodyskip): the ternary's false arm ASSUMED Trailing,
+                    // so an unrecognised edge silently configured the opposite throttle.
+                    var edge = initial.GetProperty("edge").GetString() switch
+                    {
+                        "Leading" => ThrottleEdge.Leading,
+                        "Trailing" => ThrottleEdge.Trailing,
+                        var other => throw new InvalidOperationException(
+                            $"{fixture}: unknown throttle edge in fixture: {other}"),
+                    };
                     var cell = new ThrottleCell<string>(
                         context,
                         edge,
                         initial.GetProperty("window").GetInt64());
                     outputCell = cell.OutputCell;
-                    apply = operation => operation.GetProperty("type").GetString() == "input"
-                        ? cell.Input(
+                    // Fail closed (#lzscenariobodyskip): the ternary's false arm ASSUMED tick.
+                    apply = operation => operation.GetProperty("type").GetString() switch
+                    {
+                        "input" => cell.Input(
                             operation.GetProperty("now").GetInt64(),
-                            operation.GetProperty("value").GetString()!)
-                        : cell.Tick(operation.GetProperty("now").GetInt64());
+                            operation.GetProperty("value").GetString()!),
+                        "tick" => cell.Tick(operation.GetProperty("now").GetInt64()),
+                        var other => throw new InvalidOperationException(
+                            $"{fixture}: unknown rate-shape op in fixture: {other}"),
+                    };
                     break;
                 }
             case "SampleCell":
                 {
-                    var mode = initial.GetProperty("mode").GetString() == "Count"
-                        ? SampleMode.Count(initial.GetProperty("n").GetInt64())
-                        : SampleMode.Time(initial.GetProperty("period").GetInt64());
+                    // Fail closed (#lzscenariobodyskip): the ternary's false arm ASSUMED Time, so
+                    // an unrecognised sample mode silently sampled on the wrong axis.
+                    var mode = initial.GetProperty("mode").GetString() switch
+                    {
+                        "Count" => SampleMode.Count(initial.GetProperty("n").GetInt64()),
+                        "Time" => SampleMode.Time(initial.GetProperty("period").GetInt64()),
+                        var other => throw new InvalidOperationException(
+                            $"{fixture}: unknown sample mode in fixture: {other}"),
+                    };
                     var cell = new SampleCell<string>(context, mode);
                     outputCell = cell.OutputCell;
-                    apply = operation => operation.GetProperty("type").GetString() == "input"
-                        ? cell.Input(operation.GetProperty("value").GetString()!)
-                        : cell.Tick(operation.GetProperty("now").GetInt64());
+                    // Fail closed (#lzscenariobodyskip): the ternary's false arm ASSUMED tick.
+                    apply = operation => operation.GetProperty("type").GetString() switch
+                    {
+                        "input" => cell.Input(operation.GetProperty("value").GetString()!),
+                        "tick" => cell.Tick(operation.GetProperty("now").GetInt64()),
+                        var other => throw new InvalidOperationException(
+                            $"{fixture}: unknown rate-shape op in fixture: {other}"),
+                    };
                     break;
                 }
             case "ProbabilisticSampleCell":
@@ -291,9 +322,17 @@ public sealed class TemporalRateWindowConformanceTests
                         initial.GetProperty("rate").GetDouble(),
                         new SplitMix64Random(42));
                     outputCell = cell.OutputCell;
-                    apply = operation => cell.InputWithDraw(
-                        operation.GetProperty("value").GetString()!,
-                        operation.GetProperty("draw").GetDouble());
+                    // Fail closed (#lzscenariobodyskip): this driver replayed EVERY step as an
+                    // input while `op.type` sat unread in probabilistic_sample.json — the
+                    // discriminator nobody read.
+                    apply = operation => operation.GetProperty("type").GetString() switch
+                    {
+                        "input" => cell.InputWithDraw(
+                            operation.GetProperty("value").GetString()!,
+                            operation.GetProperty("draw").GetDouble()),
+                        var other => throw new InvalidOperationException(
+                            $"{fixture}: unknown rate-shape op in fixture: {other}"),
+                    };
                     break;
                 }
             default:
@@ -336,29 +375,43 @@ public sealed class TemporalRateWindowConformanceTests
                         config.GetProperty("n").GetInt64(),
                         sum);
                     outputCell = window.OutputCell;
-                    apply = operation => window.Push(operation.GetProperty("value").GetInt32());
+                    // Fail closed (#lzscenariobodyskip): this driver replayed EVERY step as a push
+                    // while `op.type` sat unread in tumbling_count.json — the discriminator nobody
+                    // read.
+                    apply = operation => operation.GetProperty("type").GetString() switch
+                    {
+                        "push" => window.Push(operation.GetProperty("value").GetInt32()),
+                        var other => throw new InvalidOperationException(
+                            $"{fixture}: unknown windowing op in fixture: {other}"),
+                    };
                     break;
                 }
-            case "TumblingWindow":
+            // Fail closed (#lzscenariobodyskip): this bare arm ASSUMED the time flavour for every
+            // `TumblingWindow` whose `config.mode` was not exactly "count", so a misspelled or
+            // newly-added mode silently built the wrong window.
+            case "TumblingWindow" when config.GetProperty("mode").GetString() == "time":
                 {
                     var window = new TumblingTimeWindow<int>(
                         context,
                         config.GetProperty("period").GetInt64(),
                         sum);
                     outputCell = window.OutputCell;
-                    apply = operation =>
+                    // Fail closed (#lzscenariobodyskip): the fall-through ASSUMED tick.
+                    apply = operation => operation.GetProperty("type").GetString() switch
                     {
-                        if (operation.GetProperty("type").GetString() == "push")
-                        {
-                            window.Push(
-                                operation.GetProperty("now").GetInt64(),
-                                operation.GetProperty("value").GetInt32());
-                            return Optional<int>.None;
-                        }
-                        return window.Tick(operation.GetProperty("now").GetInt64());
+                        "push" => Push(
+                            window,
+                            operation.GetProperty("now").GetInt64(),
+                            operation.GetProperty("value").GetInt32()),
+                        "tick" => window.Tick(operation.GetProperty("now").GetInt64()),
+                        var other => throw new InvalidOperationException(
+                            $"{fixture}: unknown windowing op in fixture: {other}"),
                     };
                     break;
                 }
+            case "TumblingWindow":
+                throw new InvalidOperationException(
+                    $"{fixture}: unknown tumbling-window mode in fixture: {config.GetProperty("mode").GetString()}");
             case "SlidingWindow":
                 {
                     var window = new SlidingWindow<int>(
@@ -367,7 +420,15 @@ public sealed class TemporalRateWindowConformanceTests
                         config.GetProperty("slide").GetInt64(),
                         sum);
                     outputCell = window.OutputCell;
-                    apply = operation => window.Push(operation.GetProperty("value").GetInt32());
+                    // Fail closed (#lzscenariobodyskip): this driver replayed EVERY step as a push
+                    // while `op.type` sat unread in sliding_count.json — the discriminator nobody
+                    // read.
+                    apply = operation => operation.GetProperty("type").GetString() switch
+                    {
+                        "push" => window.Push(operation.GetProperty("value").GetInt32()),
+                        var other => throw new InvalidOperationException(
+                            $"{fixture}: unknown windowing op in fixture: {other}"),
+                    };
                     break;
                 }
             case "SessionWindow":
@@ -377,11 +438,17 @@ public sealed class TemporalRateWindowConformanceTests
                         config.GetProperty("gap").GetInt64(),
                         sum);
                     outputCell = window.OutputCell;
-                    apply = operation => operation.GetProperty("type").GetString() == "push"
-                        ? window.Push(
+                    // Fail closed (#lzscenariobodyskip): the ternary's false arm ASSUMED flush, so
+                    // any op other than `push` closed the session instead.
+                    apply = operation => operation.GetProperty("type").GetString() switch
+                    {
+                        "push" => window.Push(
                             operation.GetProperty("now").GetInt64(),
-                            operation.GetProperty("value").GetInt32())
-                        : window.Flush(operation.GetProperty("now").GetInt64());
+                            operation.GetProperty("value").GetInt32()),
+                        "flush" => window.Flush(operation.GetProperty("now").GetInt64()),
+                        var other => throw new InvalidOperationException(
+                            $"{fixture}: unknown windowing op in fixture: {other}"),
+                    };
                     break;
                 }
             default:
@@ -403,6 +470,24 @@ public sealed class TemporalRateWindowConformanceTests
             index++;
         }
         return index;
+    }
+
+    /// <summary>
+    /// Adapts the void-returning debounce input to the dispatch's <see cref="Optional{T}"/> result
+    /// so the op chain can be a switch EXPRESSION — which, unlike a switch statement over a
+    /// string, cannot silently fall through (#lzscenariobodyskip).
+    /// </summary>
+    private static Optional<string> Input(DebounceCell<string> cell, long now, string value)
+    {
+        cell.Input(now, value);
+        return Optional<string>.None;
+    }
+
+    /// <summary>Same adapter for the void-returning tumbling-time push.</summary>
+    private static Optional<int> Push(TumblingTimeWindow<int> window, long now, int value)
+    {
+        window.Push(now, value);
+        return Optional<int>.None;
     }
 
     private static void AssertCorpusPresent(string corpus, IReadOnlyList<string> expected)

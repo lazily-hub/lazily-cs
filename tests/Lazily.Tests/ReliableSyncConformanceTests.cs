@@ -642,6 +642,12 @@ replay.RootElement.GetProperty("wire").GetRawText(),
             return graph;
         }
 
+        // Fail closed (#lzscenariobodyskip): both switches below used to have NO default. A wire
+        // message or delta op this projector did not name left `_state` untouched and the fixture's
+        // `expected` block was then compared against a projection that never saw the mutation —
+        // which passes whenever the expectation happens to match the prior state. Every variant is
+        // now named, and the ones that genuinely do not move node payloads are EXPLICIT no-ops, so
+        // a variant added to the wire has to be triaged here instead of being silently dropped.
         public void Apply(IpcMessage message)
         {
             switch (message)
@@ -656,23 +662,53 @@ replay.RootElement.GetProperty("wire").GetRawText(),
                 case DeltaMessage delta:
                     foreach (var operation in delta.Ops)
                     {
-                        switch (operation)
-                        {
-                            case DeltaOp.CellSet set when set.Payload is IpcValue.Inline inline:
-                                _state[set.Node] = [.. inline.Bytes];
-                                break;
-                            case DeltaOp.SlotValue set when set.Payload is IpcValue.Inline inline:
-                                _state[set.Node] = [.. inline.Bytes];
-                                break;
-                            case DeltaOp.NodeAdd add when add.State is NodeState.Payload payload:
-                                _state[add.Node] = [.. payload.Bytes];
-                                break;
-                            case DeltaOp.NodeRemove remove:
-                                _state.Remove(remove.Node);
-                                break;
-                        }
+                        Apply(operation);
                     }
                     break;
+                // A resync request and an outbox ack are control frames: they carry no node state,
+                // so projecting them is a no-op by construction rather than by omission.
+                case ResyncRequestMessage:
+                case OutboxAckMessage:
+                case CrdtSyncMessage:
+                    break;
+                default:
+                    throw new InvalidOperationException(
+                        $"unknown wire message in fixture: {message.GetType().Name}");
+            }
+        }
+
+        private void Apply(DeltaOp operation)
+        {
+            switch (operation)
+            {
+                case DeltaOp.CellSet set when set.Payload is IpcValue.Inline inline:
+                    _state[set.Node] = [.. inline.Bytes];
+                    break;
+                case DeltaOp.SlotValue set when set.Payload is IpcValue.Inline inline:
+                    _state[set.Node] = [.. inline.Bytes];
+                    break;
+                case DeltaOp.NodeAdd add when add.State is NodeState.Payload payload:
+                    _state[add.Node] = [.. payload.Bytes];
+                    break;
+                case DeltaOp.NodeRemove remove:
+                    _state.Remove(remove.Node);
+                    break;
+                // Shared-blob payloads and opaque node state are not projected into this byte map;
+                // neither are edge, invalidation, or queue ops. Named so the default below can be
+                // a hard error.
+                case DeltaOp.CellSet:
+                case DeltaOp.SlotValue:
+                case DeltaOp.NodeAdd:
+                case DeltaOp.Invalidate:
+                case DeltaOp.EdgeAdd:
+                case DeltaOp.EdgeRemove:
+                case DeltaOp.QueuePush:
+                case DeltaOp.QueuePop:
+                case DeltaOp.QueueClose:
+                    break;
+                default:
+                    throw new InvalidOperationException(
+                        $"unknown delta op in fixture: {operation.GetType().Name}");
             }
         }
 

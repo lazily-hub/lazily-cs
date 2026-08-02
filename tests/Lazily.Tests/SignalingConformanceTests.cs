@@ -20,9 +20,18 @@ public sealed class SignalingConformanceTests
         {
             var direction = frame.GetProperty("direction").GetString();
             var wire = frame.GetProperty("wire");
-            var actual = direction == "client"
-                ? SignalingWire.Serialize(SignalingWire.DeserializeClient(wire.GetRawText()))
-                : SignalingWire.Serialize(SignalingWire.DeserializeServer(wire.GetRawText()));
+            // Fail closed (#lzscenariobodyskip): the ternary's false arm ASSUMED the server
+            // direction, so an unrecognised spelling round-tripped a client frame through the
+            // server codec — the fixture named one direction and the runner proved the other.
+            var actual = direction switch
+            {
+                "client" => SignalingWire.Serialize(
+                    SignalingWire.DeserializeClient(wire.GetRawText())),
+                "server" => SignalingWire.Serialize(
+                    SignalingWire.DeserializeServer(wire.GetRawText())),
+                _ => throw new InvalidOperationException(
+                    $"unknown signaling direction in fixture: {direction}"),
+            };
 
             Assert.True(
                 JsonNode.DeepEquals(JsonNode.Parse(wire.GetRawText()), JsonNode.Parse(actual)),
@@ -43,13 +52,22 @@ public sealed class SignalingConformanceTests
         foreach (var reject in rejects)
         {
             var wire = reject.GetProperty("wire").GetRawText();
-            if (reject.GetProperty("direction").GetString() == "client")
+            // Fail closed (#lzscenariobodyskip): the `else` ASSUMED the server direction, so a
+            // reject the fixture aimed at the client decoder was silently proven against the
+            // server decoder instead.
+            var direction = reject.GetProperty("direction").GetString();
+            if (direction == "client")
             {
                 Assert.ThrowsAny<JsonException>(() => SignalingWire.DeserializeClient(wire));
             }
-            else
+            else if (direction == "server")
             {
                 Assert.ThrowsAny<JsonException>(() => SignalingWire.DeserializeServer(wire));
+            }
+            else
+            {
+                throw new InvalidOperationException(
+                    $"unknown signaling direction in fixture: {direction}");
             }
         }
     }

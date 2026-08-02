@@ -58,21 +58,41 @@ public sealed class NodeKeyNullLeniencyConformanceTests
     /// </summary>
     private static JsonElement ReencodedNode(JsonElement scenario, IpcMessage message, out JsonDocument owner)
     {
-        owner = scenario.GetProperty("codec").GetString() == "msgpack"
+        // Fail closed (#lzscenariobodyskip): the ternary's false arm ASSUMED json, so an
+        // unrecognised codec was silently re-encoded through the OTHER codec than the one the
+        // scenario named — and the msgpack leg of the round trip went unproven while green.
+        var codec = scenario.GetProperty("codec").GetString();
+        owner = codec switch
+        {
             // Through the msgpack codec specifically. Both codecs share the same value tree, but
             // that is worth proving rather than assuming: the #lzmsgpackparity defect was a msgpack
             // encoder writing `key: null` while json omitted it.
-            ? MsgPackWire.Inspect(MsgPackWire.Serialize(message))
-            : JsonDocument.Parse(IpcWire.Serialize(message));
+            "msgpack" => MsgPackWire.Inspect(MsgPackWire.Serialize(message)),
+            "json" => JsonDocument.Parse(IpcWire.Serialize(message)),
+            _ => throw new InvalidOperationException($"unknown codec in fixture: {codec}"),
+        };
 
         var root = owner.RootElement;
-        return scenario.GetProperty("field").GetString() == "snapshot"
+        return Field(scenario) == "snapshot"
             ? root.GetProperty("Snapshot").GetProperty("nodes")[0]
             : root.GetProperty("Delta").GetProperty("ops")[0].GetProperty("NodeAdd");
     }
 
+    /// <summary>
+    /// Fail closed (#lzscenariobodyskip): `field` selected between the snapshot and delta wire
+    /// shapes through a bare ternary, so an unrecognised spelling did not skip the check — it
+    /// silently moved it onto the delta path while the fixture was talking about the snapshot.
+    /// </summary>
+    private static string Field(JsonElement scenario)
+    {
+        var field = scenario.GetProperty("field").GetString();
+        if (field is not ("snapshot" or "node_add"))
+            throw new InvalidOperationException($"unknown node-key field in fixture: {field}");
+        return field;
+    }
+
     private static string? DecodedKey(JsonElement scenario, IpcMessage message) =>
-        scenario.GetProperty("field").GetString() == "snapshot"
+        Field(scenario) == "snapshot"
             ? ((SnapshotMessage)message).Nodes[0].Key
             : ((DeltaOp.NodeAdd)((DeltaMessage)message).Ops[0]).Key;
 
