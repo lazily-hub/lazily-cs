@@ -97,7 +97,10 @@ public sealed class NodeKeyNullLeniencyConformanceTests
             : ((DeltaOp.NodeAdd)((DeltaMessage)message).Ops[0]).Key;
 
     [Fact]
-    public void NodeKey_null_leniency_both_wire_forms_decode_as_absent_and_the_encoder_still_omits()
+    public void NodeKey_null_leniency_both_wire_forms_decode_as_absent_and_the_encoder_still_omits() =>
+        ProseLedger.Replay(Corpus, Fixture, Replay);
+
+    private static void Replay(ProseLedger prose)
     {
         if (SpecCorpus.Root is null) return;
 
@@ -106,22 +109,29 @@ public sealed class NodeKeyNullLeniencyConformanceTests
         Assert.Equal(1, root.GetProperty("protocol_version").GetInt32());
         Assert.Equal("NodeKeyNullLeniency", root.GetProperty("kind").GetString());
 
-        var meta = FixtureAssertions.Of(root, "assertions", $"{Corpus}/{Fixture} assertions");
+        var meta = FixtureAssertions.Of(root, "assertions", $"{Corpus}/{Fixture} assertions", prose);
         meta.AssertKey("required_of_binding", "MUST");
         meta.AssertKey("scenario_count", root.GetProperty("scenarios").GetArrayLength());
         meta.AssertKey("codecs", new[] { "json", "msgpack" }.AsEnumerable());
         meta.AssertKey("fields", new[] { "snapshot", "node_add" }.AsEnumerable());
         meta.AssertKey("key_forms", new[] { "omitted", "null", "present" }.AsEnumerable());
-        foreach (var prose in new[]
-                 {
-                     "clause", "wire_encoding", "reencode_obligation", "anti_vacuity", "generator",
-                 })
-        {
-            meta.ExcuseKey(
-                prose,
-                "prose: it states WHY the fixture is shaped this way; the behaviour it describes " +
-                "is asserted by the per-scenario decode and re-encode below");
-        }
+
+        // The four paragraphs the corpus declares, each discharged by the keys that carry its
+        // obligation rather than by a sentence saying it is prose (#lzprosekeyconvention). The
+        // named keys are per-scenario `expect` keys asserted below — the ledger is
+        // fixture-scoped, so a claim made here is matched against what the whole replay
+        // asserted.
+        meta.ProseKey("clause", "decoded_key", "key_forms");
+        meta.ProseKey("wire_encoding", "decoded_key", "reencoded_key_field_present");
+        meta.ProseKey("reencode_obligation", "reencoded_key_field_present");
+        meta.ProseKey("anti_vacuity", "decoded_key", "key_forms");
+
+        // NOT prose, and not declared as such: it names the script that generated the wire
+        // frames, and there is nothing in this binding to compare it against.
+        meta.ExcuseKey(
+            "generator",
+            "names the corpus-side script that mints these frames; it states no obligation on a "
+            + "binding and nothing here could disagree with it");
 
         meta.Verify();
 
@@ -136,7 +146,7 @@ public sealed class NodeKeyNullLeniencyConformanceTests
         foreach (var scenario in scenarios.All())
         {
             var where = scenario.GetProperty("id").GetString()!;
-            var expect = FixtureAssertions.Of(scenario, "expect", $"{Corpus}/{Fixture} {where}");
+            var expect = FixtureAssertions.Of(scenario, "expect", $"{Corpus}/{Fixture} {where}", prose);
             replayed += 1;
 
             var message = Decode(scenario);
@@ -176,5 +186,6 @@ public sealed class NodeKeyNullLeniencyConformanceTests
         Assert.Equal(12, replayed);
         Assert.Equal(12, scenarios.Count);
         Assert.Equal(4, keysDecoded);
+        prose.VerifyProse(Fixture);
     }
 }

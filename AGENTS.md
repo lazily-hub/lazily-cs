@@ -70,6 +70,21 @@ reported green while testing nothing.
   a fixed one fails it until the entry is deleted.
 - **A ledger entry is a finding against this binding, never a relaxation of a fixture.** If a
   fixture looks wrong, take it up in lazily-spec; do not weaken it here.
+- **A paragraph is DISCHARGED, never asserted and never excused** (`#lzprosekeyconvention`). The
+  CORPUS says which keys of an `assertions` block are English paragraphs, in `assertions.prose`;
+  a binding never decides for itself. Discharge each one with `meta.ProseKey("clause",
+  "backends", "scenario_count")`, naming the executable keys that carry its obligation, and close
+  the fixture with `prose.VerifyProse(fixture)` inside `ProseLedger.Replay(...)`. The ledger is
+  FIXTURE-scoped, not block-scoped: `epoch_disambiguation` is discharged by `expect.frame_epoch`
+  and `expect.blob_epoch`, asserted per scenario long after the `assertions` block is finished, so
+  every block of that fixture takes the same ledger. Asserting a paragraph pins wording rather
+  than behaviour — a copy-edit reddens the run and a library regression does not — and excusing
+  one with free text ("prose: it explains why…") is unfalsifiable, which is what nine bindings
+  each defaulted to differently. Both fail, as does a discharge naming nothing, naming a key this
+  fixture's run never asserted, or naming another paragraph. `note` / `description` / `reason`
+  stay exempt BY NAME in per-step and per-scenario blocks, but a block that lists one of them in
+  its own `prose` array overrides the exemption: an obligation living under a reserved name is a
+  place no runner could be made to discharge anything.
 - **Opening a fixture is not replaying every scenario in it.** A fixture carrying several named
   scenarios can be PARTIALLY replayed while the coverage guard stays green — it asks only whether
   the FILE was opened, and one scenario answers yes; the key trackers only bind blocks a runner

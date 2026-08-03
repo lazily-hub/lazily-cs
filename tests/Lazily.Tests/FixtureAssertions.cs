@@ -55,40 +55,71 @@ namespace Lazily.Tests;
 /// and is now hiding nothing. Prefer implementing the assertion; excusing is for a key
 /// with nothing here to compare against.
 /// </para>
+/// <para>
+/// A key the CORPUS declares to be an English paragraph (<c>assertions.prose</c>,
+/// <c>#lzprosekeyconvention</c>) takes neither route: it is DISCHARGED through
+/// <see cref="ProseKey"/>, which names the executable keys carrying its obligation and hands
+/// the naming to a fixture-scoped <see cref="ProseLedger"/> that checks it. Asserting one
+/// pins wording rather than behaviour; excusing one with free text is the unfalsifiable
+/// default the clause exists to remove. Both fail here.
+/// </para>
 /// </remarks>
 public sealed class FixtureAssertions
 {
     /// <summary>
-    /// Keys that are prose for a human reader, not assertions.
+    /// Names that are ANNOTATIONS wherever they appear: prose for a human reader, exempt by
+    /// name.
     /// </summary>
     /// <remarks>
     /// The ONLY allowlist here, and deliberately tiny. An assertion a binding does not
-    /// implement does NOT belong in it — it belongs in the binding.
+    /// implement does NOT belong in it — it belongs in the binding. The exemption is by NAME
+    /// and it is overridden by the corpus: a block that lists one of these in its own
+    /// <c>prose</c> array has said the key states an obligation, and an obligation living
+    /// under a reserved name is a place no runner could be made to discharge anything, so the
+    /// declaration wins and the key must be discharged like any other paragraph
+    /// (<c>#lzprosekeyconvention</c>).
     /// </remarks>
-    private static readonly HashSet<string> ProseKeys =
+    private static readonly HashSet<string> AnnotationNames =
         new(StringComparer.Ordinal) { "comment", "description", "note", "notes", "why" };
+
+    /// <summary>The corpus's own declaration of which sibling keys are English paragraphs.</summary>
+    private const string ProseDeclaration = "prose";
 
     private readonly JsonElement _block;
     private readonly string _where;
+    private readonly ProseLedger? _ledger;
     private readonly HashSet<string> _read = new(StringComparer.Ordinal);
     private readonly HashSet<string> _asserted = new(StringComparer.Ordinal);
     private readonly Dictionary<string, string> _excused = new(StringComparer.Ordinal);
+    private readonly Dictionary<string, string[]> _discharged = new(StringComparer.Ordinal);
 
-    private FixtureAssertions(JsonElement block, string where)
+    private FixtureAssertions(JsonElement block, string where, ProseLedger? ledger)
     {
         _block = block;
         _where = where;
+        _ledger = ledger;
     }
 
     /// <summary>Track <paramref name="owner"/>'s <paramref name="property"/> block.</summary>
     /// <param name="owner">The step, scenario, or fixture root carrying the block.</param>
     /// <param name="property">Usually <c>expect</c>, <c>expected</c>, or <c>assertions</c>.</param>
     /// <param name="where">Names the fixture and position for the failure message.</param>
-    public static FixtureAssertions Of(JsonElement owner, string property, string where) =>
-        new(owner.GetProperty(property), where);
+    /// <param name="ledger">
+    /// The fixture's prose ledger, for a fixture whose corpus declares prose keys. Every block
+    /// of that fixture passes the SAME ledger — an obligation stated in <c>assertions</c> is
+    /// routinely discharged by a per-scenario <c>expect</c> key, so the keys a block asserts
+    /// have to be visible to a claim made in another one.
+    /// </param>
+    public static FixtureAssertions Of(
+        JsonElement owner,
+        string property,
+        string where,
+        ProseLedger? ledger = null) =>
+        new(owner.GetProperty(property), where, ledger);
 
     /// <summary>Track a block the caller already holds.</summary>
-    public static FixtureAssertions Wrap(JsonElement block, string where) => new(block, where);
+    public static FixtureAssertions Wrap(JsonElement block, string where, ProseLedger? ledger = null) =>
+        new(block, where, ledger);
 
     /// <summary>The underlying element, for reads that are not key lookups.</summary>
     public JsonElement Element => _block;
@@ -148,7 +179,7 @@ public sealed class FixtureAssertions
     {
         _read.Add(name);
         var value = _block.GetProperty(name);
-        _asserted.Add(name);
+        MarkAsserted(name);
         Guarded(name, () => check(value));
     }
 
@@ -159,7 +190,7 @@ public sealed class FixtureAssertions
     {
         _read.Add(name);
         if (!_block.TryGetProperty(name, out var value)) return false;
-        _asserted.Add(name);
+        MarkAsserted(name);
         Guarded(name, () => check(value));
         return true;
     }
@@ -246,15 +277,69 @@ public sealed class FixtureAssertions
     }
 
     /// <summary>
-    /// Fail when a key was never read, was read but never asserted, or carries a stale
-    /// excuse.
+    /// Discharge the prose key <paramref name="name"/> by naming the executable assertion keys
+    /// that carry its obligation (<c>#lzprosekeyconvention</c>).
+    /// </summary>
+    /// <param name="name">A key the block's own <c>prose</c> array declares.</param>
+    /// <param name="dischargedBy">
+    /// The keys that carry the paragraph's obligation, matched by NAME in any block of the
+    /// same fixture — <c>epoch_disambiguation</c> is discharged by <c>expect.frame_epoch</c>
+    /// and <c>expect.blob_epoch</c>, asserted per scenario long after this block is finished.
+    /// Every one of them must be a key the run really asserts: that is what turns "this is
+    /// prose" into a claim the tracker can falsify.
+    /// </param>
+    /// <remarks>
+    /// This REPLACES the free-text <see cref="ExcuseKey"/> reasons that used to be written for
+    /// these keys rather than sitting beside them: two paths to satisfy one key is the
+    /// ambiguity the clause removes, so a key both discharged and excused — or both discharged
+    /// and asserted — fails <see cref="Verify"/>.
+    /// </remarks>
+    public void ProseKey(string name, params string[] dischargedBy)
+    {
+        ArgumentNullException.ThrowIfNull(dischargedBy);
+
+        // A claim nobody can check is the state this whole convention replaces: rule 6 is
+        // fixture-scoped, so a block with no ledger could record a naming that no later pass
+        // ever compares against the keys the run asserted.
+        if (_ledger is null)
+            throw new Xunit.Sdk.XunitException(
+                $"{_where}: ProseKey('{name}') needs the fixture's ProseLedger — a discharge "
+                + "claim that reaches no ledger is checked by nothing, which is the "
+                + "unfalsifiable excuse this replaces");
+
+        // Rule 5.
+        if (dischargedBy.Length == 0 || dischargedBy.Any(string.IsNullOrWhiteSpace))
+            throw new Xunit.Sdk.XunitException(
+                $"{_where}: ProseKey('{name}') names no discharging key — a paragraph states an "
+                + "obligation, and a discharge that names nothing says only that the runner "
+                + "noticed it");
+
+        if (dischargedBy.Contains(ProseDeclaration, StringComparer.Ordinal))
+            throw new Xunit.Sdk.XunitException(
+                $"{_where}: ProseKey('{name}') names `{ProseDeclaration}`, which is the "
+                + "DECLARATION of what is prose, not an assertion carrying anything");
+
+        if (_discharged.ContainsKey(name))
+            throw new Xunit.Sdk.XunitException(
+                $"{_where}: ProseKey('{name}') was declared twice; the second naming silently "
+                + "replaces the first, so one of the two claims is checked by nothing");
+
+        _read.Add(name);
+        _discharged[name] = dischargedBy;
+        _ledger.Discharge(_where, name, dischargedBy);
+    }
+
+    /// <summary>
+    /// Fail when a key was never read, was read but never asserted, carries a stale excuse, or
+    /// breaks one of the prose-key rules.
     /// </summary>
     public void Verify()
     {
         if (_block.ValueKind != JsonValueKind.Object) return;
+        var declaredProse = VerifyProseKeys();
         var present = _block.EnumerateObject()
             .Select(property => property.Name)
-            .Where(name => !ProseKeys.Contains(name))
+            .Where(name => !AnnotationNames.Contains(name) || declaredProse.Contains(name))
             .ToArray();
 
         var unread = present
@@ -279,7 +364,9 @@ public sealed class FixtureAssertions
                 + string.Join("; ", stale.Select(name => $"{name}: \"{_excused[name]}\"")));
 
         var readOnly = present
-            .Where(name => !_asserted.Contains(name) && !_excused.ContainsKey(name))
+            .Where(name => !_asserted.Contains(name)
+                && !_excused.ContainsKey(name)
+                && !_discharged.ContainsKey(name))
             .OrderBy(name => name, StringComparer.Ordinal)
             .ToArray();
         if (readOnly.Length > 0)
@@ -289,6 +376,121 @@ public sealed class FixtureAssertions
                 + "never compared the fixture's own value against anything, so editing the "
                 + "fixture changes nothing; route it through AssertKey/AssertKeyWith, or "
                 + "declare an ExcuseKey with a reason");
+    }
+
+    /// <summary>
+    /// Raise the block-local half of the prose-key rules and return the declared prose keys.
+    /// </summary>
+    /// <remarks>
+    /// The set comparison at the end is what CONSUMES <c>prose</c> itself: the declaration is
+    /// an ordinary key of the block, so the unconsumed-key gate above sees a runner that
+    /// ignores it, and a forgotten paragraph fails here rather than vanishing.
+    /// </remarks>
+    private IReadOnlySet<string> VerifyProseKeys()
+    {
+        if (!_block.TryGetProperty(ProseDeclaration, out var declaration))
+        {
+            // Rule 3, in the degenerate direction: nothing in this block is prose, so nothing
+            // in it can be discharged.
+            if (_discharged.Count > 0)
+                throw new Xunit.Sdk.XunitException(
+                    $"{_where}: discharged key(s) "
+                    + $"[{string.Join(", ", _discharged.Keys.Order(StringComparer.Ordinal))}] in a "
+                    + $"block that declares no `{ProseDeclaration}` — only the CORPUS says which "
+                    + "keys are English paragraphs, and a binding deciding for itself is the "
+                    + "split this convention closes");
+            return new HashSet<string>(StringComparer.Ordinal);
+        }
+
+        if (declaration.ValueKind != JsonValueKind.Array)
+            throw new Xunit.Sdk.XunitException(
+                $"{_where}: `{ProseDeclaration}` is {declaration.ValueKind}, not an array of "
+                + "sibling key names");
+
+        var declared = new HashSet<string>(
+            declaration.EnumerateArray().Select(item => item.GetString()!),
+            StringComparer.Ordinal);
+
+        if (declared.Contains(ProseDeclaration))
+            throw new Xunit.Sdk.XunitException(
+                $"{_where}: `{ProseDeclaration}` lists itself; the declaration is a value a "
+                + "runner compares, not a paragraph");
+
+        var members = _block.EnumerateObject().Select(property => property.Name).ToArray();
+
+        var undeclaredMembers = declared.Where(name => !members.Contains(name, StringComparer.Ordinal))
+            .Order(StringComparer.Ordinal).ToArray();
+        if (undeclaredMembers.Length > 0)
+            throw new Xunit.Sdk.XunitException(
+                $"{_where}: `{ProseDeclaration}` names [{string.Join(", ", undeclaredMembers)}], "
+                + "which this block does not carry");
+
+        // A block that is entirely prose has nothing that could discharge it.
+        if (!members.Any(name => name != ProseDeclaration && !declared.Contains(name)))
+            throw new Xunit.Sdk.XunitException(
+                $"{_where}: every key of this block is prose, so no assertion here can carry "
+                + "any of their obligations");
+
+        // Rule 1.
+        var asserted = declared.Where(_asserted.Contains).Order(StringComparer.Ordinal).ToArray();
+        if (asserted.Length > 0)
+            throw new Xunit.Sdk.XunitException(
+                $"{_where}: prose key(s) [{string.Join(", ", asserted)}] were ASSERTED — "
+                + "comparing an English paragraph, or a tally derived from one, pins wording "
+                + "rather than behaviour: a copy-edit reddens the run and a library regression "
+                + "does not. Discharge them with ProseKey instead");
+
+        // Rule 2.
+        var excused = declared.Where(_excused.ContainsKey).Order(StringComparer.Ordinal).ToArray();
+        if (excused.Length > 0)
+            throw new Xunit.Sdk.XunitException(
+                $"{_where}: prose key(s) [{string.Join(", ", excused)}] were EXCUSED with free "
+                + "text — an unfalsifiable reason is indistinguishable from the undocumented "
+                + "default this clause removes. Discharge them with ProseKey, naming the keys "
+                + "that carry the obligation: "
+                + string.Join("; ", excused.Select(name => $"{name}: \"{_excused[name]}\"")));
+
+        // Rule 3.
+        var notProse = _discharged.Keys.Where(name => !declared.Contains(name))
+            .Order(StringComparer.Ordinal).ToArray();
+        if (notProse.Length > 0)
+            throw new Xunit.Sdk.XunitException(
+                $"{_where}: discharged key(s) [{string.Join(", ", notProse)}] the corpus does "
+                + $"NOT declare in `{ProseDeclaration}` — a key carrying a comparable value is "
+                + "asserted, not discharged");
+
+        // Rule 7.
+        var namesProse = _discharged
+            .Select(entry => (entry.Key, named: entry.Value.Where(declared.Contains).ToArray()))
+            .Where(entry => entry.named.Length > 0)
+            .OrderBy(entry => entry.Key, StringComparer.Ordinal)
+            .Select(entry => $"{entry.Key} -> [{string.Join(", ", entry.named)}]")
+            .ToArray();
+        if (namesProse.Length > 0)
+            throw new Xunit.Sdk.XunitException(
+                $"{_where}: discharge(s) naming a key that is itself prose — a paragraph cannot "
+                + "carry another paragraph's obligation: " + string.Join("; ", namesProse));
+
+        // Rule 4, and the comparison that consumes `prose`.
+        var declaredNames = declared.Order(StringComparer.Ordinal).ToArray();
+        var dischargedNames = _discharged.Keys.Order(StringComparer.Ordinal).ToArray();
+        if (!declaredNames.SequenceEqual(dischargedNames, StringComparer.Ordinal))
+            throw new Xunit.Sdk.XunitException(
+                $"{_where}: the discharged key set [{string.Join(", ", dischargedNames)}] differs "
+                + $"from `{ProseDeclaration}` [{string.Join(", ", declaredNames)}] — a paragraph "
+                + "the corpus declares and this runner never discharged proves nothing, and this "
+                + "comparison is what makes it fail rather than vanish");
+
+        _read.Add(ProseDeclaration);
+        MarkAsserted(ProseDeclaration);
+        _ledger?.BlockVerified(_where, declared);
+        return declared;
+    }
+
+    private void MarkAsserted(string name)
+    {
+        _asserted.Add(name);
+        _ledger?.Asserted(name);
     }
 
     /// <summary>Add the fixture and key to whatever the caller's comparison reports.</summary>

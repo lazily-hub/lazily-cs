@@ -173,7 +173,10 @@ public sealed class BlobBackendDiscriminatorConformanceTests
     };
 
     [Fact]
-    public void Blob_backend_discriminator_is_read_strictly_across_every_wire_form()
+    public void Blob_backend_discriminator_is_read_strictly_across_every_wire_form() =>
+        ProseLedger.Replay(Corpus, Fixture, Replay);
+
+    private static void Replay(ProseLedger prose)
     {
         if (SpecCorpus.Root is null) return;
 
@@ -182,49 +185,41 @@ public sealed class BlobBackendDiscriminatorConformanceTests
         Assert.Equal(1, root.GetProperty("protocol_version").GetInt32());
         Assert.Equal("BlobBackendDiscriminator", root.GetProperty("kind").GetString());
 
-        var meta = FixtureAssertions.Of(root, "assertions", $"{Corpus}/{Fixture} assertions");
+        var meta = FixtureAssertions.Of(root, "assertions", $"{Corpus}/{Fixture} assertions", prose);
         meta.AssertKey("required_of_binding", "MUST");
         meta.AssertKey("scenario_count", root.GetProperty("scenarios").GetArrayLength());
         meta.AssertKey("codecs", new[] { "json", "msgpack" }.AsEnumerable());
         meta.AssertKey("outcomes", new[] { "accept", "reject" }.AsEnumerable());
 
-        foreach (var prose in new[]
-                 {
-                     "clause", "wire_encoding", "reject_obligation", "anti_vacuity", "theorem",
-                     "generator",
-                 })
-        {
-            meta.ExcuseKey(
-                prose,
-                "prose: it states WHY the fixture is shaped this way; the behaviour it describes " +
-                "is asserted by the per-scenario decode, refusal, and re-encode below");
-        }
+        // The nine paragraphs `assertions.prose` declares, each DISCHARGED by the executable
+        // keys that carry its obligation (#lzprosekeyconvention). This replaces nine free-text
+        // excuses that already named the discharging assertions in English — falsifiable in
+        // principle and checked by nothing, which is exactly the state the convention closes.
+        // Every key named below is asserted by this run, in this block or in a per-scenario
+        // `expect` block, and the ledger fails the run if one of them stops being.
+        meta.ProseKey(
+            "clause", "decoded_backend", "rejected", "rejection_is_decode_error", "rejection_kind");
+        meta.ProseKey("wire_encoding", "decoded_backend", "rejected");
+        meta.ProseKey("backend_form_vocabulary", "backend_forms", "backends", "decoded_backend");
+        meta.ProseKey("reject_obligation", "error_names_token", "rejection_kind");
+        meta.ProseKey("null_form", "decoded_backend", "reencoded_backend_field_present");
+        meta.ProseKey("non_string_form", "rejection_is_decode_error", "rejection_kind");
 
-        meta.ExcuseKey(
-            "backend_form_vocabulary",
-            "prose: it enumerates the seven wire shapes and states the completeness rule. The "
-            + "shapes are asserted as a set against `backend_forms` below, and the rule it names "
-            + "— every backend in `backends` is the decoded_backend of some accept scenario — is "
-            + "the set difference asserted on `backends` below");
+        // The claim v1 could not make: the two epochs are read from their OWN sources, and
+        // both keys are per-scenario — asserted long after this block is finished, which is
+        // why the ledger is fixture-scoped rather than block-scoped.
+        meta.ProseKey("epoch_disambiguation", "frame_epoch", "blob_epoch");
 
-        meta.ExcuseKey(
-            "null_form",
-            "prose: it explains why an explicit null is the ABSENT form rather than a "
-            + "present-unknown one. The behaviour is asserted by the backend_null_* scenarios, "
-            + "which decode as shm and re-encode with no `backend` entry");
+        meta.ProseKey(
+            "anti_vacuity", "decoded_backend", "reencoded_backend_field_present", "backends");
+        meta.ProseKey("theorem", "rejected", "decoded_backend");
 
+        // NOT prose, and not declared as such: it names the script that generated the wire
+        // frames, and there is nothing in this binding to compare it against.
         meta.ExcuseKey(
-            "non_string_form",
-            "prose: it explains why the non-string refusal must land in the same error family as "
-            + "the unknown-token one. The behaviour is asserted by `rejection_is_decode_error` "
-            + "and `rejection_kind` on the backend_non_string_* scenarios");
-
-        meta.ExcuseKey(
-            "epoch_disambiguation",
-            "prose: it explains why the single `epoch` key was split. The split is asserted by "
-            + "`frame_epoch` against DeltaMessage.Epoch and `blob_epoch` against ShmBlobRef.Epoch "
-            + "on every accept scenario, plus the NotEqual guard that the two fixture values have "
-            + "not re-collapsed into one number");
+            "generator",
+            "names the corpus-side script that mints these frames; it states no obligation on a "
+            + "binding and nothing here could disagree with it");
 
         var scenarios = SpecCorpus.Scenarios(root, Corpus, Fixture);
 
@@ -283,7 +278,7 @@ public sealed class BlobBackendDiscriminatorConformanceTests
             Assert.Equal("Delta", scenario.GetProperty("variant").GetString());
             formsReplayed.Add(form);
 
-            var expect = FixtureAssertions.Of(scenario, "expect", $"{Corpus}/{Fixture} {where}");
+            var expect = FixtureAssertions.Of(scenario, "expect", $"{Corpus}/{Fixture} {where}", prose);
             replayed += 1;
 
             try
@@ -439,6 +434,10 @@ public sealed class BlobBackendDiscriminatorConformanceTests
         // Four, not ten: arrow and in_process round-trip the field, while omitted, explicit shm
         // and null all re-encode with no `backend` entry at all.
         Assert.Equal(4, fieldsEmitted);
+
+        // Rule 6: every key the nine discharges name was really asserted by this run. A claim
+        // verified by nothing is the state the free-text excuses were in.
+        prose.VerifyProse(Fixture);
     }
 
     /// <summary>

@@ -127,7 +127,10 @@ public sealed class CodecConformanceTests
     }
 
     [Fact]
-    public void Json_frames_round_trip_through_the_reference_codec()
+    public void Json_frames_round_trip_through_the_reference_codec() =>
+        ProseLedger.Replay(Corpus, JsonFixture, ReplayJson);
+
+    private static void ReplayJson(ProseLedger prose)
     {
         if (SpecCorpus.Root is null) return;
 
@@ -140,16 +143,19 @@ public sealed class CodecConformanceTests
         // The fixture-level block pins the codec's identity and the two distinct senses of
         // "canonical" protocol.md keeps apart (`role` = the required interop floor,
         // `byte_canonical` = one deterministic byte form per message).
-        var meta = FixtureAssertions.Of(root, "assertions", $"{Corpus}/{JsonFixture} assertions");
+        var meta = FixtureAssertions.Of(root, "assertions", $"{Corpus}/{JsonFixture} assertions", prose);
         meta.AssertKey("codec", "json");
         meta.AssertKey("self_describing", true);
         meta.AssertKey("byte_canonical", true);
         meta.AssertKey("required_of_binding", "MUST");
         meta.AssertKey("role", "reference");
         meta.AssertKey("scenario_count", root.GetProperty("scenarios").GetArrayLength());
-        meta.ExcuseKey(
-            "note",
-            "prose: documents the reference-vs-byte-canonical distinction, states nothing the replay observes");
+
+        // The paragraph keeps two senses of "canonical" apart and names both keys that carry
+        // them, so the discharge is the pair it names (#lzprosekeyconvention). Excusing it
+        // used to say "documents the distinction" — true of any wording, and checked by
+        // nothing; this claim goes red if either assertion is deleted.
+        meta.ProseKey("note", "role", "byte_canonical");
         meta.Verify();
 
         var scenarios = SpecCorpus.Scenarios(root, Corpus, JsonFixture);
@@ -165,7 +171,7 @@ public sealed class CodecConformanceTests
             // the input back.
             var roundTripped = IpcWire.Deserialize(IpcWire.Serialize(source));
 
-            var expect = FixtureAssertions.Of(scenario, "expect", $"{Corpus}/{JsonFixture} {where}");
+            var expect = FixtureAssertions.Of(scenario, "expect", $"{Corpus}/{JsonFixture} {where}", prose);
             expect.AssertKey("round_trip_equals_source", RoundTripEqual(roundTripped, source));
             AssertValues(expect, roundTripped);
             expect.Verify();
@@ -173,10 +179,14 @@ public sealed class CodecConformanceTests
         }
 
         Assert.Equal(3, replayed);
+        prose.VerifyProse(JsonFixture);
     }
 
     [Fact]
-    public void Msgpack_frames_round_trip_through_the_cross_language_binary_default()
+    public void Msgpack_frames_round_trip_through_the_cross_language_binary_default() =>
+        ProseLedger.Replay(Corpus, MsgPackFixture, ReplayMsgPack);
+
+    private static void ReplayMsgPack(ProseLedger prose)
     {
         if (SpecCorpus.Root is null) return;
 
@@ -190,16 +200,20 @@ public sealed class CodecConformanceTests
         // encoded FIELD NAMES instead of golden bytes: a MessagePack map's key order is
         // encoder-defined, so two conforming bindings MAY emit byte-different frames for the
         // same IpcMessage.
-        var meta = FixtureAssertions.Of(root, "assertions", $"{Corpus}/{MsgPackFixture} assertions");
+        var meta = FixtureAssertions.Of(root, "assertions", $"{Corpus}/{MsgPackFixture} assertions", prose);
         meta.AssertKey("codec", "msgpack");
         meta.AssertKey("self_describing", true);
         meta.AssertKey("byte_canonical", false);
         meta.AssertKey("required_of_binding", "MUST");
         meta.AssertKey("role", "cross_language_binary_default");
         meta.AssertKey("scenario_count", root.GetProperty("scenarios").GetArrayLength());
-        meta.ExcuseKey(
-            "note",
-            "prose: restates the named-field rule the encoded_* keys below verify executably");
+
+        // The paragraph states WHY this fixture pins decoded values and field NAMES instead of
+        // golden bytes, and names the key that verifies the named-map encoding. Both halves are
+        // asserted: `byte_canonical` above, `encoded_body_field_names` per scenario below —
+        // which is a key of a per-scenario `expect` block, so the ledger is fixture-scoped
+        // (#lzprosekeyconvention).
+        meta.ProseKey("note", "byte_canonical", "encoded_body_field_names");
         meta.Verify();
 
         var scenarios = SpecCorpus.Scenarios(root, Corpus, MsgPackFixture);
@@ -216,7 +230,7 @@ public sealed class CodecConformanceTests
             Assert.Equal(scenario.GetProperty("variant").GetString(), VariantOf(source));
 
             var frame = MsgPackWire.Serialize(source);
-            var expect = FixtureAssertions.Of(scenario, "expect", $"{Corpus}/{MsgPackFixture} {where}");
+            var expect = FixtureAssertions.Of(scenario, "expect", $"{Corpus}/{MsgPackFixture} {where}", prose);
 
             // Encoding first, decoded values second. A positional encoder decodes back to an
             // equal message under a matching positional decoder and is still non-conforming,
@@ -238,6 +252,7 @@ public sealed class CodecConformanceTests
         // 2 envelope/body keys per scenario, plus first_node (Snapshot) and first_op/second_op
         // (CrdtSync). Exact, not a floor: a runner that quietly reached fewer would pass one.
         Assert.Equal(9, encodingKeys);
+        prose.VerifyProse(MsgPackFixture);
     }
 
     /// <summary>

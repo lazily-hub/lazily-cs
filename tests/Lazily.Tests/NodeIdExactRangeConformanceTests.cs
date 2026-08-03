@@ -71,7 +71,10 @@ public sealed class NodeIdExactRangeConformanceTests
     }
 
     [Fact]
-    public void NodeId_exact_representation_bound_is_enforced_by_refusal_never_rounding()
+    public void NodeId_exact_representation_bound_is_enforced_by_refusal_never_rounding() =>
+        ProseLedger.Replay(Corpus, Fixture, Replay);
+
+    private static void Replay(ProseLedger prose)
     {
         if (SpecCorpus.Root is null) return;
 
@@ -80,19 +83,30 @@ public sealed class NodeIdExactRangeConformanceTests
         Assert.Equal(1, root.GetProperty("protocol_version").GetInt32());
         Assert.Equal("NodeIdExactRange", root.GetProperty("kind").GetString());
 
-        var meta = FixtureAssertions.Of(root, "assertions", $"{Corpus}/{Fixture} assertions");
+        var meta = FixtureAssertions.Of(root, "assertions", $"{Corpus}/{Fixture} assertions", prose);
         meta.AssertKey("required_of_binding", "MUST");
         meta.AssertKey("scenario_count", root.GetProperty("scenarios").GetArrayLength());
         meta.AssertKey("codecs", new[] { "json", "msgpack" }.AsEnumerable());
-        foreach (var prose in new[] { "clause", "wire_encoding", "outcomes", "anti_vacuity", "generator" })
-        {
-            meta.ExcuseKey(
-                prose,
-                "prose: it states WHY the fixture is shaped this way; the behaviour it describes " +
-                "is asserted by the per-scenario decode below");
-        }
 
-        meta.Verify();
+        // The three paragraphs the corpus declares, discharged by the keys that carry them
+        // (#lzprosekeyconvention). `outcomes` is NOT one of them: its English is nested UNDER a
+        // data key, so the assertion is the key SET and the parent key's own assertion
+        // discharges it — asserted against the outcomes this run observed, after the loop.
+        meta.ProseKey("clause", "outcome", "node_id_decimal");
+        meta.ProseKey("wire_encoding", "node_id_decimal", "root_id_decimal");
+        meta.ProseKey("anti_vacuity", "outcome", "node_id_decimal", "node_count");
+
+        meta.ExcuseKey(
+            "generator",
+            "names the corpus-side script that mints these frames; it states no obligation on a "
+            + "binding and nothing here could disagree with it");
+
+        // The declared outcome vocabulary, read through the raw element: every scenario's
+        // `outcome` is checked to be a member of it, and the SET is asserted against what the
+        // run observed once the loop is done. Reading it here does not consume it.
+        var declaredOutcomes = meta.Element.GetProperty("outcomes").EnumerateObject()
+            .Select(member => member.Name).ToArray();
+        var observedOutcomes = new SortedSet<string>(StringComparer.Ordinal);
 
         var scenarios = SpecCorpus.Scenarios(root, Corpus, Fixture);
 
@@ -105,7 +119,7 @@ public sealed class NodeIdExactRangeConformanceTests
         foreach (var scenario in scenarios.All())
         {
             var where = scenario.GetProperty("id").GetString()!;
-            var expect = FixtureAssertions.Of(scenario, "expect", $"{Corpus}/{Fixture} {where}");
+            var expect = FixtureAssertions.Of(scenario, "expect", $"{Corpus}/{Fixture} {where}", prose);
             var expected = ulong.Parse(
                 scenario.GetProperty("expect").GetProperty("node_id_decimal").GetString()!,
                 CultureInfo.InvariantCulture);
@@ -115,10 +129,12 @@ public sealed class NodeIdExactRangeConformanceTests
             // because a ulong represents everything the wire type allows.
             expect.AssertKeyWith("outcome", want =>
             {
-                var outcome = want.GetString();
+                var outcome = want.GetString()!;
                 Assert.True(
-                    outcome is "exact" or "exact_or_reject",
-                    $"{where}: unknown outcome {outcome}");
+                    declaredOutcomes.Contains(outcome, StringComparer.Ordinal),
+                    $"{where}: outcome {outcome} is not one the fixture's own `outcomes` "
+                    + $"vocabulary declares [{string.Join(", ", declaredOutcomes)}]");
+                observedOutcomes.Add(outcome);
             });
 
             var message = Decode(scenario);
@@ -144,7 +160,20 @@ public sealed class NodeIdExactRangeConformanceTests
             expect.Verify();
         }
 
+        // The vocabulary rung, asserted against what the run OBSERVED rather than against a
+        // literal: a fixture that grew a third outcome no scenario carries, or a runner that
+        // reached only one of the two branches, is a set difference either way.
+        meta.AssertKeyWith(
+            "outcomes",
+            want => Assert.Equal(
+                want.EnumerateObject().Select(member => member.Name)
+                    .OrderBy(name => name, StringComparer.Ordinal).ToArray(),
+                observedOutcomes.ToArray()));
+
+        meta.Verify();
+
         Assert.Equal(6, accepted);
         Assert.Equal(6, scenarios.Count);
+        prose.VerifyProse(Fixture);
     }
 }
