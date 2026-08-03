@@ -1,4 +1,5 @@
 using System.Globalization;
+using System.Text;
 using System.Text.Json;
 using Lazily;
 using Xunit;
@@ -112,12 +113,22 @@ public sealed class BlobBackendDiscriminatorConformanceTests
     /// survive a round trip through structured JSON. Raw text and raw hex are what the fixture
     /// carries, and the ABSENT map entry the omitted scenarios test only exists on the wire.
     /// </remarks>
-    private static IpcMessage Decode(string codec, JsonElement scenario) => codec switch
+    private static IpcMessage Decode(string codec, JsonElement scenario, FixtureAssertions expect)
     {
-        "json" => IpcWire.Deserialize(scenario.GetProperty("wire_json").GetString()!),
-        "msgpack" => MsgPackWire.Deserialize(HexToBytes(scenario.GetProperty("wire_msgpack_hex").GetString()!)),
-        _ => throw new InvalidOperationException($"unknown codec in fixture: {codec}"),
-    };
+        switch (codec)
+        {
+            case "json":
+                var json = scenario.GetProperty("wire_json").GetString()!;
+                expect.AssertKey("wire_input_fnv1a64", WireInputDigest.Fnv1a64Hex(Encoding.UTF8.GetBytes(json)));
+                return IpcWire.Deserialize(json);
+            case "msgpack":
+                var msgpack = HexToBytes(scenario.GetProperty("wire_msgpack_hex").GetString()!);
+                expect.AssertKey("wire_input_fnv1a64", WireInputDigest.Fnv1a64Hex(msgpack));
+                return MsgPackWire.Deserialize(msgpack);
+            default:
+                throw new InvalidOperationException($"unknown codec in fixture: {codec}");
+        }
+    }
 
     /// <summary>
     /// Re-encode under the scenario's OWN codec and read the blob body back off the WIRE.
@@ -204,14 +215,9 @@ public sealed class BlobBackendDiscriminatorConformanceTests
         meta.ProseKey(
             "clause", "decoded_backend", "rejected", "rejection_is_decode_error", "rejection_kind");
 
-        // PROXY. `wire_encoding` is a claim about how the CORPUS carries its bytes — raw text
-        // and hex rather than a pre-parsed object — and no assertion a run makes can observe
-        // it: a runner that re-serialized a parsed object would still satisfy every key here.
-        // The honest proxy is the codec and form vocabulary, both asserted from what the run
-        // replayed, which prove the distinction the paragraph is about survived into the
-        // runner: an ABSENT map entry, an explicit null, and a non-string all reached this
-        // binding as distinct forms in both codecs.
-        meta.ProseKey("wire_encoding", "codecs", "backend_forms");
+        // Executable proof that the exact raw text / decoded-hex byte buffer reaches the
+        // library decoder rather than a reconstructed proxy.
+        meta.ProseKey("wire_encoding", "wire_input_fnv1a64");
 
         meta.ProseKey("backend_form_vocabulary", "backend_forms", "backends", "decoded_backend");
         meta.ProseKey("reject_obligation", "error_names_token", "rejection_kind");
@@ -314,7 +320,7 @@ public sealed class BlobBackendDiscriminatorConformanceTests
                     case "accept":
                         {
                             accepted += 1;
-                            var message = Decode(codec, scenario);
+                            var message = Decode(codec, scenario, expect);
                             var (node, blob, frameEpoch) = Descriptor(message);
 
                             // Through the library's OWN resolution function — the one every backend
@@ -365,7 +371,7 @@ public sealed class BlobBackendDiscriminatorConformanceTests
 
                             // `rejected` is asserted from the OBSERVED outcome of a real decode, not
                             // from a literal the runner already believes.
-                            var caught = Record.Exception(() => Decode(codec, scenario));
+                            var caught = Record.Exception(() => Decode(codec, scenario, expect));
                             expect.AssertKey("rejected", caught is not null);
 
                             // The assertion that pins this binding's v1 defect. Both MUST-level

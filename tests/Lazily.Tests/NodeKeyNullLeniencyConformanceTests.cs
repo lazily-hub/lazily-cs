@@ -1,4 +1,5 @@
 using System.Globalization;
+using System.Text;
 using System.Text.Json;
 using Lazily;
 using Xunit;
@@ -40,15 +41,22 @@ public sealed class NodeKeyNullLeniencyConformanceTests
         return bytes;
     }
 
-    private static IpcMessage Decode(JsonElement scenario)
+    private static IpcMessage Decode(JsonElement scenario, FixtureAssertions expect)
     {
         var codec = scenario.GetProperty("codec").GetString();
-        return codec switch
+        switch (codec)
         {
-            "json" => IpcWire.Deserialize(scenario.GetProperty("wire_json").GetString()!),
-            "msgpack" => MsgPackWire.Deserialize(HexToBytes(scenario.GetProperty("wire_msgpack_hex").GetString()!)),
-            _ => throw new InvalidOperationException($"unknown codec {codec}"),
-        };
+            case "json":
+                var json = scenario.GetProperty("wire_json").GetString()!;
+                expect.AssertKey("wire_input_fnv1a64", WireInputDigest.Fnv1a64Hex(Encoding.UTF8.GetBytes(json)));
+                return IpcWire.Deserialize(json);
+            case "msgpack":
+                var msgpack = HexToBytes(scenario.GetProperty("wire_msgpack_hex").GetString()!);
+                expect.AssertKey("wire_input_fnv1a64", WireInputDigest.Fnv1a64Hex(msgpack));
+                return MsgPackWire.Deserialize(msgpack);
+            default:
+                throw new InvalidOperationException($"unknown codec {codec}");
+        }
     }
 
     /// <summary>
@@ -164,13 +172,9 @@ public sealed class NodeKeyNullLeniencyConformanceTests
         // asserted.
         meta.ProseKey("clause", "decoded_key", "key_forms");
 
-        // PROXY, with the control the paragraph actually needs now in place. `wire_encoding` is
-        // an obligation on the RUNNER — parse the raw text and hex rather than re-serialize a
-        // pre-parsed object — which no assertion key reddens on its own. `key_forms` is the
-        // closest executable key BECAUSE it is now collected from the raw wire slot before any
-        // decode: the ABSENT entry and the explicit nil are proven distinguishable in this
-        // runner, which is exactly what the paragraph says must survive into it.
-        meta.ProseKey("wire_encoding", "codecs", "key_forms");
+        // Executable proof that the exact raw text / decoded-hex byte buffer reaches the
+        // library decoder rather than a reconstructed proxy.
+        meta.ProseKey("wire_encoding", "wire_input_fnv1a64");
 
         meta.ProseKey("reencode_obligation", "reencoded_key_field_present");
         meta.ProseKey("anti_vacuity", "decoded_key", "key_forms");
@@ -213,7 +217,7 @@ public sealed class NodeKeyNullLeniencyConformanceTests
 
             observedKeyForms.Add(wireForm);
 
-            var message = Decode(scenario);
+            var message = Decode(scenario, expect);
             var key = DecodedKey(scenario, message);
             if (key is not null) keysDecoded += 1;
 

@@ -1,4 +1,5 @@
 using System.Globalization;
+using System.Text;
 using System.Text.Json;
 using Lazily;
 using Xunit;
@@ -57,17 +58,24 @@ public sealed class NodeIdExactRangeConformanceTests
     /// failure rather than the <c>exact_or_reject</c> branch — which is why this returns the
     /// message directly instead of a result.
     /// </remarks>
-    private static IpcMessage Decode(JsonElement scenario)
+    private static IpcMessage Decode(JsonElement scenario, FixtureAssertions expect)
     {
         var codec = scenario.GetProperty("codec").GetString();
-        return codec switch
+        switch (codec)
         {
             // The raw TEXT through the codec's own entry point, so the parse that would round
             // on a narrower runtime is inside the code under test rather than in the runner.
-            "json" => IpcWire.Deserialize(scenario.GetProperty("wire_json").GetString()!),
-            "msgpack" => MsgPackWire.Deserialize(HexToBytes(scenario.GetProperty("wire_msgpack_hex").GetString()!)),
-            _ => throw new InvalidOperationException($"unknown codec {codec}"),
-        };
+            case "json":
+                var json = scenario.GetProperty("wire_json").GetString()!;
+                expect.AssertKey("wire_input_fnv1a64", WireInputDigest.Fnv1a64Hex(Encoding.UTF8.GetBytes(json)));
+                return IpcWire.Deserialize(json);
+            case "msgpack":
+                var msgpack = HexToBytes(scenario.GetProperty("wire_msgpack_hex").GetString()!);
+                expect.AssertKey("wire_input_fnv1a64", WireInputDigest.Fnv1a64Hex(msgpack));
+                return MsgPackWire.Deserialize(msgpack);
+            default:
+                throw new InvalidOperationException($"unknown codec {codec}");
+        }
     }
 
     [Fact]
@@ -92,13 +100,9 @@ public sealed class NodeIdExactRangeConformanceTests
         // discharges it — asserted against the outcomes this run observed, after the loop.
         meta.ProseKey("clause", "outcome", "node_id_decimal");
 
-        // PROXY. `wire_encoding` is an obligation on the RUNNER — parse the raw `wire_json` /
-        // `wire_msgpack_hex` with the codec under test, and compare the identifier by its
-        // DECIMAL rendering — and no assertion key reddens when a runner takes the shortcut of
-        // re-serializing a pre-parsed object. `node_id_decimal` is the closest executable key:
-        // it is compared as a decimal string, which is the half of the paragraph a run can
-        // observe. `codecs` proves both wire forms were really reached.
-        meta.ProseKey("wire_encoding", "codecs", "node_id_decimal");
+        // Executable proof that the exact raw text / decoded-hex byte buffer reaches the
+        // library decoder rather than a reconstructed proxy.
+        meta.ProseKey("wire_encoding", "wire_input_fnv1a64");
 
         meta.ProseKey("anti_vacuity", "outcome", "node_id_decimal", "node_count");
 
@@ -148,7 +152,7 @@ public sealed class NodeIdExactRangeConformanceTests
                 observedOutcomes.Add(outcome);
             });
 
-            var message = Decode(scenario);
+            var message = Decode(scenario, expect);
             accepted += 1;
             observedCodecs.Add(scenario.GetProperty("codec").GetString()!);
 
