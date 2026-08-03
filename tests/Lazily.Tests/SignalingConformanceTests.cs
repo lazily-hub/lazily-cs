@@ -15,6 +15,7 @@ public sealed class SignalingConformanceTests
         var frames = document.RootElement.GetProperty("frames").EnumerateArray().ToArray();
         Assert.Equal(17, frames.Length);
         var schema = LoadSchema();
+        var asserted = 0;
 
         foreach (var frame in frames)
         {
@@ -39,7 +40,116 @@ public sealed class SignalingConformanceTests
             using var actualDocument = JsonDocument.Parse(actual);
             var result = schema.Evaluate(actualDocument.RootElement);
             Assert.True(result.IsValid, result.ToString());
+
+            // Each frame's own `assertions` block (#lznullformblind). Round-tripping the
+            // wire proves the codec is self-consistent and says nothing about what the
+            // fixture CLAIMS: all seventeen of these blocks were carried by a fixture this
+            // runner opens and bound by nothing, so every key in them reported exactly
+            // nothing. Not unread — unreachable, because no tracker ever saw them.
+            var label = frame.GetProperty("label").GetString()!;
+            var assertions = FixtureAssertions.Of(frame, "assertions", $"signaling/frames.json {label}");
+            if (direction == "client")
+            {
+                AssertClientFrame(assertions, SignalingWire.DeserializeClient(wire.GetRawText()));
+            }
+            else
+            {
+                AssertServerFrame(assertions, SignalingWire.DeserializeServer(wire.GetRawText()));
+            }
+
+            assertions.Verify();
+            asserted += 1;
         }
+
+        // Anti-vacuity: a dispatch that stopped matching would leave every block bound and
+        // nothing compared, which the two verdicts above cannot distinguish from a corpus
+        // that asserts nothing.
+        Assert.Equal(17, asserted);
+    }
+
+    private static void AssertClientFrame(FixtureAssertions assertions, ClientSignalingFrame frame)
+    {
+        switch (frame)
+        {
+            case ClientSignalingFrame.Join join:
+                assertions.AssertKey("peer", join.Peer);
+                assertions.AssertKey("has_capabilities", join.Capabilities is not null);
+                if (assertions.TryGetProperty("capabilities", out _))
+                {
+                    assertions.AssertKey("capabilities", join.Capabilities ?? []);
+                }
+
+                break;
+            case ClientSignalingFrame.Offer offer:
+                assertions.AssertKey("to", offer.To);
+                break;
+            case ClientSignalingFrame.Answer answer:
+                assertions.AssertKey("to", answer.To);
+                break;
+            case ClientSignalingFrame.Ice ice:
+                assertions.AssertKey("to", ice.To);
+                break;
+            case ClientSignalingFrame.Relay relay:
+                assertions.AssertKey("to", relay.To);
+                break;
+            case ClientSignalingFrame.Leave:
+                // The corpus carries an empty block here: `leave` addresses nobody and
+                // names nobody. Nothing to assert and nothing to excuse.
+                break;
+            default:
+                throw new InvalidOperationException($"unhandled client frame {frame.GetType().Name}");
+        }
+    }
+
+    private static void AssertServerFrame(FixtureAssertions assertions, ServerSignalingFrame frame)
+    {
+        switch (frame)
+        {
+            case ServerSignalingFrame.Welcome welcome:
+                assertions.AssertKey("peer", welcome.Peer);
+                assertions.AssertKey("peers", welcome.Peers.Select(id => (long)id));
+                // Derived from the decoded frame rather than asserted as a literal: the
+                // claim is that the roster OMITS the addressee, so it has to be computed
+                // from the same two fields the frame carries.
+                assertions.AssertKey("roster_excludes_self", !welcome.Peers.Contains(welcome.Peer));
+                break;
+            case ServerSignalingFrame.PeerJoined joined:
+                assertions.AssertKey("peer", joined.Peer);
+                break;
+            case ServerSignalingFrame.PeerLeft left:
+                assertions.AssertKey("peer", left.Peer);
+                break;
+            case ServerSignalingFrame.Offer offer:
+                AssertForwarded(assertions, offer.From);
+                break;
+            case ServerSignalingFrame.Answer answer:
+                AssertForwarded(assertions, answer.From);
+                break;
+            case ServerSignalingFrame.Ice ice:
+                AssertForwarded(assertions, ice.From);
+                break;
+            case ServerSignalingFrame.Relay relay:
+                AssertForwarded(assertions, relay.From);
+                break;
+            case ServerSignalingFrame.Error error:
+                assertions.AssertKey("code", error.Code);
+                break;
+            default:
+                throw new InvalidOperationException($"unhandled server frame {frame.GetType().Name}");
+        }
+    }
+
+    private static void AssertForwarded(FixtureAssertions assertions, ulong from)
+    {
+        assertions.AssertKey("from", from);
+        // `server_stamped_from` is a claim about PROVENANCE, which one frame cannot show.
+        // What it pins here is the forwarded SHAPE — the frame carries `from` and no `to`,
+        // which is what makes a client-addressed field impossible to spoof through it. The
+        // provenance itself is asserted against a live room by the anti_spoof_session
+        // replay below.
+        assertions.AssertKeyWith(
+            "server_stamped_from",
+            want => Assert.True(want.GetBoolean() && from != 0));
     }
 
     [Fact]

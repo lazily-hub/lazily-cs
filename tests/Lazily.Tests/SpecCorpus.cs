@@ -1,3 +1,5 @@
+using System.Globalization;
+using System.Text;
 using System.Text.Json;
 
 namespace Lazily.Tests;
@@ -49,7 +51,13 @@ public static class SpecCorpus
     {
         ArgumentNullException.ThrowIfNull(Root);
         Record(corpus, fixture);
-        return JsonDocument.Parse(File.ReadAllText(Path.Combine(Root, corpus, fixture)));
+        var document = JsonDocument.Parse(File.ReadAllText(Path.Combine(Root, corpus, fixture)));
+        // Rung 0 (#lznullformblind): inventory the assertion blocks these bytes
+        // carry, at READ time. Every rung above is scoped to a block a runner
+        // BOUND, so reading the file is the only moment the corpus's full set of
+        // blocks is in hand.
+        RecordDeclaredBlocks(Key(corpus, fixture), document.RootElement);
+        return document;
     }
 
     /// <summary>The fixture's <c>scenarios</c>, wrapped in the replay ledger.</summary>
@@ -135,6 +143,130 @@ public static class SpecCorpus
 
     internal static void RecordProseVerified(string corpus, string fixture) =>
         Append(ProseVerifiedMarker + "\t" + Key(corpus, fixture));
+
+    // -- Rung 0: the assertion-block BIND ledger (#lznullformblind) -------------
+    //
+    // Every rung above this one is scoped to a block a runner already BOUND to a
+    // FixtureAssertions tracker. The unconsumed-key check fires on a key nothing
+    // read; the read-but-not-asserted check on a key read and discarded; the prose
+    // ledger on a discharge naming nothing. NONE of them can fire for a block no
+    // runner ever bound, because there is no tracker: its keys are not unread,
+    // nothing reads them, and the fixture reports exactly nothing. lazily-dart
+    // found two such blocks carrying eight silent keys, one of them the anti-spoof
+    // invariant its fixture exists for; lazily-cpp found a third; lazily-zig found
+    // twenty-two.
+    //
+    // The two sides are matched by the block's CONTENT digest, never by its `where`
+    // label: runners spell those inconsistently (`assertions`, `frames[3] warn`,
+    // `scenarios[2].expect`) and a label-keyed ledger would silently miss the
+    // mismatch rather than report it.
+    //
+    // Both channels ride the SAME manifest as everything above, under `blocks-`
+    // prefixes — no second file, no second env var, and no second CI wiring.
+    internal const string BlockDeclaredMarker = "blocks-declared";
+    internal const string BlockBoundMarker = "blocks-bound";
+
+    /// <summary>Book an assertion block as BOUND. Called from the FixtureAssertions ctor.</summary>
+    internal static void RecordBlockBind(JsonElement block)
+    {
+        if (block.ValueKind != JsonValueKind.Object) return;
+        Append(BlockBoundMarker + "\t" + BlockDigest(block));
+    }
+
+    private static void RecordDeclaredBlocks(string fixtureKey, JsonElement root)
+    {
+        if (root.ValueKind != JsonValueKind.Object) return;
+        if (root.TryGetProperty("assertions", out var top)) Declare(fixtureKey, "assertions", top);
+        foreach (var container in new[] { "frames", "scenarios", "rejects" })
+        {
+            if (!root.TryGetProperty(container, out var items)) continue;
+            if (items.ValueKind != JsonValueKind.Array) continue;
+            var index = 0;
+            foreach (var item in items.EnumerateArray())
+            {
+                if (item.ValueKind == JsonValueKind.Object
+                    && item.TryGetProperty("assertions", out var block))
+                {
+                    Declare(fixtureKey, $"{container}[{index}].assertions", block);
+                }
+
+                index++;
+            }
+        }
+    }
+
+    private static void Declare(string fixtureKey, string where, JsonElement block)
+    {
+        if (block.ValueKind != JsonValueKind.Object) return;
+        Append(BlockDeclaredMarker + "\t" + fixtureKey + "\t" + BlockDigest(block) + "\t" + where);
+    }
+
+    /// <summary>
+    /// FNV-1a over a structural walk of the block: a content key, so a block is booked by
+    /// what it SAYS rather than by what a runner chose to call it.
+    /// </summary>
+    /// <remarks>
+    /// Walked rather than hashed off <c>GetRawText()</c> on purpose: raw text carries the
+    /// fixture's whitespace, so a runner that binds a block it rebuilt or re-serialized would
+    /// digest differently and be reported unbound for a formatting difference. Type tags are
+    /// folded in so <c>1</c> and <c>"1"</c> cannot collide, and numbers are folded by their
+    /// raw lexical form, which is what both sides read out of the same file.
+    /// </remarks>
+    private static string BlockDigest(JsonElement value)
+    {
+        var hash = 0xcbf29ce484222325UL;
+        Hash(ref hash, value);
+        return hash.ToString("x16", CultureInfo.InvariantCulture);
+
+        static void Feed(ref ulong hash, string text)
+        {
+            foreach (var b in Encoding.UTF8.GetBytes(text))
+            {
+                hash ^= b;
+                hash *= 0x100000001b3UL;
+            }
+        }
+
+        static void Hash(ref ulong hash, JsonElement element)
+        {
+            switch (element.ValueKind)
+            {
+                case JsonValueKind.Object:
+                    Feed(ref hash, "{");
+                    foreach (var property in element.EnumerateObject())
+                    {
+                        Feed(ref hash, property.Name);
+                        Feed(ref hash, "=");
+                        Hash(ref hash, property.Value);
+                    }
+
+                    Feed(ref hash, "}");
+                    break;
+                case JsonValueKind.Array:
+                    Feed(ref hash, "[");
+                    foreach (var item in element.EnumerateArray()) Hash(ref hash, item);
+                    Feed(ref hash, "]");
+                    break;
+                case JsonValueKind.String:
+                    Feed(ref hash, "s");
+                    Feed(ref hash, element.GetString() ?? string.Empty);
+                    break;
+                case JsonValueKind.Number:
+                    Feed(ref hash, "n");
+                    Feed(ref hash, element.GetRawText());
+                    break;
+                case JsonValueKind.True:
+                    Feed(ref hash, "b1");
+                    break;
+                case JsonValueKind.False:
+                    Feed(ref hash, "b0");
+                    break;
+                default:
+                    Feed(ref hash, "z");
+                    break;
+            }
+        }
+    }
 
     private static void Append(string line)
     {

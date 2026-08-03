@@ -266,6 +266,107 @@ echo "conformance coverage OK: $covered/$total canonical fixtures OPENED by the 
      "(${#KNOWN_UNCOVERED[@]} listed as known-uncovered; floor $MIN_FIXTURES;" \
      "runtime manifest — these bytes were really read)"
 
+# -- RUNG 0: the assertion-block BIND ledger (#lznullformblind) ---------------
+#
+# Every rung above and below is scoped to a block a runner already BOUND to a
+# FixtureAssertions tracker. The unconsumed-key check fires on a key nothing
+# read; the read-but-not-asserted check on a key read and discarded; the prose
+# ledger on a discharge naming nothing. NONE of them can fire for a block no
+# runner ever bound, because there is no tracker: its keys are not unread,
+# nothing reads them, and the fixture reports exactly nothing. lazily-dart found
+# two such blocks carrying eight silent keys, lazily-cpp a third, lazily-zig
+# twenty-two.
+#
+# `SpecCorpus.Load` inventories every `assertions` block at read time and the
+# `FixtureAssertions` constructor books one as BOUND, both riding this same
+# manifest under `blocks-` prefixes. The two sides are matched by CONTENT digest
+# and never by the block's label: runners spell those inconsistently, and a
+# label-keyed ledger would silently miss the mismatch rather than report it.
+#
+# An unbindable block belongs HERE, as a documented excuse read on every run, not
+# as a runner fabricated to manufacture coverage. Format: "fixture|where|reason".
+KNOWN_UNBOUND_BLOCKS=(
+)
+
+BLOCK_GUARD_PY="$(cat <<'PY'
+import os
+import sys
+
+manifest_path = sys.argv[1]
+
+excuses = {}
+for raw in sys.argv[2:]:
+    raw = raw.strip()
+    if not raw:
+        continue
+    parts = raw.split("|", 2)
+    if len(parts) != 3 or not parts[2].strip():
+        print(
+            f"ERROR: malformed KNOWN_UNBOUND_BLOCKS entry {raw!r} — expected "
+            "fixture|where|reason, with a non-empty reason. An excuse with no reason "
+            "is an unexplained gap wearing a green badge.",
+            file=sys.stderr,
+        )
+        sys.exit(1)
+    excuses[f"{parts[0]}|{parts[1]}"] = parts[2].strip()
+
+declared = {}
+bound = set()
+with open(manifest_path, encoding="utf-8") as handle:
+    for line in handle:
+        parts = line.rstrip("\n").split("\t")
+        if parts[0] == "blocks-declared" and len(parts) == 4:
+            declared.setdefault(parts[2], set()).add(f"{parts[1]}|{parts[3]}")
+        elif parts[0] == "blocks-bound" and len(parts) == 2:
+            bound.add(parts[1])
+
+unbound = []
+for digest, sites in sorted(declared.items()):
+    if digest in bound:
+        continue
+    unbound.extend(site for site in sorted(sites) if site not in excuses)
+
+if unbound:
+    print(
+        f"ERROR: {len(unbound)} assertion block(s) were carried by an OPENED fixture and\n"
+        "       bound by no runner. Every other rung is scoped to blocks a runner bound,\n"
+        "       so these report nothing at all rather than reporting a gap:",
+        file=sys.stderr,
+    )
+    for site in unbound:
+        print(f"         {site}", file=sys.stderr)
+    print(
+        "       Bind each with FixtureAssertions.Of/Wrap and assert its keys, or add it\n"
+        "       to KNOWN_UNBOUND_BLOCKS with a reason so the gap is visible every run\n"
+        "       instead of invisible.",
+        file=sys.stderr,
+    )
+    sys.exit(1)
+
+# Positive-evidence floor (#lzvacuousrun): zero declared blocks means zero
+# unbound blocks, which reports OK having compared nothing.
+min_blocks = int(os.environ.get("MIN_BLOCKS", "25"))
+if len(declared) < min_blocks:
+    print(
+        f"ERROR: only {len(declared)} distinct assertion blocks were inventoried, expected "
+        f">= {min_blocks}.\n"
+        "       The loader-side inventory detached, or fixtures stopped being read.\n"
+        "       Do not lower MIN_BLOCKS to fix this.",
+        file=sys.stderr,
+    )
+    sys.exit(1)
+
+print(
+    f"assertion-block bind OK: {len(declared)}/{len(declared)} assertion blocks carried by "
+    f"opened fixtures were BOUND to a tracker ({len(excuses)} declared unbindable; floor "
+    f"{min_blocks}; content-keyed, so a runner's block NAME cannot satisfy it)"
+)
+PY
+)"
+
+python3 -c "$BLOCK_GUARD_PY" "$MANIFEST" \
+  ${KNOWN_UNBOUND_BLOCKS[@]+"${KNOWN_UNBOUND_BLOCKS[@]}"}
+
 # -- Per-scenario replay accounting (#lzscenariocoverage) ---------------------
 #
 # The rung below the fixture check above. The manifest carries two kinds of line:
@@ -316,6 +417,12 @@ for line in sys.argv[3:]:
     excuses[(parts[0], parts[1])] = parts[2].strip()
 
 PROSE_VERIFIED = "prose-verified"
+# The rung-0 channels ride the same manifest under their own prefixes
+# (#lznullformblind). A corpus-relative fixture id can never be spelled like one,
+# so the split stays unambiguous — but a `blocks-bound<TAB><digest>` line read by
+# the branch below would be reported as a scenario of a fixture named
+# "blocks-bound".
+BLOCK_MARKERS = ("blocks-declared", "blocks-bound")
 
 opened = set()
 replayed = set()
@@ -332,6 +439,8 @@ with open(manifest_path, encoding="utf-8") as handle:
             # trailing marker would be read below as an id the fixture does not carry.
             if head == PROSE_VERIFIED:
                 prose_verified.add(tail)
+            elif head in BLOCK_MARKERS:
+                continue
             else:
                 replayed.add((head, tail))
         else:

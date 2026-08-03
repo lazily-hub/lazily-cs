@@ -52,6 +52,64 @@ public sealed class StateProjectionConformanceTests
         var materialized = projection.ToSnapshot();
         Assert.Equal(6UL, materialized.Epoch);
         Assert.Equal(4, materialized.Nodes.Count);
+
+        // Both fixtures' `assertions` blocks (#lznullformblind). Every claim above is
+        // asserted against a HARDCODED literal, so the corpus's own values never reached a
+        // comparison and neither block was ever bound to a tracker — editing the fixture
+        // changed nothing here. Binding them makes the fixture the source of the expected
+        // values and puts both blocks inside the ledger rungs.
+        // A second projection carrying the snapshot ALONE: the one above has had the delta
+        // applied, so `cycle_phase` (the snapshot's claim) and `cycle_phase_after` (the
+        // delta's) would both be read off post-delta state and the first would be checked
+        // against the wrong thing.
+        var snapshotOnly = new StateProjection();
+        Assert.IsType<StateProjectionApplyStatus.Applied>(snapshotOnly.ApplySnapshot(snapshot));
+
+        var snapshotAssertions = FixtureAssertions.Of(
+            snapshotFixture.RootElement,
+            "assertions",
+            "agent-doc/snapshot_agent_doc_state.json");
+        snapshotAssertions.AssertKey("epoch", snapshot.Epoch);
+        snapshotAssertions.AssertKey("node_count", snapshot.Nodes.Count);
+        snapshotAssertions.AssertKey("edge_count", snapshot.Edges.Count);
+        snapshotAssertions.AssertKey("root_count", snapshot.Roots.Count);
+        snapshotAssertions.AssertKey("type_tags", snapshot.Nodes.Select(node => node.TypeTag));
+        snapshotAssertions.AssertKeyWith(
+            "all_type_tags_in_vocabulary",
+            want => Assert.Equal(
+                want.GetBoolean(),
+                snapshot.Nodes.All(node => node.TypeTag.StartsWith("agent_doc.", StringComparison.Ordinal))));
+        snapshotAssertions.AssertKeyWith(
+            "cycle_phase",
+            want => AssertPayloadField(snapshotOnly, 102, "phase", want.GetString()!));
+        snapshotAssertions.AssertKeyWith(
+            "queue_head_phase",
+            want => AssertPayloadField(snapshotOnly, 103, "phase", want.GetString()!));
+        snapshotAssertions.Verify();
+
+        var deltaAssertions = FixtureAssertions.Of(
+            deltaFixture.RootElement,
+            "assertions",
+            "agent-doc/delta_agent_doc_state.json");
+        deltaAssertions.AssertKey("base_epoch", delta.BaseEpoch);
+        deltaAssertions.AssertKey("epoch", delta.Epoch);
+        deltaAssertions.AssertKey("op_count", delta.Ops.Count);
+        deltaAssertions.AssertKey(
+            "added_type_tags",
+            delta.Ops.OfType<DeltaOp.NodeAdd>().Select(op => op.TypeTag));
+        deltaAssertions.AssertKeyWith(
+            "all_type_tags_in_vocabulary",
+            want => Assert.Equal(
+                want.GetBoolean(),
+                delta.Ops.OfType<DeltaOp.NodeAdd>()
+                    .All(op => op.TypeTag.StartsWith("agent_doc.", StringComparison.Ordinal))));
+        deltaAssertions.AssertKeyWith(
+            "cycle_phase_after",
+            want => AssertPayloadField(projection, 102, "phase", want.GetString()!));
+        deltaAssertions.AssertKeyWith(
+            "queue_head_phase_after",
+            want => AssertPayloadField(projection, 103, "phase", want.GetString()!));
+        deltaAssertions.Verify();
     }
 
     [Fact]

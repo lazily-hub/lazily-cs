@@ -28,8 +28,72 @@ public sealed class IpcWireConformanceTests
             var message = Assert.IsType<SnapshotMessage>(IpcWire.Deserialize(wire.GetRawText()));
             Assert.True(message.Nodes.Count > 0, fixture);
             AssertRoundTripAndSchema(wire, message, schema, fixture);
+            AssertSnapshotAssertions(document.RootElement, message, fixture);
         }
     }
+
+    /// <summary>
+    /// The fixture's own <c>assertions</c> block (<c>#lznullformblind</c>).
+    /// </summary>
+    /// <remarks>
+    /// A round-trip proves the codec agrees with itself. It says nothing about what the
+    /// corpus CLAIMS, and until this existed these blocks were carried by fixtures this
+    /// runner opens and bound by nothing at all — not unread, unreachable, because no
+    /// tracker ever saw them. Every rung of the assertion ledger is scoped to a block a
+    /// runner bound, so eight silent keys per fixture reported exactly nothing.
+    /// </remarks>
+    private static void AssertSnapshotAssertions(
+        JsonElement root,
+        SnapshotMessage message,
+        string fixture)
+    {
+        var assertions = FixtureAssertions.Of(root, "assertions", fixture);
+        assertions.AssertKey("epoch", message.Epoch);
+        assertions.AssertKey("node_count", message.Nodes.Count);
+        assertions.AssertKey("edge_count", message.Edges.Count);
+        assertions.AssertKey("root_count", message.Roots.Count);
+        assertions.TryAssertKeyWith(
+            "first_node_type_tag",
+            want => Assert.Equal(want.GetString(), message.Nodes[0].TypeTag));
+        assertions.TryAssertKeyWith(
+            "first_node_state_kind",
+            want => Assert.Equal(want.GetString(), StateKind(message.Nodes[0].State)));
+        assertions.TryAssertKeyWith(
+            "has_opaque_node",
+            want => Assert.Equal(
+                want.GetBoolean(),
+                message.Nodes.Any(node => node.State is NodeState.Opaque)));
+        assertions.TryAssertKeyWith(
+            "opaque_node_id",
+            want => Assert.Equal(
+                want.GetUInt64(),
+                message.Nodes.Single(node => node.State is NodeState.Opaque).Node));
+        // The three blob keys are one claim about one descriptor, so they are resolved
+        // from the SAME node rather than from three independent lookups: a fixture whose
+        // blob moved to a different node would otherwise still satisfy all three.
+        if (message.Nodes[0].State is NodeState.SharedBlob shared)
+        {
+            assertions.TryAssertKeyWith(
+                "blob_offset",
+                want => Assert.Equal(want.GetUInt64(), shared.Blob.Offset));
+            assertions.TryAssertKeyWith(
+                "blob_len",
+                want => Assert.Equal(want.GetUInt64(), shared.Blob.Length));
+            assertions.TryAssertKeyWith(
+                "blob_epoch",
+                want => Assert.Equal(want.GetUInt64(), shared.Blob.Epoch));
+        }
+
+        assertions.Verify();
+    }
+
+    private static string StateKind(NodeState state) => state switch
+    {
+        NodeState.Payload => "Payload",
+        NodeState.SharedBlob => "SharedBlob",
+        NodeState.Opaque => "Opaque",
+        _ => throw new InvalidOperationException($"unhandled node state {state.GetType().Name}"),
+    };
 
     [Fact]
     public void Delta_corpus_round_trips_and_validates_against_schema()
@@ -47,8 +111,67 @@ public sealed class IpcWireConformanceTests
             var message = Assert.IsType<DeltaMessage>(IpcWire.Deserialize(wire.GetRawText()));
             Assert.True(message.Epoch > message.BaseEpoch, fixture);
             AssertRoundTripAndSchema(wire, message, schema, fixture);
+            AssertDeltaAssertions(document.RootElement, message, fixture);
         }
     }
+
+    /// <summary>The delta fixture's own <c>assertions</c> block (<c>#lznullformblind</c>).</summary>
+    private static void AssertDeltaAssertions(
+        JsonElement root,
+        DeltaMessage message,
+        string fixture)
+    {
+        var assertions = FixtureAssertions.Of(root, "assertions", fixture);
+        assertions.AssertKey("base_epoch", message.BaseEpoch);
+        assertions.AssertKey("epoch", message.Epoch);
+        assertions.TryAssertKeyWith("op_count", want => Assert.Equal(want.GetInt32(), message.Ops.Count));
+        assertions.TryAssertKeyWith(
+            "is_sequential",
+            want => Assert.Equal(want.GetBoolean(), message.Epoch == message.BaseEpoch + 1));
+        assertions.TryAssertKeyWith(
+            "resync_after_epoch_10",
+            want => Assert.Equal(want.GetBoolean(), message.BaseEpoch > 10));
+        assertions.TryAssertKeyWith(
+            "has_all_op_variants",
+            want => Assert.Equal(
+                want.GetBoolean(),
+                message.Ops.Select(op => op.GetType().Name).Distinct().Count() == message.Ops.Count));
+        assertions.TryAssertKeyWith(
+            "first_op_kind",
+            want => Assert.Equal(want.GetString(), message.Ops[0].GetType().Name));
+        assertions.TryAssertKeyWith(
+            "first_op_payload_kind",
+            want => Assert.Equal(want.GetString(), PayloadKind(message.Ops[0])));
+        assertions.TryAssertKeyWith(
+            "first_op_payload_backend",
+            want => Assert.Equal(want.GetString(), PayloadBackend(message.Ops[0])));
+        assertions.Verify();
+    }
+
+    private static string PayloadKind(DeltaOp op) => Payload(op) switch
+    {
+        IpcValue.Inline => "Inline",
+        IpcValue.SharedBlob => "SharedBlob",
+        _ => throw new InvalidOperationException($"op {op.GetType().Name} carries no payload"),
+    };
+
+    private static string? PayloadBackend(DeltaOp op) =>
+        Payload(op) is IpcValue.SharedBlob { Blob.Backend: { } backend }
+            ? backend switch
+            {
+                BlobBackendKind.Shm => "shm",
+                BlobBackendKind.Arrow => "arrow",
+                BlobBackendKind.InProcess => "in_process",
+                _ => throw new InvalidOperationException($"unhandled blob backend {backend}"),
+            }
+            : null;
+
+    private static IpcValue Payload(DeltaOp op) => op switch
+    {
+        DeltaOp.CellSet set => set.Payload,
+        DeltaOp.SlotValue value => value.Payload,
+        _ => throw new InvalidOperationException($"op {op.GetType().Name} carries no payload"),
+    };
 
     [Fact]
     public void CrdtSync_corpus_round_trips_and_validates_against_schema()
@@ -68,6 +191,30 @@ public sealed class IpcWireConformanceTests
             var wire = frame.GetProperty("wire");
             var message = Assert.IsType<CrdtSyncMessage>(IpcWire.Deserialize(wire.GetRawText()));
             AssertRoundTripAndSchema(wire, message, schema, label);
+
+            // Each frame's own `assertions` block (#lznullformblind) — four blocks
+            // carried by a fixture this runner opens and bound by nothing.
+            var assertions = FixtureAssertions.Of(
+                frame,
+                "assertions",
+                $"distributed/crdt_sync_frames.json {label}");
+            assertions.TryAssertKeyWith(
+                "frontier_len",
+                want => Assert.Equal(want.GetInt32(), message.Frontier?.Count ?? 0));
+            assertions.AssertKey("op_count", message.Ops.Count);
+            assertions.TryAssertKeyWith(
+                "frontier_omitted",
+                // An omitted frontier decodes as absent, not as an empty list: the two are
+                // the same to a runner that only counts, which is why the count above
+                // cannot carry this claim.
+                want => Assert.Equal(want.GetBoolean(), message.Frontier is null or { Count: 0 }));
+            assertions.TryAssertKeyWith(
+                "has_keyed_op",
+                want => Assert.Equal(want.GetBoolean(), message.Ops.Any(op => op.Key is not null)));
+            assertions.TryAssertKeyWith(
+                "has_keyless_op",
+                want => Assert.Equal(want.GetBoolean(), message.Ops.Any(op => op.Key is null)));
+            assertions.Verify();
         }
     }
 

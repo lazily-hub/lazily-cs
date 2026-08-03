@@ -43,6 +43,36 @@ public sealed class BlobTransportConformanceTests
             arena.Bytes.Span.Slice(ShmBlobArena.HeaderLength, payload.Length).ToArray());
         Assert.Equal(payload, arena.Read(descriptor));
         expected.Verify();
+
+        // The fixture's `assertions` block (#lznullformblind). Everything above replays
+        // `input` against `expected`; this sibling block was carried by the same file and
+        // read by NOTHING — not unread, unreachable, because no tracker ever saw it. Six
+        // silent claims, one of them the header's magic.
+        var assertions = FixtureAssertions.Of(root, "assertions", "arena_blob.json assertions");
+        assertions.AssertKey("capacity", arena.Bytes.Length);
+        assertions.AssertKey("epoch", descriptor.Epoch);
+        assertions.AssertKey("payload_len", descriptor.Length);
+        assertions.AssertKey("header_len", ShmBlobArena.HeaderLength);
+        // Read out of the bytes the arena really wrote rather than off a constant:
+        // comparing the magic to itself would pass over a writer that stopped emitting it.
+        assertions.AssertKey(
+            "magic",
+            System.Text.Encoding.ASCII.GetString(arena.Bytes.Span[..4].ToArray().Reverse().ToArray()));
+        assertions.AssertKeyWith(
+            "descriptor",
+            want =>
+            {
+                Assert.Equal(want.GetProperty("offset").GetUInt64(), descriptor.Offset);
+                Assert.Equal(want.GetProperty("len").GetUInt64(), descriptor.Length);
+                Assert.Equal(want.GetProperty("generation").GetUInt64(), descriptor.Generation);
+                Assert.Equal(want.GetProperty("epoch").GetUInt64(), descriptor.Epoch);
+                Assert.Equal(want.GetProperty("checksum").GetUInt64(), descriptor.Checksum);
+                // The KEY SET, not just the five fields. Without it this is the null form
+                // one level down: a sixth field added upstream would be compared by
+                // nothing. lazily-zig's corpus perturbation pass found exactly that.
+                Assert.Equal(5, want.EnumerateObject().Count());
+            });
+        assertions.Verify();
     }
 
     [Fact]

@@ -95,6 +95,12 @@ public sealed class FixtureAssertions
 
     private FixtureAssertions(JsonElement block, string where, ProseLedger? ledger)
     {
+        // Rung 0 (#lznullformblind): book this block as BOUND, keyed by its CONTENT rather
+        // than by <paramref name="where"/>. Every other rung is scoped to a block a runner
+        // already bound, so a block nothing binds reports nothing at all — its keys are not
+        // unread, nothing reads them. Content keying is what stops the ledger inheriting the
+        // inconsistent spellings runners give `where`.
+        SpecCorpus.RecordBlockBind(block);
         _block = block;
         _where = where;
         _ledger = ledger;
