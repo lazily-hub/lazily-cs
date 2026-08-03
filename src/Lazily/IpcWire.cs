@@ -445,13 +445,24 @@ frontier);
         // leniency downgrades that to a probabilistic guarantee riding on a 64-bit checksum
         // against a backend this build genuinely resolves — so a collision returns BYTES, where
         // a refusal is a visible protocol error the peer recovers from by resync.
-        if (body.TryGetProperty("backend", out var backendElement))
+        if (body.TryGetProperty("backend", out var backendElement)
+            && backendElement.ValueKind != JsonValueKind.Null)
         {
-            // A non-string `backend` used to escape as InvalidOperationException out of
-            // GetString(), which is outside this codec's declared failure mode (JsonException,
-            // so a caller can handle both MUST-level codecs through one catch) — and an explicit
-            // `backend: null` reached the switch as a null string and was refused as the token
-            // `''`, naming nothing. Both are rejections either way; neither said what was wrong.
+            // An explicit `backend: null` is the ABSENT form, not a present-unknown one, and is
+            // filtered out by the guard above so it leaves `backend` null — decoding as `shm`
+            // through EffectiveBackend, and re-encoding with no `backend` entry at all
+            // (#lzkeynullstrict, the same rule NodeKey follows). A serde-style peer that did not
+            // apply `skip_serializing_if` to an optional field emits null where a conforming
+            // encoder omits, so refusing it would be stricter than the reference implementation
+            // on a frame the reference implementation produces. This binding used to refuse it —
+            // first as the token `''`, naming nothing, then as a ValueKind error — which is the
+            // right shape of failure for the wrong fact.
+            //
+            // A non-string `backend` is the opposite case and still refuses. It used to escape as
+            // InvalidOperationException out of GetString(), which is outside this codec's declared
+            // failure mode: both MUST-level codecs document JsonException so a caller can guard a
+            // decode with ONE catch, and a refusal raised outside that family fails PAST the
+            // handler — the frame is still refused and the peer never sees the error.
             if (backendElement.ValueKind != JsonValueKind.String)
             {
                 throw new JsonException(

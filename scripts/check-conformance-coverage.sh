@@ -105,15 +105,20 @@ KNOWN_UNREPLAYED_SCENARIOS=(
 # at 138/138 and then prints "0/0 scenarios across 0 opened fixtures" and exits 0.
 # That was reproducible on this script before this constant existed.
 #
-# 128 = calibrated from the observed run at the time of writing, which replayed
-# 133/133 scenarios across 36 opened fixtures — the 125 replayed when this floor
+# 134 = calibrated from the observed run at the time of writing, which replayed
+# 139/139 scenarios across 36 opened fixtures — the 125 replayed when this floor
 # was first written, PLUS the eight scenarios of
-# codec/blob_backend_discriminator.json (#lzblobbackendstrict). Deliberately set
-# slightly below the real number so ordinary corpus churn does not trip it, and
-# far enough above zero that a detached ledger or a dispatch that stopped matching
-# cannot slip through. NEVER lower this to make the gate green: a drop means
-# scenarios stopped being reached, and that is the finding, not the floor.
-MIN_SCENARIOS="${MIN_SCENARIOS:-128}"
+# codec/blob_backend_discriminator.json (#lzblobbackendstrict), PLUS the SIX that
+# fixture grew at v2: `in_process`, an explicit `null`, and a non-string
+# `backend`, each carried in both codecs. A fixture growing scenarios and the
+# floor staying put is how a binding replays the old half of a hardened fixture
+# and reports the same green as before, so the floor moves WITH the corpus.
+# Deliberately set slightly below the real number so ordinary corpus churn does
+# not trip it, and far enough above zero that a detached ledger or a dispatch that
+# stopped matching cannot slip through. NEVER lower this to make the gate green: a
+# drop means scenarios stopped being reached, and that is the finding, not the
+# floor.
+MIN_SCENARIOS="${MIN_SCENARIOS:-134}"
 
 MANIFEST="${LAZILY_CONFORMANCE_MANIFEST:-build/conformance-fixtures-loaded.txt}"
 TEST_DIRS=("tests")
