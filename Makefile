@@ -1,6 +1,6 @@
 # lazily-cs — build, test, and verification targets.
 
-.PHONY: all restore build test format format-check conformance pack package-check ffi-check interop-peer-check check clean conformance-coverage ci-reach
+.PHONY: all restore build test format format-check conformance pack package-check ffi-check interop-peer-check check clean conformance-coverage assertion-ordering-check ci-reach
 
 DOTNET ?= dotnet
 
@@ -49,7 +49,10 @@ interop-peer-check:
 	$(DOTNET) run --project src/Lazily.InteropPeer/Lazily.InteropPeer.csproj --no-build -- --self-check
 
 # Full local gate — run before committing.
-check: format-check build test conformance-coverage package-check ffi-check interop-peer-check ci-reach
+assertion-ordering-check:
+	python3 ../lazily-spec/scripts/check-assertion-ordering.py --binding cs --root .
+
+check: format-check build test conformance-coverage package-check ffi-check interop-peer-check assertion-ordering-check ci-reach
 	@echo "lazily-cs: check OK"
 
 # CI-reachability guard (#lzcheckcireachguard). Fails when a target above runs a

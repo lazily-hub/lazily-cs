@@ -183,9 +183,9 @@ public sealed class CodecConformanceTests
         // opened the file and stopped.
         meta.AssertKey("scenario_count", replayed);
         meta.Verify();
+        prose.VerifyProse(JsonFixture);
 
         Assert.Equal(3, replayed);
-        prose.VerifyProse(JsonFixture);
     }
 
     [Fact]
@@ -252,6 +252,7 @@ public sealed class CodecConformanceTests
 
         meta.AssertKey("scenario_count", replayed);
         meta.Verify();
+        prose.VerifyProse(MsgPackFixture);
 
         // Non-zero, expected magnitude (#lzvacuousrun). "Three green rungs over nothing" is
         // the failure this suite has actually shipped before: a runner that replayed no
@@ -261,7 +262,6 @@ public sealed class CodecConformanceTests
         // 2 envelope/body keys per scenario, plus first_node (Snapshot) and first_op/second_op
         // (CrdtSync). Exact, not a floor: a runner that quietly reached fewer would pass one.
         Assert.Equal(9, encodingKeys);
-        prose.VerifyProse(MsgPackFixture);
     }
 
     /// <summary>

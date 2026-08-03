@@ -467,6 +467,9 @@ public sealed class BlobBackendDiscriminatorConformanceTests
         });
 
         meta.Verify();
+        // Rule 6: every key the nine discharges name was really asserted by this run. A claim
+        // verified by nothing is the state the free-text excuses were in.
+        prose.VerifyProse(Fixture);
 
         Assert.Equal(14, replayed);
         Assert.Equal(14, scenarios.Count);
@@ -477,10 +480,6 @@ public sealed class BlobBackendDiscriminatorConformanceTests
         // Four, not ten: arrow and in_process round-trip the field, while omitted, explicit shm
         // and null all re-encode with no `backend` entry at all.
         Assert.Equal(4, fieldsEmitted);
-
-        // Rule 6: every key the nine discharges name was really asserted by this run. A claim
-        // verified by nothing is the state the free-text excuses were in.
-        prose.VerifyProse(Fixture);
     }
 
     /// <summary>

@@ -190,9 +190,9 @@ public sealed class NodeIdExactRangeConformanceTests
                 observedCodecs.ToArray()));
 
         meta.Verify();
+        prose.VerifyProse(Fixture);
 
         Assert.Equal(6, accepted);
         Assert.Equal(6, scenarios.Count);
-        prose.VerifyProse(Fixture);
     }
 }

@@ -272,6 +272,7 @@ public sealed class NodeKeyNullLeniencyConformanceTests
                 observedKeyForms.ToArray()));
 
         meta.Verify();
+        prose.VerifyProse(Fixture);
 
         Assert.Equal(12, replayed);
         Assert.Equal(12, scenarios.Count);
@@ -280,6 +281,5 @@ public sealed class NodeKeyNullLeniencyConformanceTests
         // Each wire form really occurred, in both codecs — the omitted/null/present split is
         // in the bytes, not only in the scenario labels.
         Assert.Equal(3, observedKeyForms.Count);
-        prose.VerifyProse(Fixture);
     }
 }

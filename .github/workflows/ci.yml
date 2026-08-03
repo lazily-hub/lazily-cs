@@ -125,6 +125,9 @@ jobs:
           grep -qE 'scenario replay coverage OK: [1-9][0-9]*/[0-9]+ scenarios across [1-9][0-9]* opened fixtures' <<< "$out" \
             || { echo "::error::scenario replay ledger reported no replayed scenarios"; exit 1; }
 
+      - name: Assertion observation ordering (#lzassertordering)
+        run: python3 ../lazily-spec/scripts/check-assertion-ordering.py --binding cs --root .
+
       # The gate that keeps every step above honest (#lzcheckcireachguard). It
       # compares `make check`'s prerequisite closure against the run: bodies in
       # this file and fails on any target CI does not reach. Comments inside run:
