@@ -81,10 +81,37 @@ reported green while testing nothing.
   than behaviour — a copy-edit reddens the run and a library regression does not — and excusing
   one with free text ("prose: it explains why…") is unfalsifiable, which is what nine bindings
   each defaulted to differently. Both fail, as does a discharge naming nothing, naming a key this
-  fixture's run never asserted, or naming another paragraph. `note` / `description` / `reason`
-  stay exempt BY NAME in per-step and per-scenario blocks, but a block that lists one of them in
-  its own `prose` array overrides the exemption: an obligation living under a reserved name is a
-  place no runner could be made to discharge anything.
+  fixture's run never asserted, naming another paragraph, or naming `prose` itself — the last is
+  not redundant, since `prose` never self-lists and rule 4's own comparison marks it asserted, so
+  the prose-name set is SEEDED with it.
+  - **The corpus declaration is read off the RAW block, before any name-based exemption.**
+    `note` / `description` / `reason` stay exempt BY NAME in per-step and per-scenario blocks, but
+    a tracker that subtracts its reserved names first makes a declaration invisible: the key is
+    exempt from the unread guard, exempt from the unasserted guard, and never discharged, so both
+    `frame_roundtrip_*` fixtures would skip the convention entirely while this binding still
+    reported conforming. Three of nine hit that independently. Inside a declaring block the name
+    exemption is off ENTIRELY — a `note` sitting there but absent from the array needs an
+    assertion or an excuse like any other key.
+  - **A run is ONE TEST.** The ledger belongs to a `ProseLedger.Replay` scope and is cleared at
+    its verification; unioning asserted keys across tests would let a discharge in one test be
+    satisfied by an assertion in another. The net is armed by that scope, never registered by the
+    first `ProseKey` — every teardown mechanism runs LIFO, so a net armed by the first discharge
+    fires before a verification registered earlier and reports a false failure.
+  - **Rule 8 lives in `scripts/check-conformance-coverage.sh`, not in the test host.** Rules 1-7
+    are all satisfied over an EMPTY population, so a declaring fixture that is opened and never
+    replayed passes every one of them while proving nothing — the vacuity `anti_vacuity` exists to
+    name, reappearing in the guard meant to enforce it. `VerifyProse` records evidence in the
+    runtime manifest and the guard derives the REQUIRED set from the corpus (`assertions.prose` on
+    disk), never from a count kept here. Two-directional, like every other ledger in this repo.
+  - **A discharge is checked for truth, not for sufficiency, so what it NAMES matters.** Rule 6
+    only proves the named key was asserted. A key that compares the fixture to itself
+    (`scenario_count` against the fixture's own `scenarios` array) or against a hand-written
+    literal (`codecs`, `key_forms`) is asserted, satisfies rule 6, and discharges nothing — it is
+    green over a runner that decodes nothing. Compare such keys against what the run really
+    replayed BEFORE naming them. Where a paragraph is carried only by PROXY — `wire_encoding` is
+    an obligation on the runner that no assertion key reddens, `theorem` names a Lean proof in
+    lazily-formal — naming the closest executable key is conforming, and the call site says so,
+    because that judgement is the reviewer's and the call site is where review sees it.
 - **Opening a fixture is not replaying every scenario in it.** A fixture carrying several named
   scenarios can be PARTIALLY replayed while the coverage guard stays green — it asks only whether
   the FILE was opened, and one scenario answers yes; the key trackers only bind blocks a runner

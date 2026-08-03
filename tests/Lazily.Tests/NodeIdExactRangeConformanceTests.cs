@@ -85,15 +85,21 @@ public sealed class NodeIdExactRangeConformanceTests
 
         var meta = FixtureAssertions.Of(root, "assertions", $"{Corpus}/{Fixture} assertions", prose);
         meta.AssertKey("required_of_binding", "MUST");
-        meta.AssertKey("scenario_count", root.GetProperty("scenarios").GetArrayLength());
-        meta.AssertKey("codecs", new[] { "json", "msgpack" }.AsEnumerable());
 
         // The three paragraphs the corpus declares, discharged by the keys that carry them
         // (#lzprosekeyconvention). `outcomes` is NOT one of them: its English is nested UNDER a
         // data key, so the assertion is the key SET and the parent key's own assertion
         // discharges it — asserted against the outcomes this run observed, after the loop.
         meta.ProseKey("clause", "outcome", "node_id_decimal");
-        meta.ProseKey("wire_encoding", "node_id_decimal", "root_id_decimal");
+
+        // PROXY. `wire_encoding` is an obligation on the RUNNER — parse the raw `wire_json` /
+        // `wire_msgpack_hex` with the codec under test, and compare the identifier by its
+        // DECIMAL rendering — and no assertion key reddens when a runner takes the shortcut of
+        // re-serializing a pre-parsed object. `node_id_decimal` is the closest executable key:
+        // it is compared as a decimal string, which is the half of the paragraph a run can
+        // observe. `codecs` proves both wire forms were really reached.
+        meta.ProseKey("wire_encoding", "codecs", "node_id_decimal");
+
         meta.ProseKey("anti_vacuity", "outcome", "node_id_decimal", "node_count");
 
         meta.ExcuseKey(
@@ -107,6 +113,11 @@ public sealed class NodeIdExactRangeConformanceTests
         var declaredOutcomes = meta.Element.GetProperty("outcomes").EnumerateObject()
             .Select(member => member.Name).ToArray();
         var observedOutcomes = new SortedSet<string>(StringComparer.Ordinal);
+
+        // `codecs` and `scenario_count` are asserted after the loop against what the run really
+        // replayed. A hand-written literal, or the fixture's own scenarios array, is green over
+        // a runner that decodes nothing.
+        var observedCodecs = new SortedSet<string>(StringComparer.Ordinal);
 
         var scenarios = SpecCorpus.Scenarios(root, Corpus, Fixture);
 
@@ -139,6 +150,7 @@ public sealed class NodeIdExactRangeConformanceTests
 
             var message = Decode(scenario);
             accepted += 1;
+            observedCodecs.Add(scenario.GetProperty("codec").GetString()!);
 
             var snapshot = Assert.IsType<SnapshotMessage>(message);
             Assert.Equal("Snapshot", scenario.GetProperty("variant").GetString());
@@ -169,6 +181,14 @@ public sealed class NodeIdExactRangeConformanceTests
                 want.EnumerateObject().Select(member => member.Name)
                     .OrderBy(name => name, StringComparer.Ordinal).ToArray(),
                 observedOutcomes.ToArray()));
+
+        meta.AssertKey("scenario_count", accepted);
+        meta.AssertKeyWith(
+            "codecs",
+            want => Assert.Equal(
+                want.EnumerateArray().Select(item => item.GetString())
+                    .OrderBy(item => item, StringComparer.Ordinal).ToArray(),
+                observedCodecs.ToArray()));
 
         meta.Verify();
 

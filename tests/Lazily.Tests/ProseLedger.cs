@@ -17,29 +17,46 @@ namespace Lazily.Tests;
 /// and the free-text excuses this replaces were the second kind.
 /// </para>
 /// <para>
-/// The ledger is FIXTURE-scoped rather than block-scoped because the obligation stated in
-/// <c>assertions</c> is routinely carried by a per-scenario <c>expect</c> key:
-/// <c>epoch_disambiguation</c> is discharged by <c>expect.frame_epoch</c> and
-/// <c>expect.blob_epoch</c>, asserted long after the <c>assertions</c> block is finished. A
-/// named key is therefore matched by KEY NAME in any block of that fixture, and the match runs
-/// when the whole replay is done.
+/// The DECLARATION is block-local — each block owns its own <c>prose</c> array, and rules 3
+/// and 4 compare a block's discharged set against that block's array — but the NAME MATCHING
+/// of rules 6 and 7 is fixture-wide, because that is the half that has to reach a per-scenario
+/// <c>expect</c> key: <c>epoch_disambiguation</c> is discharged by <c>expect.frame_epoch</c>
+/// and <c>expect.blob_epoch</c>, asserted long after the <c>assertions</c> block is finished.
+/// </para>
+/// <para>
+/// A "RUN" IS ONE TEST, not one process. The ledger belongs to a single <see cref="Replay"/>
+/// scope and is CLEARED at its verification. Unioning asserted keys across tests would let a
+/// discharge in one test be satisfied by an assertion in another — the same
+/// accident-of-collocation the fixture-scoped ledger exists to bound.
 /// </para>
 /// <para>
 /// Rules 1-5 and 7 are local to the block that declares <c>prose</c> and are raised by
 /// <see cref="FixtureAssertions.Verify"/>. This type raises rule 6 — a discharge naming a key
 /// the run never asserted — plus the two things only a fixture-scoped view can see: a claim
-/// whose declaring block was never verified, and a claim nobody verified at all.
+/// whose declaring block was never verified, and a claim nobody verified at all. Rule 8, the
+/// fixture that is OPENED and never verified at all, cannot be seen from inside a test that
+/// never ran: <see cref="VerifyProse"/> records evidence in the runtime manifest and
+/// <c>scripts/check-conformance-coverage.sh</c> derives the REQUIRED set from the corpus.
 /// </para>
 /// <para>
-/// ARMING. <see cref="Replay"/> owns the ledger's lifetime, and <see cref="Dispose"/> is what
-/// fails a run that never called <see cref="VerifyProse"/> — an unverified discharge claim is
-/// exactly as bad as an unconsumed key, and a check the runner can forget is not a check. What
-/// <see cref="Replay"/> adds over a bare <c>using</c> is the DISARM on an in-flight failure:
-/// a <c>Dispose</c> that throws while a real assertion failure is unwinding REPLACES that
-/// failure, and losing the message that says what actually diverged is the trade
-/// <see cref="FixtureAssertions.Verify"/> already refuses to make. Disarming there costs
-/// nothing — the run fails anyway, and the claim only matters on a run that would otherwise
-/// be green.
+/// ARMING IS A LIFO HAZARD, and this is why the net is not registered by <see cref="ProseKey"/>
+/// itself. Every cleanup mechanism the nine bindings use — <c>Drop</c>, <c>t.Cleanup</c>,
+/// <c>addTearDown</c>, <c>IDisposable</c> — runs in REVERSE registration order, so a net armed
+/// by the first discharge fires BEFORE a verification the runner registered earlier in its body
+/// and reports a false failure. <see cref="Replay"/> owns the ledger's whole lifetime instead:
+/// its scope opens before the first block exists and closes after the last one, which is the
+/// same seam that already owns the block's consumption check and is structurally guaranteed to
+/// run last.
+/// </para>
+/// <para>
+/// <see cref="Dispose"/> is what fails a run that never called <see cref="VerifyProse"/> — an
+/// unverified discharge claim is exactly as bad as an unconsumed key, and a check the runner
+/// can forget is not a check. What <see cref="Replay"/> adds over a bare <c>using</c> is the
+/// DISARM on an in-flight failure: a <c>Dispose</c> that throws while a real assertion failure
+/// is unwinding REPLACES that failure, and losing the message that says what actually diverged
+/// is the trade <see cref="FixtureAssertions.Verify"/> already refuses to make. Disarming there
+/// costs nothing — the run fails anyway, and the claim only matters on a run that would
+/// otherwise be green.
 /// </para>
 /// </remarks>
 public sealed class ProseLedger : IDisposable
@@ -53,17 +70,21 @@ public sealed class ProseLedger : IDisposable
         public string[] DischargedBy { get; } = dischargedBy;
     }
 
+    private readonly string _corpus;
     private readonly string _fixture;
     private readonly string _where;
     private readonly List<Claim> _claims = [];
     private readonly HashSet<string> _asserted = new(StringComparer.Ordinal);
-    private readonly HashSet<string> _declaredProse = new(StringComparer.Ordinal);
+
+    /// <summary>Seeded with <c>prose</c> itself: rule 7's second half.</summary>
+    private readonly HashSet<string> _proseNames = new(StringComparer.Ordinal) { "prose" };
+
     private readonly HashSet<string> _verifiedBlocks = new(StringComparer.Ordinal);
-    private bool _verified;
     private bool _armed = true;
 
     private ProseLedger(string corpus, string fixture)
     {
+        _corpus = corpus;
         _fixture = fixture;
         _where = $"{corpus}/{fixture}";
     }
@@ -122,9 +143,10 @@ public sealed class ProseLedger : IDisposable
                 + $"; asserted keys were [{string.Join(", ", _asserted.Order(StringComparer.Ordinal))}]");
 
         // Rule 7 again, over the whole fixture: a key that is prose in ANY block of this
-        // fixture cannot discharge another prose key, wherever it was named.
+        // fixture — or `prose` itself, which the set is seeded with — cannot discharge another
+        // prose key, wherever it was named.
         var proseNamed = _claims
-            .Select(claim => (claim, named: claim.DischargedBy.Where(_declaredProse.Contains).ToArray()))
+            .Select(claim => (claim, named: claim.DischargedBy.Where(_proseNames.Contains).ToArray()))
             .Where(entry => entry.named.Length > 0)
             .Select(entry =>
                 $"{entry.claim.Where}: '{entry.claim.Key}' names [{string.Join(", ", entry.named)}]")
@@ -147,7 +169,16 @@ public sealed class ProseLedger : IDisposable
                 + "`prose` set was never compared against them: "
                 + string.Join("; ", unverifiedBlocks));
 
-        _verified = true;
+        // Rule 8's evidence. Only the corpus knows which fixtures declare `prose`, so the
+        // REQUIRED set of verifications is derived there rather than from a count kept here;
+        // this records that THIS fixture reached verification in a run that really replayed it.
+        SpecCorpus.RecordProseVerified(_corpus, _fixture);
+
+        // A run is one test, and the ledger is cleared at its verification: a claim recorded
+        // after this point is unverified again, and Dispose says so.
+        _claims.Clear();
+        _asserted.Clear();
+        _verifiedBlocks.Clear();
     }
 
     /// <summary>Record that <paramref name="key"/> was asserted somewhere in this fixture.</summary>
@@ -158,19 +189,24 @@ public sealed class ProseLedger : IDisposable
         _claims.Add(new Claim(where, key, dischargedBy));
 
     /// <summary>Record that a block declaring <c>prose</c> completed its own verification.</summary>
-    internal void BlockVerified(string where, IEnumerable<string> declaredProse)
+    internal void BlockVerified(string where, IEnumerable<string> proseNames)
     {
         _verifiedBlocks.Add(where);
-        foreach (var key in declaredProse) _declaredProse.Add(key);
+        foreach (var key in proseNames) _proseNames.Add(key);
     }
 
     /// <summary>Fail when the run left a discharge claim unverified.</summary>
+    /// <remarks>
+    /// Claims are CLEARED by <see cref="VerifyProse"/>, so this fires both on a run that never
+    /// verified and on one that discharged something after verifying — the second claim would
+    /// otherwise ride on the first one's verification.
+    /// </remarks>
     public void Dispose()
     {
-        if (!_armed || _verified || _claims.Count == 0) return;
+        if (!_armed || _claims.Count == 0) return;
         throw new Xunit.Sdk.XunitException(
-            $"{_where}: {_claims.Count} prose discharge claim(s) were recorded and VerifyProse "
-            + "was never called — an unverified claim proves exactly as much as an unconsumed "
-            + $"key: [{string.Join(", ", _claims.Select(claim => claim.Key).Order(StringComparer.Ordinal))}]");
+            $"{_where}: {_claims.Count} prose discharge claim(s) were recorded and never "
+            + "verified — an unverified claim proves exactly as much as an unconsumed key: "
+            + $"[{string.Join(", ", _claims.Select(claim => claim.Key).Order(StringComparer.Ordinal))}]");
     }
 }

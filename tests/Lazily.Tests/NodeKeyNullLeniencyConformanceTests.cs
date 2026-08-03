@@ -79,6 +79,44 @@ public sealed class NodeKeyNullLeniencyConformanceTests
     }
 
     /// <summary>
+    /// The wire FORM of this scenario's <c>key</c> slot, read off the RAW frame BEFORE any
+    /// decode.
+    /// </summary>
+    /// <remarks>
+    /// The control this fixture's <c>wire_encoding</c> obligation needs and no decoded value
+    /// can supply. Every key in the fixture's <c>expect</c> blocks is IDENTICAL for the
+    /// <c>omitted</c> and <c>null</c> families — that is the point of the clause, both forms
+    /// read as absent — so a runner whose codec collapsed the two the instant it parsed would
+    /// satisfy all twelve scenarios while the four <c>null</c> ones were the four
+    /// <c>omitted</c> ones wearing a different id. At least one binding was in exactly that
+    /// state. This reads the slot where the distinction actually lives, which is what the
+    /// sibling blob-backend runner already does for <c>backend</c>, and it is what makes
+    /// <c>key_forms</c> an observation instead of a literal.
+    /// </remarks>
+    private static string WireKeyForm(JsonElement scenario, out JsonDocument owner)
+    {
+        // Fail closed (#lzscenariobodyskip), and never through the library's decoder: json is
+        // parsed as raw text and msgpack is transcribed schema-lessly, so the ABSENT map entry
+        // and the explicit nil arrive here as different shapes or not at all.
+        var codec = scenario.GetProperty("codec").GetString();
+        owner = codec switch
+        {
+            "json" => JsonDocument.Parse(scenario.GetProperty("wire_json").GetString()!),
+            "msgpack" => MsgPackWire.Inspect(
+                HexToBytes(scenario.GetProperty("wire_msgpack_hex").GetString()!)),
+            _ => throw new InvalidOperationException($"unknown codec in fixture: {codec}"),
+        };
+
+        var root = owner.RootElement;
+        var node = Field(scenario) == "snapshot"
+            ? root.GetProperty("Snapshot").GetProperty("nodes")[0]
+            : root.GetProperty("Delta").GetProperty("ops")[0].GetProperty("NodeAdd");
+
+        if (!node.TryGetProperty("key", out var key)) return "omitted";
+        return key.ValueKind == JsonValueKind.Null ? "null" : "present";
+    }
+
+    /// <summary>
     /// Fail closed (#lzscenariobodyskip): `field` selected between the snapshot and delta wire
     /// shapes through a bare ternary, so an unrecognised spelling did not skip the check — it
     /// silently moved it onto the delta path while the fixture was talking about the snapshot.
@@ -111,10 +149,13 @@ public sealed class NodeKeyNullLeniencyConformanceTests
 
         var meta = FixtureAssertions.Of(root, "assertions", $"{Corpus}/{Fixture} assertions", prose);
         meta.AssertKey("required_of_binding", "MUST");
-        meta.AssertKey("scenario_count", root.GetProperty("scenarios").GetArrayLength());
-        meta.AssertKey("codecs", new[] { "json", "msgpack" }.AsEnumerable());
-        meta.AssertKey("fields", new[] { "snapshot", "node_add" }.AsEnumerable());
-        meta.AssertKey("key_forms", new[] { "omitted", "null", "present" }.AsEnumerable());
+
+        // `scenario_count`, `codecs`, `fields` and `key_forms` are asserted AFTER the loop,
+        // against what the run really replayed — `key_forms` against the forms read off the RAW
+        // WIRE. Comparing them to hand-written literals, or to the fixture's own scenarios
+        // array, is green over a runner that decodes nothing, which is the vacuity
+        // `anti_vacuity` exists to name; and `key_forms` is named by two discharges below, so a
+        // literal there would discharge nothing at all.
 
         // The four paragraphs the corpus declares, each discharged by the keys that carry its
         // obligation rather than by a sentence saying it is prose (#lzprosekeyconvention). The
@@ -122,7 +163,15 @@ public sealed class NodeKeyNullLeniencyConformanceTests
         // fixture-scoped, so a claim made here is matched against what the whole replay
         // asserted.
         meta.ProseKey("clause", "decoded_key", "key_forms");
-        meta.ProseKey("wire_encoding", "decoded_key", "reencoded_key_field_present");
+
+        // PROXY, with the control the paragraph actually needs now in place. `wire_encoding` is
+        // an obligation on the RUNNER — parse the raw text and hex rather than re-serialize a
+        // pre-parsed object — which no assertion key reddens on its own. `key_forms` is the
+        // closest executable key BECAUSE it is now collected from the raw wire slot before any
+        // decode: the ABSENT entry and the explicit nil are proven distinguishable in this
+        // runner, which is exactly what the paragraph says must survive into it.
+        meta.ProseKey("wire_encoding", "codecs", "key_forms");
+
         meta.ProseKey("reencode_obligation", "reencoded_key_field_present");
         meta.ProseKey("anti_vacuity", "decoded_key", "key_forms");
 
@@ -133,8 +182,6 @@ public sealed class NodeKeyNullLeniencyConformanceTests
             "names the corpus-side script that mints these frames; it states no obligation on a "
             + "binding and nothing here could disagree with it");
 
-        meta.Verify();
-
         var scenarios = SpecCorpus.Scenarios(root, Corpus, Fixture);
 
         // Anti-vacuity in both directions. A runner that never decodes reports "absent" for
@@ -142,12 +189,29 @@ public sealed class NodeKeyNullLeniencyConformanceTests
         // only a real decode can produce.
         var replayed = 0;
         var keysDecoded = 0;
+        var observedCodecs = new SortedSet<string>(StringComparer.Ordinal);
+        var observedFields = new SortedSet<string>(StringComparer.Ordinal);
+        var observedKeyForms = new SortedSet<string>(StringComparer.Ordinal);
 
         foreach (var scenario in scenarios.All())
         {
             var where = scenario.GetProperty("id").GetString()!;
             var expect = FixtureAssertions.Of(scenario, "expect", $"{Corpus}/{Fixture} {where}", prose);
             replayed += 1;
+            observedCodecs.Add(scenario.GetProperty("codec").GetString()!);
+            observedFields.Add(Field(scenario));
+
+            // The raw-wire control, BEFORE the decoder runs. The scenario's own `key_form`
+            // label is the claim; the bytes are the fact. A codec that collapsed the ABSENT
+            // entry into an explicit nil — or a fixture edit that did — diverges here, where
+            // every `expect` key of the omitted and null families is identical by design.
+            var wireForm = WireKeyForm(scenario, out var wireOwner);
+            using (wireOwner)
+            {
+                Assert.Equal(scenario.GetProperty("key_form").GetString(), wireForm);
+            }
+
+            observedKeyForms.Add(wireForm);
 
             var message = Decode(scenario);
             var key = DecodedKey(scenario, message);
@@ -183,9 +247,39 @@ public sealed class NodeKeyNullLeniencyConformanceTests
             expect.Verify();
         }
 
+        // The count and the three vocabularies, from the run rather than from a literal.
+        // `key_forms` in particular is the set of forms read off the WIRE, so it is the
+        // control the `wire_encoding` discharge above names rather than a restatement of the
+        // fixture's own array.
+        meta.AssertKey("scenario_count", replayed);
+        meta.AssertKeyWith(
+            "codecs",
+            want => Assert.Equal(
+                want.EnumerateArray().Select(item => item.GetString())
+                    .OrderBy(item => item, StringComparer.Ordinal).ToArray(),
+                observedCodecs.ToArray()));
+        meta.AssertKeyWith(
+            "fields",
+            want => Assert.Equal(
+                want.EnumerateArray().Select(item => item.GetString())
+                    .OrderBy(item => item, StringComparer.Ordinal).ToArray(),
+                observedFields.ToArray()));
+        meta.AssertKeyWith(
+            "key_forms",
+            want => Assert.Equal(
+                want.EnumerateArray().Select(item => item.GetString())
+                    .OrderBy(item => item, StringComparer.Ordinal).ToArray(),
+                observedKeyForms.ToArray()));
+
+        meta.Verify();
+
         Assert.Equal(12, replayed);
         Assert.Equal(12, scenarios.Count);
         Assert.Equal(4, keysDecoded);
+
+        // Each wire form really occurred, in both codecs — the omitted/null/present split is
+        // in the bytes, not only in the scenario labels.
+        Assert.Equal(3, observedKeyForms.Count);
         prose.VerifyProse(Fixture);
     }
 }

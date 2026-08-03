@@ -187,9 +187,13 @@ public sealed class BlobBackendDiscriminatorConformanceTests
 
         var meta = FixtureAssertions.Of(root, "assertions", $"{Corpus}/{Fixture} assertions", prose);
         meta.AssertKey("required_of_binding", "MUST");
-        meta.AssertKey("scenario_count", root.GetProperty("scenarios").GetArrayLength());
-        meta.AssertKey("codecs", new[] { "json", "msgpack" }.AsEnumerable());
-        meta.AssertKey("outcomes", new[] { "accept", "reject" }.AsEnumerable());
+
+        // `scenario_count`, `codecs` and `outcomes` are asserted AFTER the loop, against what
+        // the run really replayed. Comparing `scenario_count` to the fixture's own scenarios
+        // array is the fixture agreeing with itself, and comparing `codecs` / `outcomes` to a
+        // hand-written literal is green over a runner that decodes nothing — the exact vacuity
+        // `anti_vacuity` exists to name, which is why neither may be named in a discharge
+        // until it is observed.
 
         // The nine paragraphs `assertions.prose` declares, each DISCHARGED by the executable
         // keys that carry its obligation (#lzprosekeyconvention). This replaces nine free-text
@@ -199,7 +203,16 @@ public sealed class BlobBackendDiscriminatorConformanceTests
         // `expect` block, and the ledger fails the run if one of them stops being.
         meta.ProseKey(
             "clause", "decoded_backend", "rejected", "rejection_is_decode_error", "rejection_kind");
-        meta.ProseKey("wire_encoding", "decoded_backend", "rejected");
+
+        // PROXY. `wire_encoding` is a claim about how the CORPUS carries its bytes — raw text
+        // and hex rather than a pre-parsed object — and no assertion a run makes can observe
+        // it: a runner that re-serialized a parsed object would still satisfy every key here.
+        // The honest proxy is the codec and form vocabulary, both asserted from what the run
+        // replayed, which prove the distinction the paragraph is about survived into the
+        // runner: an ABSENT map entry, an explicit null, and a non-string all reached this
+        // binding as distinct forms in both codecs.
+        meta.ProseKey("wire_encoding", "codecs", "backend_forms");
+
         meta.ProseKey("backend_form_vocabulary", "backend_forms", "backends", "decoded_backend");
         meta.ProseKey("reject_obligation", "error_names_token", "rejection_kind");
         meta.ProseKey("null_form", "decoded_backend", "reencoded_backend_field_present");
@@ -212,6 +225,12 @@ public sealed class BlobBackendDiscriminatorConformanceTests
 
         meta.ProseKey(
             "anti_vacuity", "decoded_backend", "reencoded_backend_field_present", "backends");
+
+        // PROXY. `theorem` names resolve_wrong_backend, a Lean theorem in lazily-formal; a run
+        // can only prove its CONSEQUENCE. `rejected` and `decoded_backend` are that
+        // consequence: an unknown kind is refused rather than routed, and an accepted one
+        // resolves to the kind it arrived as, which is what "receivers route by kind" means
+        // where this binding can see it.
         meta.ProseKey("theorem", "rejected", "decoded_backend");
 
         // NOT prose, and not declared as such: it names the script that generated the wire
@@ -241,6 +260,8 @@ public sealed class BlobBackendDiscriminatorConformanceTests
         var decodedBackends = new SortedSet<string>(StringComparer.Ordinal);
         var formsReplayed = new SortedSet<string>(StringComparer.Ordinal);
         var rejectionKinds = new SortedSet<string>(StringComparer.Ordinal);
+        var codecsReplayed = new SortedSet<string>(StringComparer.Ordinal);
+        var outcomesReplayed = new SortedSet<string>(StringComparer.Ordinal);
 
         // Every scenario is replayed even when an earlier one fails, and all of the failures are
         // reported together. A `foreach` that lets the first Assert unwind reports ONE scenario
@@ -277,6 +298,11 @@ public sealed class BlobBackendDiscriminatorConformanceTests
 
             Assert.Equal("Delta", scenario.GetProperty("variant").GetString());
             formsReplayed.Add(form);
+
+            // Booked from the scenario the runner is about to REPLAY, so `codecs` and
+            // `outcomes` below say which codecs and outcomes this run really exercised.
+            codecsReplayed.Add(codec);
+            outcomesReplayed.Add(outcome);
 
             var expect = FixtureAssertions.Of(scenario, "expect", $"{Corpus}/{Fixture} {where}", prose);
             replayed += 1;
@@ -388,6 +414,23 @@ public sealed class BlobBackendDiscriminatorConformanceTests
         // fixture's declaration order (rdma last) is not the replay order (rdma before
         // non_string), and a sequence comparison here would be asserting the corpus's authoring
         // order rather than this binding's coverage of it.
+        // The count and the two vocabularies, from the run rather than from the fixture or a
+        // literal: `scenario_count` is how many scenarios were REPLAYED, and a runner that
+        // decoded nothing reaches neither the codecs nor the outcomes below.
+        meta.AssertKey("scenario_count", replayed);
+        meta.AssertKeyWith(
+            "codecs",
+            want => Assert.Equal(
+                want.EnumerateArray().Select(item => item.GetString())
+                    .OrderBy(item => item, StringComparer.Ordinal).ToArray(),
+                codecsReplayed.ToArray()));
+        meta.AssertKeyWith(
+            "outcomes",
+            want => Assert.Equal(
+                want.EnumerateArray().Select(item => item.GetString())
+                    .OrderBy(item => item, StringComparer.Ordinal).ToArray(),
+                outcomesReplayed.ToArray()));
+
         meta.AssertKeyWith(
             "backend_forms",
             want => Assert.Equal(

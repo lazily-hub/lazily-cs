@@ -149,14 +149,14 @@ public sealed class CodecConformanceTests
         meta.AssertKey("byte_canonical", true);
         meta.AssertKey("required_of_binding", "MUST");
         meta.AssertKey("role", "reference");
-        meta.AssertKey("scenario_count", root.GetProperty("scenarios").GetArrayLength());
 
-        // The paragraph keeps two senses of "canonical" apart and names both keys that carry
-        // them, so the discharge is the pair it names (#lzprosekeyconvention). Excusing it
-        // used to say "documents the distinction" — true of any wording, and checked by
-        // nothing; this claim goes red if either assertion is deleted.
-        meta.ProseKey("note", "role", "byte_canonical");
-        meta.Verify();
+        // PROXY, and said so at the call site (#lzprosekeyconvention). The paragraph keeps two
+        // senses of "canonical" apart, so the keys it is about are `role` and `byte_canonical`
+        // — but both are compared against a literal this runner writes, and no run observes
+        // "this codec is the required interop floor". `round_trip_equals_source` is the
+        // executable half: it is what a codec that is really spoken here produces, so the
+        // claim is not green over a runner that decodes nothing.
+        meta.ProseKey("note", "role", "byte_canonical", "round_trip_equals_source");
 
         var scenarios = SpecCorpus.Scenarios(root, Corpus, JsonFixture);
         var replayed = 0;
@@ -177,6 +177,12 @@ public sealed class CodecConformanceTests
             expect.Verify();
             replayed += 1;
         }
+
+        // Against what the run REPLAYED, never against the fixture's own scenarios array —
+        // that comparison is the fixture agreeing with itself and is green over a runner that
+        // opened the file and stopped.
+        meta.AssertKey("scenario_count", replayed);
+        meta.Verify();
 
         Assert.Equal(3, replayed);
         prose.VerifyProse(JsonFixture);
@@ -206,15 +212,15 @@ public sealed class CodecConformanceTests
         meta.AssertKey("byte_canonical", false);
         meta.AssertKey("required_of_binding", "MUST");
         meta.AssertKey("role", "cross_language_binary_default");
-        meta.AssertKey("scenario_count", root.GetProperty("scenarios").GetArrayLength());
 
         // The paragraph states WHY this fixture pins decoded values and field NAMES instead of
-        // golden bytes, and names the key that verifies the named-map encoding. Both halves are
-        // asserted: `byte_canonical` above, `encoded_body_field_names` per scenario below —
-        // which is a key of a per-scenario `expect` block, so the ledger is fixture-scoped
-        // (#lzprosekeyconvention).
+        // golden bytes, and names the key that verifies the named-map encoding.
+        // `byte_canonical` is a literal comparison and carries the obligation only by proxy —
+        // non-canonicality is not observable, which is the paragraph's own point —  but
+        // `encoded_body_field_names` is read off the ENCODED BYTES, so this discharge has an
+        // executable half that a positional encoder fails (#lzprosekeyconvention). It is a key
+        // of a per-scenario `expect` block, which is why the ledger is fixture-scoped.
         meta.ProseKey("note", "byte_canonical", "encoded_body_field_names");
-        meta.Verify();
 
         var scenarios = SpecCorpus.Scenarios(root, Corpus, MsgPackFixture);
         var replayed = 0;
@@ -243,6 +249,9 @@ public sealed class CodecConformanceTests
             expect.Verify();
             replayed += 1;
         }
+
+        meta.AssertKey("scenario_count", replayed);
+        meta.Verify();
 
         // Non-zero, expected magnitude (#lzvacuousrun). "Three green rungs over nothing" is
         // the failure this suite has actually shipped before: a runner that replayed no

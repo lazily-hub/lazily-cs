@@ -118,6 +118,24 @@ public static class SpecCorpus
     // never from a bookkeeping read, because naming a scenario is not replaying it.
     internal static void RecordScenario(string fixture, string id) => Append(fixture + "\t" + id);
 
+    // -- Runtime prose-verification ledger (#lzprosekeyconvention) --------------
+    //
+    // Rule 8: rules 1-7 are all satisfied over an EMPTY population, so a fixture
+    // that is opened and then never replayed passes every one of them while proving
+    // nothing — the vacuity `anti_vacuity` exists to name, reappearing in the guard
+    // meant to enforce it. Nothing inside a test that never ran can report that, so
+    // the fact rides out in the same manifest and the guard derives the REQUIRED set
+    // from the corpus: every fixture whose `assertions` declares `prose` must appear
+    // here, and no hand-kept count is consulted.
+    //
+    // The marker is a PREFIX, not a suffix: a `fixture<TAB>id` line already means
+    // "this scenario was replayed", so a trailing marker would be read as a scenario
+    // id the fixture does not carry.
+    internal const string ProseVerifiedMarker = "prose-verified";
+
+    internal static void RecordProseVerified(string corpus, string fixture) =>
+        Append(ProseVerifiedMarker + "\t" + Key(corpus, fixture));
+
     private static void Append(string line)
     {
         var manifest = Environment.GetEnvironmentVariable("LAZILY_CONFORMANCE_MANIFEST");

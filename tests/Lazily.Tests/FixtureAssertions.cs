@@ -314,11 +314,6 @@ public sealed class FixtureAssertions
                 + "obligation, and a discharge that names nothing says only that the runner "
                 + "noticed it");
 
-        if (dischargedBy.Contains(ProseDeclaration, StringComparer.Ordinal))
-            throw new Xunit.Sdk.XunitException(
-                $"{_where}: ProseKey('{name}') names `{ProseDeclaration}`, which is the "
-                + "DECLARATION of what is prose, not an assertion carrying anything");
-
         if (_discharged.ContainsKey(name))
             throw new Xunit.Sdk.XunitException(
                 $"{_where}: ProseKey('{name}') was declared twice; the second naming silently "
@@ -336,10 +331,21 @@ public sealed class FixtureAssertions
     public void Verify()
     {
         if (_block.ValueKind != JsonValueKind.Object) return;
-        var declaredProse = VerifyProseKeys();
+
+        // The declaration is read off the RAW block, BEFORE any name-based exemption is
+        // subtracted. A tracker that filters its reserved names first makes the corpus's own
+        // declaration invisible — the key is exempt from the unread guard, exempt from the
+        // unasserted guard, and never discharged, so both frame_roundtrip fixtures would skip
+        // this convention entirely while the binding still reported conforming. Three of nine
+        // hit that independently.
+        var declaresProse = VerifyProseKeys() is not null;
+
         var present = _block.EnumerateObject()
             .Select(property => property.Name)
-            .Where(name => !AnnotationNames.Contains(name) || declaredProse.Contains(name))
+            // Inside a declaring block the name exemption is off ENTIRELY: the corpus wins, so
+            // a `note` sitting in such a block but absent from its array needs an assertion or
+            // an excuse like any other key. Everywhere else the exemption stands.
+            .Where(name => !AnnotationNames.Contains(name) || declaresProse)
             .ToArray();
 
         var unread = present
@@ -386,7 +392,7 @@ public sealed class FixtureAssertions
     /// an ordinary key of the block, so the unconsumed-key gate above sees a runner that
     /// ignores it, and a forgotten paragraph fails here rather than vanishing.
     /// </remarks>
-    private IReadOnlySet<string> VerifyProseKeys()
+    private IReadOnlySet<string>? VerifyProseKeys()
     {
         if (!_block.TryGetProperty(ProseDeclaration, out var declaration))
         {
@@ -399,7 +405,7 @@ public sealed class FixtureAssertions
                     + $"block that declares no `{ProseDeclaration}` — only the CORPUS says which "
                     + "keys are English paragraphs, and a binding deciding for itself is the "
                     + "split this convention closes");
-            return new HashSet<string>(StringComparer.Ordinal);
+            return null;
         }
 
         if (declaration.ValueKind != JsonValueKind.Array)
@@ -459,9 +465,14 @@ public sealed class FixtureAssertions
                 + $"NOT declare in `{ProseDeclaration}` — a key carrying a comparable value is "
                 + "asserted, not discharged");
 
-        // Rule 7.
+        // Rule 7, over the declared paragraphs SEEDED WITH `prose` ITSELF. The seed is not
+        // redundant: `prose` never lists itself, so without it a discharge naming `prose`
+        // slips past — and rule 4's own comparison marks `prose` asserted, so rule 6 would
+        // wave it through. A paragraph discharged by the declaration that it is a paragraph
+        // proves nothing.
+        var proseNames = new HashSet<string>(declared, StringComparer.Ordinal) { ProseDeclaration };
         var namesProse = _discharged
-            .Select(entry => (entry.Key, named: entry.Value.Where(declared.Contains).ToArray()))
+            .Select(entry => (entry.Key, named: entry.Value.Where(proseNames.Contains).ToArray()))
             .Where(entry => entry.named.Length > 0)
             .OrderBy(entry => entry.Key, StringComparer.Ordinal)
             .Select(entry => $"{entry.Key} -> [{string.Join(", ", entry.named)}]")
@@ -483,7 +494,7 @@ public sealed class FixtureAssertions
 
         _read.Add(ProseDeclaration);
         MarkAsserted(ProseDeclaration);
-        _ledger?.BlockVerified(_where, declared);
+        _ledger?.BlockVerified(_where, proseNames);
         return declared;
     }
 

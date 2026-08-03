@@ -315,16 +315,25 @@ for line in sys.argv[3:]:
         continue
     excuses[(parts[0], parts[1])] = parts[2].strip()
 
+PROSE_VERIFIED = "prose-verified"
+
 opened = set()
 replayed = set()
+prose_verified = set()
 with open(manifest_path, encoding="utf-8") as handle:
     for line in handle:
         line = line.rstrip("\n")
         if not line:
             continue
         if "\t" in line:
-            fixture, scenario = line.split("\t", 1)
-            replayed.add((fixture, scenario))
+            head, tail = line.split("\t", 1)
+            # The prose marker is a PREFIX (see SpecCorpus.RecordProseVerified): a
+            # `fixture<TAB>id` line already means "this scenario was replayed", so a
+            # trailing marker would be read below as an id the fixture does not carry.
+            if head == PROSE_VERIFIED:
+                prose_verified.add(tail)
+            else:
+                replayed.add((head, tail))
         else:
             opened.add(line)
 
@@ -358,7 +367,25 @@ def ids_of(path):
     return resolved
 
 
+def declares_prose(path):
+    """Does this fixture's `assertions` block declare prose keys (#lzprosekeyconvention)?
+
+    Read from the CORPUS, never from a list kept here: rule 8's required set of
+    verifications is derived, so a fixture that grows an `assertions.prose` array
+    upstream starts demanding a discharge here without anyone updating a count.
+    """
+    with open(path, encoding="utf-8") as handle:
+        document = json.load(handle)
+    if not isinstance(document, dict):
+        return False
+    assertions = document.get("assertions")
+    if not isinstance(assertions, dict):
+        return False
+    return isinstance(assertions.get("prose"), list) and bool(assertions["prose"])
+
+
 on_disk = {}
+declaring = set()
 for root, _, files in os.walk(spec_dir):
     for name in sorted(files):
         if not name.endswith(".json"):
@@ -368,6 +395,8 @@ for root, _, files in os.walk(spec_dir):
         found = ids_of(full)
         if found:
             on_disk[key] = found
+        if declares_prose(full):
+            declaring.add(key)
 
 errors = list(excuse_errors)
 unidentified = []
@@ -448,6 +477,42 @@ for (fixture, scenario_id), reason in sorted(excuses.items()):
             "coverage silently."
         )
 
+# ---- Prose-key verification rung (#lzprosekeyconvention, rule 8) ------------
+#
+# Rules 1-7 live inside the test host and are all satisfied over an EMPTY
+# population: a fixture that is opened and then never replayed discharges nothing,
+# contradicts nothing, and passes every one of them. That is the same vacuity the
+# corpus's own `anti_vacuity` keys exist to name, reappearing in the guard meant to
+# enforce them — and it is invisible from inside a test that never ran.
+#
+# The required set is DERIVED from the corpus above, never from a count kept here.
+# Two-directional, exactly as the ledgers one rung up: a declaring fixture the suite
+# opened but never verified is a gap, and a verification record for a fixture that
+# does not declare prose is drift in the recorder.
+for fixture in sorted(declaring):
+    if fixture not in opened:
+        # Not opened at all: rung 1 already reported it, or KNOWN_UNCOVERED excused
+        # the whole file. Not this check's finding to make twice.
+        continue
+    if fixture in prose_verified:
+        continue
+    errors.append(
+        f"ERROR: '{fixture}' declares `assertions.prose`, and the suite OPENED it, but no "
+        "runner ever verified its discharges.\n"
+        "       Rules 1-7 are vacuously green over a fixture nobody replayed: it discharges\n"
+        "       nothing, so nothing can contradict it. Replay it under ProseLedger.Replay and\n"
+        "       call VerifyProse."
+    )
+
+for fixture in sorted(prose_verified):
+    if fixture not in declaring:
+        errors.append(
+            f"ERROR: the ledger records a prose verification for '{fixture}', which declares "
+            "no `assertions.prose`.\n"
+            "       The recorder and the corpus disagree about which fixtures carry paragraphs,\n"
+            "       so this rung is measuring something nobody can check."
+        )
+
 for entry in unidentified:
     errors.append(
         f"ERROR: {entry} carries neither `id` nor `name`.\n"
@@ -506,6 +571,11 @@ print(
     f"{fixtures_checked} opened fixtures REPLAYED "
     f"({len(excuses)} listed as known-unreplayed; floor {min_scenarios}; runtime ledger — "
     "these scenarios were really reached)"
+)
+print(
+    f"prose-key discharge OK: {len(declaring & opened)}/{len(declaring)} canonical fixtures "
+    "declaring `assertions.prose` reached VerifyProse "
+    "(required set derived from the corpus, not from a count kept here)"
 )
 PY
 )"
