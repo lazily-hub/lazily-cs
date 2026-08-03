@@ -427,69 +427,87 @@ public sealed class IngressFamilyConformanceTests
 
     private static void AssertState(IIngressModel model, FixtureAssertions expected, string where)
     {
-        expected.AssertKeyWith(
+        // Descended at every level (#lzsubblockkeyset): `scopes` is an object of scope keys,
+        // each scope's value is an object of state fields, and `authority`/`retry` are objects
+        // again. All four key sets were read by NAME, so a field the corpus grows at any level
+        // was compared by nothing. The child trackers own them now.
+        expected.AssertObjectKey(
             "scopes",
             scopes =>
             {
                 foreach (var scope in scopes.EnumerateObject())
                 {
                     var key = scope.Name;
-                    var want = scope.Value;
-                    var view = model.View(key);
-                    Assert.True(view is not null, $"{where}: scope {key} absent");
-                    var got = view!.Value;
+                    scopes.AssertObjectKey(key, want =>
+                    {
+                        var view = model.View(key);
+                        Assert.True(view is not null, $"{where}: scope {key} absent");
+                        var got = view!.Value;
 
-                    // Every comparison carries `where`: an unlabelled "Expected 0, Actual 1" names
-                    // neither the fixture, the step, nor the field, which makes a red gate useless
-                    // as evidence.
-                    Same(where, key, "lifecycle",
-                        ParseLifecycle(want.GetProperty("lifecycle").GetString()!), got.Lifecycle);
-                    Same(where, key, "generation",
-                        want.GetProperty("generation").GetInt64(), got.Generation);
-                    Same(where, key, "watermark",
-                        OptionalInt64(want.GetProperty("delivered_through")), got.DeliveredThrough);
-                    Same(where, key, "buffered",
-                        want.GetProperty("buffered").GetInt32(), got.Buffered);
-                    Same(where, key, "consecutive_errors",
-                        want.GetProperty("consecutive_errors").GetInt32(), got.ConsecutiveErrors);
-                    Same(where, key, "window",
-                        OptionalInt64(want.GetProperty("window")),
-                        model.Value(key) is { HasValue: true } window ? window.Value : null);
-                    Same(where, key, "readiness",
-                        ParseReadiness(want.GetProperty("readiness").GetString()!), model.Readiness(key));
+                        // Every comparison carries `where`: an unlabelled "Expected 0, Actual 1"
+                        // names neither the fixture, the step, nor the field, which makes a red
+                        // gate useless as evidence.
+                        want.AssertKeyWith("lifecycle", v => Same(where, key, "lifecycle",
+                            ParseLifecycle(v.GetString()!), got.Lifecycle));
+                        want.AssertKeyWith("generation", v => Same(where, key, "generation",
+                            v.GetInt64(), got.Generation));
+                        want.AssertKeyWith("delivered_through", v => Same(where, key, "watermark",
+                            OptionalInt64(v), got.DeliveredThrough));
+                        want.AssertKeyWith("buffered", v => Same(where, key, "buffered",
+                            v.GetInt32(), got.Buffered));
+                        want.AssertKeyWith("consecutive_errors", v => Same(where, key, "consecutive_errors",
+                            v.GetInt32(), got.ConsecutiveErrors));
+                        want.AssertKeyWith("window", v => Same(where, key, "window",
+                            OptionalInt64(v),
+                            model.Value(key) is { HasValue: true } window ? window.Value : null));
+                        want.AssertKeyWith("readiness", v => Same(where, key, "readiness",
+                            ParseReadiness(v.GetString()!), model.Readiness(key)));
 
-                    var wantAuthority = want.GetProperty("authority");
-                    Same(where, key, "authority",
-                        wantAuthority.ValueKind == JsonValueKind.Null
-                            ? null
-                            : new IngressAuthority(
-                                wantAuthority.GetProperty("generation").GetInt64(),
-                                OptionalInt64(wantAuthority.GetProperty("delivered_through")),
-                                wantAuthority.GetProperty("stamped_at").GetInt64()),
-                        model.Authority(key));
+                        if (want.GetProperty("authority").ValueKind == JsonValueKind.Null)
+                        {
+                            want.AssertKeyWith("authority", _ =>
+                                Same<IngressAuthority?>(where, key, "authority", null, model.Authority(key)));
+                        }
+                        else
+                        {
+                            want.AssertObjectKey("authority", wantAuthority => Same(
+                                where, key, "authority",
+                                new IngressAuthority(
+                                    wantAuthority.AssertKeyInto("generation", v => v.GetInt64()),
+                                    wantAuthority.AssertKeyInto("delivered_through", OptionalInt64),
+                                    wantAuthority.AssertKeyInto("stamped_at", v => v.GetInt64())),
+                                model.Authority(key)));
+                        }
 
-                    var wantRetry = want.GetProperty("retry");
-                    Same(where, key, "retry",
-                        wantRetry.ValueKind == JsonValueKind.Null
-                            ? null
-                            : new IngressRetry(
-                                wantRetry.GetProperty("attempt").GetInt32(),
-                                wantRetry.GetProperty("backoff").GetInt64(),
-                                wantRetry.GetProperty("resume_from").GetInt64()),
-                        model.Retry(key));
+                        if (want.GetProperty("retry").ValueKind == JsonValueKind.Null)
+                        {
+                            want.AssertKeyWith("retry", _ =>
+                                Same<IngressRetry?>(where, key, "retry", null, model.Retry(key)));
+                        }
+                        else
+                        {
+                            want.AssertObjectKey("retry", wantRetry => Same(
+                                where, key, "retry",
+                                new IngressRetry(
+                                    wantRetry.AssertKeyInto("attempt", v => v.GetInt32()),
+                                    wantRetry.AssertKeyInto("backoff", v => v.GetInt64()),
+                                    wantRetry.AssertKeyInto("resume_from", v => v.GetInt64())),
+                                model.Retry(key)));
+                        }
+                    });
                 }
             });
 
-        expected.AssertKeyWith(
+        expected.AssertObjectKey(
             "receipts",
             receipts =>
             {
-                Same(where, "receipts", "accepted",
-                    receipts.GetProperty("accepted").GetInt32(), model.AcceptedLen());
-                Same(where, "receipts", "dropped",
-                    receipts.GetProperty("dropped").GetInt32(), model.DroppedLen());
-                Same(where, "receipts", "error",
-                    receipts.GetProperty("error").GetInt32(), model.ErrorsLen());
+                receipts.AssertKeyWith("accepted", v =>
+                    Same(where, "receipts", "accepted", v.GetInt32(), model.AcceptedLen()));
+                receipts.AssertKeyWith("dropped", v =>
+                    Same(where, "receipts", "dropped", v.GetInt32(), model.DroppedLen()));
+                receipts.AssertKeyWith("error", v =>
+                    Same(where, "receipts", "error", v.GetInt32(), model.ErrorsLen()));
             });
     }
 
@@ -518,38 +536,59 @@ public sealed class IngressFamilyConformanceTests
         string[] channels = ["accepted", "dropped", "error"];
         var checks = 0;
 
-        expected.AssertKeyWith(
+        // THREE levels of descent (#lzsubblockkeyset): `invalidates` carries `scopes` and
+        // `receipts`, `scopes` carries one object per scope, and each of those carries one
+        // key per reader kind. Every one of those key sets was read by NAME before, so a
+        // scope, a channel, or a reader kind the corpus grows was compared by nothing at any
+        // of the three levels. The child trackers now own all of them.
+        expected.AssertObjectKey(
             "invalidates",
             invalidates =>
             {
-                foreach (var scope in invalidates.GetProperty("scopes").EnumerateObject())
+                invalidates.AssertObjectKey("scopes", scopes =>
                 {
-                    var key = scope.Name;
-                    var wasValid = before.Scopes[key];
-                    var isValid = after.Scopes[key];
-                    for (var slot = 0; slot < kinds.Length; slot++)
+                    foreach (var scope in scopes.EnumerateObject())
                     {
-                        var want = scope.Value.GetProperty(kinds[slot]).GetBoolean();
-                        var invalidated = wasValid[slot] && !isValid[slot];
-                        Assert.True(
-                            invalidated == want,
-                            $"{where}: {key}.{kinds[slot]} invalidation expected {want} " +
-                            $"(was valid={wasValid[slot]}, now valid={isValid[slot]})");
+                        var key = scope.Name;
+                        scopes.AssertObjectKey(key, wantScope =>
+                        {
+                            var wasValid = before.Scopes[key];
+                            var isValid = after.Scopes[key];
+                            for (var slot = 0; slot < kinds.Length; slot++)
+                            {
+                                var at = slot;
+                                wantScope.AssertKeyWith(kinds[at], wantKind =>
+                                {
+                                    var want = wantKind.GetBoolean();
+                                    var invalidated = wasValid[at] && !isValid[at];
+                                    Assert.True(
+                                        invalidated == want,
+                                        $"{where}: {key}.{kinds[at]} invalidation expected {want} " +
+                                        $"(was valid={wasValid[at]}, now valid={isValid[at]})");
+                                });
+                                checks++;
+                            }
+                        });
+                    }
+                });
+
+                invalidates.AssertObjectKey("receipts", wantReceipts =>
+                {
+                    for (var slot = 0; slot < channels.Length; slot++)
+                    {
+                        var at = slot;
+                        wantReceipts.AssertKeyWith(channels[at], wantChannel =>
+                        {
+                            var want = wantChannel.GetBoolean();
+                            var invalidated = before.Receipts[at] && !after.Receipts[at];
+                            Assert.True(
+                                invalidated == want,
+                                $"{where}: receipts.{channels[at]} invalidation expected {want} " +
+                                $"(was valid={before.Receipts[at]}, now valid={after.Receipts[at]})");
+                        });
                         checks++;
                     }
-                }
-
-                var wantReceipts = invalidates.GetProperty("receipts");
-                for (var slot = 0; slot < channels.Length; slot++)
-                {
-                    var want = wantReceipts.GetProperty(channels[slot]).GetBoolean();
-                    var invalidated = before.Receipts[slot] && !after.Receipts[slot];
-                    Assert.True(
-                        invalidated == want,
-                        $"{where}: receipts.{channels[slot]} invalidation expected {want} " +
-                        $"(was valid={before.Receipts[slot]}, now valid={after.Receipts[slot]})");
-                    checks++;
-                }
+                });
             });
 
         return checks;

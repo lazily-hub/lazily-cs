@@ -218,12 +218,9 @@ public sealed class SignalingConformanceTests
                     expected[index],
                     "signaling/anti_spoof_session.json step expect entry");
                 entry.AssertKey("to", delivery.To);
-                entry.AssertKeyWith(
+                entry.AssertKeyDeep(
                     "frame",
-                    want => Assert.True(
-                        JsonNode.DeepEquals(
-                            JsonNode.Parse(want.GetRawText()),
-                            JsonNode.Parse(SignalingWire.Serialize(delivery.Frame)))));
+                    JsonNode.Parse(SignalingWire.Serialize(delivery.Frame)));
                 entry.Verify();
             }
 

@@ -166,15 +166,18 @@ public sealed class MaterializationConformanceTests
                     Join(want.EnumerateArray().Select(x => x.GetString()!))));
 
             // ---- Observational transparency: identical values from both builds. -------------
-            expected.AssertKeyWith(
+            expected.AssertObjectKey(
                 "observe",
                 observe =>
                 {
-                    foreach (var want in observe.EnumerateObject())
+                    foreach (var entry in observe.EnumerateObject())
                     {
-                        var key = want.Name;
-                        Check($"observe.eager.{key}", eager.GetOrInsert(key, k => canonical[k]), want.Value.GetInt32());
-                        Check($"observe.lazy.{key}", lazy.GetOrInsert(key, k => canonical[k]), want.Value.GetInt32());
+                        var key = entry.Name;
+                        observe.AssertKeyWith(key, want =>
+                        {
+                            Check($"observe.eager.{key}", eager.GetOrInsert(key, k => canonical[k]), want.GetInt32());
+                            Check($"observe.lazy.{key}", lazy.GetOrInsert(key, k => canonical[k]), want.GetInt32());
+                        });
                     }
                 });
 

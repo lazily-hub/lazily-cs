@@ -626,18 +626,24 @@ public sealed class QueueFamilyConformanceTests
 
             // Invalidation FIRST — reading a reader revalidates it.
             var at = index;
-            expected.TryAssertKeyWith(
+            // Descended (#lzsubblockkeyset): the child tracker's teardown proves the loop
+            // reached every probe the matrix declares.
+            expected.TryAssertObjectKey(
                 "invalidates",
                 invalidates =>
                 {
                     foreach (var probe in invalidates.EnumerateObject())
                     {
-                        var wasInvalidated = !q.Probe(probe.Name).StillValid();
-                        Assert.True(
-                            wasInvalidated == probe.Value.GetBoolean(),
-                            $"{flavor.Name} {fixture} step {at}: invalidates.{probe.Name} — expected " +
-                            $"{probe.Value.GetBoolean()}, got {wasInvalidated}. Reader kinds are " +
-                            "independent: a push onto a non-empty queue must not touch head.");
+                        var name = probe.Name;
+                        invalidates.AssertKeyWith(name, want =>
+                        {
+                            var wasInvalidated = !q.Probe(name).StillValid();
+                            Assert.True(
+                                wasInvalidated == want.GetBoolean(),
+                                $"{flavor.Name} {fixture} step {at}: invalidates.{name} — expected " +
+                                $"{want.GetBoolean()}, got {wasInvalidated}. Reader kinds are " +
+                                "independent: a push onto a non-empty queue must not touch head.");
+                        });
                         checks++;
                     }
                 });
@@ -734,41 +740,46 @@ public sealed class QueueFamilyConformanceTests
 
             // Invalidation FIRST — reading a reader revalidates it.
             var at = index;
-            expected.AssertKeyWith(
+            expected.AssertObjectKey(
                 "invalidates",
                 want =>
                 {
                     foreach (var probe in want.EnumerateObject())
                     {
-                        var handle = before[probe.Name] ?? topic.Probe(probe.Name);
-                        Assert.True(
-                            handle is not null,
-                            $"{flavor.Name} {fixture} step {at}: no reader for '{probe.Name}'");
-                        var invalidated = !handle!.StillValid();
-                        Assert.True(
-                            invalidated == probe.Value.GetBoolean(),
-                            $"{flavor.Name} {fixture} step {at}: invalidates.{probe.Name} — expected " +
-                            $"{probe.Value.GetBoolean()}, got {invalidated}. Cursors are independent: " +
-                            "advancing one subscriber must not wake another.");
+                        var name = probe.Name;
+                        want.AssertKeyWith(name, wantProbe =>
+                        {
+                            var handle = before[name] ?? topic.Probe(name);
+                            Assert.True(
+                                handle is not null,
+                                $"{flavor.Name} {fixture} step {at}: no reader for '{name}'");
+                            var invalidated = !handle!.StillValid();
+                            Assert.True(
+                                invalidated == wantProbe.GetBoolean(),
+                                $"{flavor.Name} {fixture} step {at}: invalidates.{name} — expected " +
+                                $"{wantProbe.GetBoolean()}, got {invalidated}. Cursors are independent: " +
+                                "advancing one subscriber must not wake another.");
+                        });
                         checks++;
                     }
                 });
 
             expected.AssertKey("base_offset", topic.BaseOffset);
             expected.AssertKey("elements", topic.Elements());
-            expected.AssertKeyWith(
+            expected.AssertObjectKey(
                 "subscriptions",
                 want => AssertSubscriptions(flavor, fixture, at, topic, want));
 
-            expected.TryAssertKeyWith(
+            expected.TryAssertObjectKey(
                 "reads",
                 reads =>
                 {
                     foreach (var read in reads.EnumerateObject())
                     {
-                        Assert.Equal(
-                            read.Value.EnumerateArray().Select(e => e.GetString()!).ToArray(),
-                            topic.ReadStream(read.Name));
+                        var name = read.Name;
+                        reads.AssertKeyWith(name, want => Assert.Equal(
+                            want.EnumerateArray().Select(e => e.GetString()!).ToArray(),
+                            topic.ReadStream(name)));
                     }
                 });
 
@@ -841,17 +852,21 @@ public sealed class QueueFamilyConformanceTests
 
             // Invalidation FIRST — reading a reader revalidates it.
             var at = index;
-            expected.AssertKeyWith(
+            expected.AssertObjectKey(
                 "invalidates",
                 want =>
                 {
                     foreach (var probe in want.EnumerateObject())
                     {
-                        var invalidated = !queue.Probe(probe.Name).StillValid();
-                        Assert.True(
-                            invalidated == probe.Value.GetBoolean(),
-                            $"{flavor.Name} {fixture} step {at}: invalidates.{probe.Name} — expected " +
-                            $"{probe.Value.GetBoolean()}, got {invalidated}");
+                        var name = probe.Name;
+                        want.AssertKeyWith(name, wantProbe =>
+                        {
+                            var invalidated = !queue.Probe(name).StillValid();
+                            Assert.True(
+                                invalidated == wantProbe.GetBoolean(),
+                                $"{flavor.Name} {fixture} step {at}: invalidates.{name} — expected " +
+                                $"{wantProbe.GetBoolean()}, got {invalidated}");
+                        });
                         checks++;
                     }
                 });
@@ -867,14 +882,14 @@ public sealed class QueueFamilyConformanceTests
                 "dead_letters",
                 want => AssertDeadLetters(flavor, fixture, at, queue, want));
 
-            expected.AssertKeyWith(
+            expected.AssertObjectKey(
                 "reads",
                 wantReads =>
                 {
-                    Assert.Equal(wantReads.GetProperty("pending_len").GetInt32(), queue.PendingLen());
-                    Assert.Equal(wantReads.GetProperty("is_empty").GetBoolean(), queue.IsEmpty());
-                    Assert.Equal(wantReads.GetProperty("in_flight_len").GetInt32(), queue.InFlightLen());
-                    Assert.Equal(wantReads.GetProperty("dead_letter_len").GetInt32(), queue.DeadLetterLen());
+                    wantReads.AssertKey("pending_len", queue.PendingLen());
+                    wantReads.AssertKey("is_empty", queue.IsEmpty());
+                    wantReads.AssertKey("in_flight_len", queue.InFlightLen());
+                    wantReads.AssertKey("dead_letter_len", queue.DeadLetterLen());
                 });
 
             expected.Verify();
@@ -1049,18 +1064,30 @@ public sealed class QueueFamilyConformanceTests
         return new TopicSnapshot<string>(baseOffset, elements, subscriptions);
     }
 
+    /// <remarks>
+    /// Two levels of descent (<c>#lzsubblockkeyset</c>): <c>subscriptions</c> is an object of
+    /// subscriber ids, and each id's value is itself an object. Both key sets are now owned by
+    /// a tracker — a subscriber the loop skips and a per-subscriber field the corpus grows are
+    /// each reported, where before both were compared by nothing.
+    /// </remarks>
     private static void AssertSubscriptions(
-        IQueueFlavor flavor, string fixture, int index, ITopicRunner topic, JsonElement expected)
+        IQueueFlavor flavor, string fixture, int index, ITopicRunner topic, FixtureAssertions expected)
     {
         var wanted = expected.EnumerateObject().Select(p => p.Name).OrderBy(n => n, StringComparer.Ordinal).ToArray();
         Assert.Equal(wanted, topic.SubscriptionIds());
         foreach (var sub in expected.EnumerateObject())
         {
-            var state = topic.SubscriptionState(sub.Name);
-            Assert.True(state is not null, $"{flavor.Name} {fixture} step {index}: no subscription {sub.Name}");
-            Assert.Equal(sub.Value.GetProperty("cursor").GetInt64(), state!.Cursor);
-            Assert.Equal(ReadDurability(sub.Value.GetProperty("durability").GetString()!), state.Durability);
-            Assert.Equal(sub.Value.GetProperty("connected").GetBoolean(), state.Connected);
+            var id = sub.Name;
+            expected.AssertObjectKey(id, want =>
+            {
+                var state = topic.SubscriptionState(id);
+                Assert.True(state is not null, $"{flavor.Name} {fixture} step {index}: no subscription {id}");
+                want.AssertKey("cursor", state!.Cursor);
+                want.AssertKeyWith(
+                    "durability",
+                    d => Assert.Equal(ReadDurability(d.GetString()!), state.Durability));
+                want.AssertKey("connected", state.Connected);
+            });
         }
     }
 

@@ -506,11 +506,17 @@ public sealed class TemporalRateWindowConformanceTests
         Computed<T> probe)
     {
         var actual = !probe.Peek(out _);
-        expected.AssertKeyWith(
+        // Descended (#lzsubblockkeyset). This site used to read ONE named key out of the
+        // matrix and ignore the rest, so a reader class the corpus adds would be compared by
+        // nothing. These fixtures carry exactly the projection this probe observes; a second
+        // one now reports as unconsumed instead of being skipped in silence.
+        expected.AssertObjectKey(
             "invalidates",
-            want => Assert.True(
-                actual == want.GetProperty(name).GetBoolean(),
-                $"{fixture} step {index}: invalidates.{name}"));
+            want => want.AssertKeyWith(
+                name,
+                wantKind => Assert.True(
+                    actual == wantKind.GetBoolean(),
+                    $"{fixture} step {index}: invalidates.{name}")));
     }
 
     private static void AssertOptionalString(JsonElement expected, Optional<string> actual)

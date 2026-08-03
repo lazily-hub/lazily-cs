@@ -181,42 +181,62 @@ public sealed class CollectionsConformanceTests
                     string.Join(",", map.PresentKeys().Order(StringComparer.Ordinal)),
                     string.Join(",", membership.EnumerateArray().Select(x => x.GetString()!).Order(StringComparer.Ordinal))));
 
-            expected.TryAssertKeyWith(
+            // Object-valued keys descend (#lzsubblockkeyset): the child tracker owns the
+            // unconsumed-key teardown, so a sub-field the corpus grows later reddens here
+            // instead of being compared by nothing. The three below were each checked by
+            // name or by a loop that could not prove it visited everything.
+            expected.TryAssertObjectKey(
                 "values",
                 wantValues =>
                 {
                     foreach (var v in wantValues.EnumerateObject())
                     {
-                        check($"{where}:value.{v.Name}", map.TryObserve(v.Name, out var got) ? got : null, v.Value.GetInt32());
+                        var name = v.Name;
+                        wantValues.AssertKeyWith(
+                            name,
+                            want => check(
+                                $"{where}:value.{name}",
+                                map.TryObserve(name, out var got) ? got : null,
+                                want.GetInt32()));
                     }
                 });
 
-            expected.AssertKeyWith(
+            expected.AssertObjectKey(
                 "invalidates",
                 invalidates =>
                 {
-                    check(
-                        $"{where}:invalidates.membership",
-                        recomputed.Membership,
-                        invalidates.GetProperty("membership").GetBoolean());
-                    check(
-                        $"{where}:invalidates.order",
-                        recomputed.Order,
-                        invalidates.GetProperty("order").GetBoolean());
-                    check(
-                        $"{where}:invalidates.value",
-                        string.Join(",", recomputed.Values.Order(StringComparer.Ordinal)),
-                        string.Join(",", invalidates.GetProperty("value").EnumerateArray().Select(x => x.GetString()!).Order(StringComparer.Ordinal)));
+                    invalidates.AssertKeyWith(
+                        "membership",
+                        want => check(
+                            $"{where}:invalidates.membership",
+                            recomputed.Membership,
+                            want.GetBoolean()));
+                    invalidates.AssertKeyWith(
+                        "order",
+                        want => check($"{where}:invalidates.order", recomputed.Order, want.GetBoolean()));
+                    invalidates.AssertKeyWith(
+                        "value",
+                        want => check(
+                            $"{where}:invalidates.value",
+                            string.Join(",", recomputed.Values.Order(StringComparer.Ordinal)),
+                            string.Join(",", want.EnumerateArray().Select(x => x.GetString()!).Order(StringComparer.Ordinal))));
                 });
 
-            expected.TryAssertKeyWith(
+            expected.TryAssertObjectKey(
                 "handle_stable",
                 stable =>
                 {
                     foreach (var s in stable.EnumerateObject())
                     {
-                        var same = map.TryGetHandle(s.Name, out var after) && ReferenceEquals(handleBefore, after);
-                        check($"{where}:handle_stable.{s.Name}", same, s.Value.GetBoolean());
+                        var name = s.Name;
+                        stable.AssertKeyWith(
+                            name,
+                            want =>
+                            {
+                                var same = map.TryGetHandle(name, out var after)
+                                    && ReferenceEquals(handleBefore, after);
+                                check($"{where}:handle_stable.{name}", same, want.GetBoolean());
+                            });
                     }
                 });
 

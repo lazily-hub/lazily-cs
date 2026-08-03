@@ -57,7 +57,7 @@ public sealed class ReliableSyncConformanceTests
                 $"reliable-sync/resync_gap_converge.json scenario {scenario.GetProperty("name").GetString()}");
             expected.AssertKey("final_last_epoch", coordinator.LastEpoch);
             expected.AssertKey("resync_requests_emitted", requests);
-            if (expected.TryAssertKeyWith("converged_nodes", graph.AssertNodes))
+            if (expected.TryAssertObjectKey("converged_nodes", graph.AssertNodes))
             {
 
                 // `equals_no_drop_receiver`: recovery is state-equivalent, not lossy. The
@@ -113,7 +113,7 @@ public sealed class ReliableSyncConformanceTests
                 "expect",
                 $"reliable-sync/idempotent_redelivery.json scenario {scenario.GetProperty("name").GetString()}");
             expected.AssertKey("final_last_epoch", coordinator.LastEpoch);
-            expected.AssertKeyWith("state_after", graph.AssertState);
+            expected.AssertObjectKey("state_after", graph.AssertState);
             expected.AssertKey(
                 "net_effect_unchanged",
                 graph.State.SequenceEqual(GraphProjector.FromState(scenario.GetProperty("state_before")).State));
@@ -712,19 +712,25 @@ replay.RootElement.GetProperty("wire").GetRawText(),
             }
         }
 
-        public void AssertNodes(JsonElement expected) => AssertState(expected);
+        public void AssertNodes(FixtureAssertions expected) => AssertState(expected);
 
-        public void AssertState(JsonElement expected)
+        /// <remarks>
+        /// Every node id goes through the child tracker (<c>#lzsubblockkeyset</c>), so a node
+        /// the fixture declares and this loop never reached is reported rather than skipped.
+        /// </remarks>
+        public void AssertState(FixtureAssertions expected)
         {
             Assert.Equal(expected.EnumerateObject().Count(), _state.Count);
             foreach (var property in expected.EnumerateObject())
             {
-                var node = ulong.Parse(
-                property.Name,
-                System.Globalization.CultureInfo.InvariantCulture);
-                Assert.Equal(
-                property.Value.EnumerateArray().Select(value => value.GetByte()).ToArray(),
-                _state[node]);
+                var name = property.Name;
+                expected.AssertKeyWith(name, want =>
+                {
+                    var node = ulong.Parse(name, System.Globalization.CultureInfo.InvariantCulture);
+                    Assert.Equal(
+                        want.EnumerateArray().Select(value => value.GetByte()).ToArray(),
+                        _state[node]);
+                });
             }
         }
     }

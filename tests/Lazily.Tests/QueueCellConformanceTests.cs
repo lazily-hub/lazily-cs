@@ -155,18 +155,26 @@ public sealed class QueueCellConformanceTests
 
                 // Invalidation FIRST — reading a reader revalidates it.
                 var stepIndex = i;
-                expected.TryAssertKeyWith(
+                // Descended (#lzsubblockkeyset): the child tracker's teardown proves the loop
+                // reached every probe the matrix declares, which the raw enumeration could not.
+                expected.TryAssertObjectKey(
                     "invalidates",
                     invalidates =>
                     {
                         foreach (var probe in invalidates.EnumerateObject())
                         {
-                            var wasInvalidated = !readers.StillValid(probe.Name);
-                            Assert.True(
-                                wasInvalidated == probe.Value.GetBoolean(),
-                                $"{fixture} step {stepIndex}: invalidates.{probe.Name} — expected " +
-                                $"{probe.Value.GetBoolean()}, got {wasInvalidated}. Reader kinds are " +
-                                "independent: a push onto a non-empty queue must not touch head.");
+                            var name = probe.Name;
+                            invalidates.AssertKeyWith(
+                                name,
+                                want =>
+                                {
+                                    var wasInvalidated = !readers.StillValid(name);
+                                    Assert.True(
+                                        wasInvalidated == want.GetBoolean(),
+                                        $"{fixture} step {stepIndex}: invalidates.{name} — expected " +
+                                        $"{want.GetBoolean()}, got {wasInvalidated}. Reader kinds are " +
+                                        "independent: a push onto a non-empty queue must not touch head.");
+                                });
                             invalidationChecks++;
                         }
                     });

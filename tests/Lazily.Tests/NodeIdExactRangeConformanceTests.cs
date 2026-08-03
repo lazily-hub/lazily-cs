@@ -175,12 +175,11 @@ public sealed class NodeIdExactRangeConformanceTests
         // The vocabulary rung, asserted against what the run OBSERVED rather than against a
         // literal: a fixture that grew a third outcome no scenario carries, or a runner that
         // reached only one of the two branches, is a set difference either way.
-        meta.AssertKeyWith(
-            "outcomes",
-            want => Assert.Equal(
-                want.EnumerateObject().Select(member => member.Name)
-                    .OrderBy(name => name, StringComparer.Ordinal).ToArray(),
-                observedOutcomes.ToArray()));
+        // Through the tracker's key-set entry point rather than a hand-rolled comparison
+        // (#lzsubblockkeyset): `outcomes` is object-valued, and Verify() now refuses one that
+        // reached neither AssertObjectKey nor AssertKeySet. The comparison is the same; what
+        // changed is that the tracker can now tell it happened.
+        meta.AssertKeySet("outcomes", observedOutcomes);
 
         meta.AssertKey("scenario_count", accepted);
         meta.AssertKeyWith(

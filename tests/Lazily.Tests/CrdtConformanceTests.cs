@@ -311,14 +311,17 @@ public sealed class CrdtConformanceTests
         if (expect.TryAssertKeyWith("text", text => Assert.Equal(text.GetString(), replicas["a"].Text)))
             assertions++;
 
-        expect.TryAssertKeyWith(
+        expect.TryAssertObjectKey(
             "text_on",
             perReplica =>
             {
                 foreach (var property in perReplica.EnumerateObject())
                 {
+                    var name = property.Name;
                     assertions++;
-                    Assert.Equal(property.Value.GetString(), replicas[property.Name].Text);
+                    perReplica.AssertKeyWith(
+                        name,
+                        want => Assert.Equal(want.GetString(), replicas[name].Text));
                 }
             });
 
@@ -346,20 +349,26 @@ public sealed class CrdtConformanceTests
                     StringComparison.Ordinal)))
             assertions++;
 
-        expect.TryAssertKeyWith(
+        expect.TryAssertObjectKey(
             "version_vector_on",
             vectors =>
             {
                 foreach (var property in vectors.EnumerateObject())
                 {
-                    var actual = replicas[property.Name].VersionVector();
-                    var expected = property.Value
-                        .EnumerateObject()
-                        .ToDictionary(
-                            item => long.Parse(item.Name, System.Globalization.CultureInfo.InvariantCulture),
-                            item => item.Value.GetInt64());
+                    var name = property.Name;
+                    vectors.AssertObjectKey(name, want =>
+                    {
+                        var actual = replicas[name].VersionVector();
+                        var expected = new Dictionary<long, long>();
+                        foreach (var item in want.EnumerateObject())
+                        {
+                            var node = item.Name;
+                            expected[long.Parse(node, System.Globalization.CultureInfo.InvariantCulture)] =
+                                want.AssertKeyInto(node, v => v.GetInt64());
+                        }
+                        Assert.Equal(expected.OrderBy(item => item.Key), actual.OrderBy(item => item.Key));
+                    });
                     assertions++;
-                    Assert.Equal(expected.OrderBy(item => item.Key), actual.OrderBy(item => item.Key));
                 }
             });
 
@@ -469,12 +478,17 @@ public sealed class CrdtConformanceTests
 
         expect.TryAssertKeyWith("order", order => assertions += AssertOrder(replicas["a"], order));
 
-        expect.TryAssertKeyWith(
+        expect.TryAssertObjectKey(
             "order_on",
             orderOn =>
             {
                 foreach (var property in orderOn.EnumerateObject())
-                    assertions += AssertOrder(replicas[property.Name], property.Value);
+                {
+                    var name = property.Name;
+                    assertions += orderOn.AssertKeyInto(
+                        name,
+                        want => AssertOrder(replicas[name], want));
+                }
             });
 
         expect.TryAssertKeyWith(
@@ -493,14 +507,22 @@ public sealed class CrdtConformanceTests
                 }
             });
 
-        expect.TryAssertKeyWith("get", get => assertions += AssertGets(replicas["a"], get));
+        // Descended (#lzsubblockkeyset): the id set of `get` — and of each replica's block
+        // under `get_on` — is now owned by a child tracker rather than by a loop that could
+        // not prove it visited everything.
+        expect.TryAssertObjectKey("get", get => assertions += AssertGets(replicas["a"], get));
 
-        expect.TryAssertKeyWith(
+        expect.TryAssertObjectKey(
             "get_on",
             getOn =>
             {
                 foreach (var property in getOn.EnumerateObject())
-                    assertions += AssertGets(replicas[property.Name], property.Value);
+                {
+                    var name = property.Name;
+                    getOn.AssertObjectKey(
+                        name,
+                        want => assertions += AssertGets(replicas[name], want));
+                }
             });
 
         var convergedTarget = ConvergedTarget(expect);
@@ -521,17 +543,21 @@ public sealed class CrdtConformanceTests
                 }
             });
 
-        expect.TryAssertKeyWith(
+        expect.TryAssertObjectKey(
             "not_contains_on",
             absentOn =>
             {
                 foreach (var property in absentOn.EnumerateObject())
                 {
-                    foreach (var id in property.Value.EnumerateArray())
+                    var name = property.Name;
+                    absentOn.AssertKeyWith(name, want =>
                     {
-                        assertions++;
-                        Assert.False(replicas[property.Name].Contains(id.GetString()!));
-                    }
+                        foreach (var id in want.EnumerateArray())
+                        {
+                            assertions++;
+                            Assert.False(replicas[name].Contains(id.GetString()!));
+                        }
+                    });
                 }
             });
 
@@ -546,14 +572,18 @@ public sealed class CrdtConformanceTests
         return 1;
     }
 
-    private static int AssertGets(SeqCrdt<string, string> sequence, JsonElement expected)
+    private static int AssertGets(SeqCrdt<string, string> sequence, FixtureAssertions expected)
     {
         var made = 0;
         foreach (var property in expected.EnumerateObject())
         {
+            var name = property.Name;
             made++;
-            Assert.True(sequence.TryGetValue(property.Name, out var actual));
-            Assert.Equal(SequenceValue(property.Value), actual);
+            expected.AssertKeyWith(name, want =>
+            {
+                Assert.True(sequence.TryGetValue(name, out var actual));
+                Assert.Equal(SequenceValue(want), actual);
+            });
         }
         return made;
     }

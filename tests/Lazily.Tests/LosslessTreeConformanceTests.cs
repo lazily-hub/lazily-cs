@@ -255,14 +255,17 @@ public sealed class LosslessTreeConformanceTests
                 render => Assert.Equal(render.GetString(), world.Replicas["a"].Render())))
             assertions++;
 
-        expect.TryAssertKeyWith(
+        expect.TryAssertObjectKey(
             "render_on",
             renderOn =>
             {
                 foreach (var property in renderOn.EnumerateObject())
                 {
+                    var name = property.Name;
                     assertions++;
-                    Assert.Equal(property.Value.GetString(), world.Replicas[property.Name].Render());
+                    renderOn.AssertKeyWith(
+                        name,
+                        want => Assert.Equal(want.GetString(), world.Replicas[name].Render()));
                 }
             });
 

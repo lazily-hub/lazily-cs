@@ -169,14 +169,18 @@ public sealed class CollectionsFamilyConformanceTests
                 var gotOrder = map.PresentKeys().ToList();
                 expected.AssertKey("order", gotOrder);
 
-                expected.TryAssertKeyWith(
+                expected.TryAssertObjectKey(
                     "values",
                     wantValues =>
                     {
-                        foreach (var want in wantValues.EnumerateObject())
+                        foreach (var entry in wantValues.EnumerateObject())
                         {
-                            Assert.True(map.TryGetHandle(want.Name, out var h), $"{where}: {want.Name} absent");
-                            Assert.Equal(want.Value.GetInt32(), ctx.Get(h));
+                            var name = entry.Name;
+                            wantValues.AssertKeyWith(name, want =>
+                            {
+                                Assert.True(map.TryGetHandle(name, out var h), $"{where}: {name} absent");
+                                Assert.Equal(want.GetInt32(), ctx.Get(h));
+                            });
                         }
                     });
 
@@ -188,40 +192,58 @@ public sealed class CollectionsFamilyConformanceTests
                     $"{where}: expected.invalidates is missing - the matrix is the contract");
                 matrices++;
 
-                expected.AssertKeyWith(
+                // Descended (#lzsubblockkeyset): the three reader classes below are read by
+                // NAME, so a fourth the corpus adds would be compared by nothing. The child's
+                // teardown reports it instead.
+                expected.AssertObjectKey(
                     "invalidates",
                     invalidates =>
                     {
-                        var dirty = invalidates.TryGetProperty("value", out var dv)
-                            ? dv.EnumerateArray().Select(k => k.GetString()!).ToHashSet()
-                            : [];
                         var survivors = gotOrder.ToHashSet();
-                        foreach (var (key, reader) in valueReaders)
+                        void CheckValueReaders(IReadOnlySet<string> dirty)
                         {
-                            if (!survivors.Contains(key)) continue; // removed: nothing left to read
-                            ctx.Get(reader);
-                            var recomputed = valueCounts[key] != valueBase[key];
-                            if (dirty.Contains(key))
+                            foreach (var (key, reader) in valueReaders)
                             {
-                                Assert.True(recomputed, $"{where}: value reader for {key} should have been invalidated");
+                                if (!survivors.Contains(key)) continue; // removed: nothing left to read
+                                ctx.Get(reader);
+                                var recomputed = valueCounts[key] != valueBase[key];
+                                if (dirty.Contains(key))
+                                {
+                                    Assert.True(recomputed, $"{where}: value reader for {key} should have been invalidated");
+                                }
+                                else
+                                {
+                                    Assert.False(
+                                        recomputed,
+                                        $"{where}: value reader for {key} should have stayed cached - " +
+                                        "per-entry independence is the whole point");
+                                }
                             }
-                            else
-                            {
-                                Assert.False(
-                                    recomputed,
-                                    $"{where}: value reader for {key} should have stayed cached - " +
-                                    "per-entry independence is the whole point");
-                            }
+                        }
+
+                        if (!invalidates.TryAssertKeyWith(
+                                "value",
+                                dv => CheckValueReaders(
+                                    dv.EnumerateArray().Select(k => k.GetString()!).ToHashSet())))
+                        {
+                            CheckValueReaders(new HashSet<string>());
                         }
 
                         ctx.Get(membership);
                         ctx.Get(order);
-                        Assert.Equal(
-                            invalidates.TryGetProperty("membership", out var m) && m.GetBoolean(),
-                            membershipCount != membershipBase);
-                        Assert.Equal(
-                            invalidates.TryGetProperty("order", out var o) && o.GetBoolean(),
-                            orderCount != orderBase);
+                        if (!invalidates.TryAssertKeyWith(
+                                "membership",
+                                m => Assert.Equal(m.GetBoolean(), membershipCount != membershipBase)))
+                        {
+                            Assert.Equal(membershipCount, membershipBase);
+                        }
+
+                        if (!invalidates.TryAssertKeyWith(
+                                "order",
+                                o => Assert.Equal(o.GetBoolean(), orderCount != orderBase)))
+                        {
+                            Assert.Equal(orderCount, orderBase);
+                        }
                     });
 
                 // `membership` is the ORDER-INDEPENDENT key set. It is not implied by
@@ -238,23 +260,29 @@ public sealed class CollectionsFamilyConformanceTests
 
                 // Handle stability: the law separating an atomic move from a
                 // remove + re-mint. A reorder keeps the entry's node.
-                expected.TryAssertKeyWith(
+                // Descended (#lzsubblockkeyset): the child tracker's teardown proves the loop
+                // reached every entry the fixture declares.
+                expected.TryAssertObjectKey(
                     "handle_stable",
                     stable =>
                     {
                         foreach (var entry in stable.EnumerateObject())
                         {
-                            var after = map.TryGetHandle(entry.Name, out var h) ? h : null;
-                            handlesBefore.TryGetValue(entry.Name, out var before);
-                            if (entry.Value.GetBoolean())
+                            var entryName = entry.Name;
+                            stable.AssertKeyWith(entryName, wantStable =>
                             {
-                                Assert.NotNull(before);
-                                Assert.Same(before, after);
-                            }
-                            else
-                            {
-                                Assert.NotSame(before, after);
-                            }
+                                var after = map.TryGetHandle(entryName, out var h) ? h : null;
+                                handlesBefore.TryGetValue(entryName, out var before);
+                                if (wantStable.GetBoolean())
+                                {
+                                    Assert.NotNull(before);
+                                    Assert.Same(before, after);
+                                }
+                                else
+                                {
+                                    Assert.NotSame(before, after);
+                                }
+                            });
                         }
                     });
 

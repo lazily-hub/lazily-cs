@@ -91,28 +91,37 @@ public sealed class WorkQueueConformanceTests
                 AssertReturn(fixture, index, step.GetProperty("returns"), returned);
                 var expected = FixtureAssertions.Of(step, "expected", $"{fixture} step {index}");
                 var at = index;
-                expected.AssertKeyWith(
+                // Descended rather than looped over raw (#lzsubblockkeyset). The loop already
+                // visited every probe; routing each through the child tracker is what makes
+                // that PROVABLE — the child's teardown reports a probe the loop missed.
+                expected.AssertObjectKey(
                     "invalidates",
                     want =>
                     {
                         foreach (var probe in want.EnumerateObject())
                         {
-                            var invalidated = !readers.StillValid(probe.Name);
-                            Assert.True(
-                                invalidated == probe.Value.GetBoolean(),
-                                $"{fixture} step {at}: invalidates.{probe.Name}");
+                            var name = probe.Name;
+                            want.AssertKeyWith(
+                                name,
+                                wantProbe =>
+                                {
+                                    var invalidated = !readers.StillValid(name);
+                                    Assert.True(
+                                        invalidated == wantProbe.GetBoolean(),
+                                        $"{fixture} step {at}: invalidates.{name}");
+                                });
                             invalidationChecks++;
                         }
                     });
 
-                expected.AssertKeyWith(
+                expected.AssertObjectKey(
                     "reads",
                     reads =>
                     {
-                        Assert.Equal(reads.GetProperty("pending_len").GetInt32(), queue.PendingLen());
-                        Assert.Equal(reads.GetProperty("is_empty").GetBoolean(), queue.IsEmpty());
-                        Assert.Equal(reads.GetProperty("in_flight_len").GetInt32(), queue.InFlightLen());
-                        Assert.Equal(reads.GetProperty("dead_letter_len").GetInt32(), queue.DeadLetterLen());
+                        reads.AssertKey("pending_len", queue.PendingLen());
+                        reads.AssertKey("is_empty", queue.IsEmpty());
+                        reads.AssertKey("in_flight_len", queue.InFlightLen());
+                        reads.AssertKey("dead_letter_len", queue.DeadLetterLen());
                     });
                 AssertSnapshots(expected, queue);
                 expected.Verify();

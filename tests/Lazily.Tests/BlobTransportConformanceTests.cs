@@ -25,15 +25,18 @@ public sealed class BlobTransportConformanceTests
             input.GetProperty("epoch").GetUInt64());
         var descriptor = arena.Write(payload);
 
-        expected.AssertKeyWith(
+        // Descended rather than compared field-by-field (#lzsubblockkeyset): the child owns
+        // the unconsumed-key teardown, so a sixth sub-field added upstream fails here instead
+        // of being compared by nothing.
+        expected.AssertObjectKey(
             "descriptor",
             want =>
             {
-                Assert.Equal(want.GetProperty("offset").GetUInt64(), descriptor.Offset);
-                Assert.Equal(want.GetProperty("len").GetUInt64(), descriptor.Length);
-                Assert.Equal(want.GetProperty("generation").GetUInt64(), descriptor.Generation);
-                Assert.Equal(want.GetProperty("epoch").GetUInt64(), descriptor.Epoch);
-                Assert.Equal(want.GetProperty("checksum").GetUInt64(), descriptor.Checksum);
+                want.AssertKey("offset", descriptor.Offset);
+                want.AssertKey("len", descriptor.Length);
+                want.AssertKey("generation", descriptor.Generation);
+                want.AssertKey("epoch", descriptor.Epoch);
+                want.AssertKey("checksum", descriptor.Checksum);
             });
         Assert.Null(descriptor.Backend);
 
@@ -58,19 +61,20 @@ public sealed class BlobTransportConformanceTests
         assertions.AssertKey(
             "magic",
             System.Text.Encoding.ASCII.GetString(arena.Bytes.Span[..4].ToArray().Reverse().ToArray()));
-        assertions.AssertKeyWith(
+        // The KEY SET, not just the five fields — and owned by the TRACKER rather than by a
+        // count written here (#lzsubblockkeyset). This site used to assert
+        // `want.EnumerateObject().Count() == 5`, which is the same guarantee only for as
+        // long as someone remembers to write it; descending makes an unrecognised sub-field
+        // report as unconsumed with no call-site edit at all.
+        assertions.AssertObjectKey(
             "descriptor",
             want =>
             {
-                Assert.Equal(want.GetProperty("offset").GetUInt64(), descriptor.Offset);
-                Assert.Equal(want.GetProperty("len").GetUInt64(), descriptor.Length);
-                Assert.Equal(want.GetProperty("generation").GetUInt64(), descriptor.Generation);
-                Assert.Equal(want.GetProperty("epoch").GetUInt64(), descriptor.Epoch);
-                Assert.Equal(want.GetProperty("checksum").GetUInt64(), descriptor.Checksum);
-                // The KEY SET, not just the five fields. Without it this is the null form
-                // one level down: a sixth field added upstream would be compared by
-                // nothing. lazily-zig's corpus perturbation pass found exactly that.
-                Assert.Equal(5, want.EnumerateObject().Count());
+                want.AssertKey("offset", descriptor.Offset);
+                want.AssertKey("len", descriptor.Length);
+                want.AssertKey("generation", descriptor.Generation);
+                want.AssertKey("epoch", descriptor.Epoch);
+                want.AssertKey("checksum", descriptor.Checksum);
             });
         assertions.Verify();
     }

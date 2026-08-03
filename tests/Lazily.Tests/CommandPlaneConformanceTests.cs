@@ -141,32 +141,42 @@ public sealed class CommandPlaneConformanceTests
             }
 
             var atFrame = frameIndex;
-            expected.TryAssertKeyWith(
+            expected.TryAssertObjectKey(
                 "rpc",
                 rpc =>
                 {
-                    var commandId = rpc.GetProperty("command_id").GetString()!;
-                    var unresolved = rpc.GetProperty("unresolved_after_frame_indices")
-                        .EnumerateArray()
-                        .Select(item => item.GetInt32())
-                        .Contains(atFrame);
+                    var commandId = rpc.AssertKeyInto("command_id", v => v.GetString()!);
+                    var unresolved = rpc.AssertKeyInto(
+                        "unresolved_after_frame_indices",
+                        v => v.EnumerateArray().Select(item => item.GetInt32()).Contains(atFrame));
                     if (unresolved)
                     {
                         Assert.False(projection.TryGetTerminal(commandId, out _));
                         assertions++;
                     }
+
+                    // The two keys below belong to the same block and are asserted by the
+                    // terminal-resolution pass; naming them here would compare the fixture to
+                    // itself (#lzsubblockkeyset requires the SET be accounted for, not that
+                    // every member be re-asserted at every call site).
+                    rpc.ExcuseKey(
+                        "resolves_after_frame_index",
+                        "asserted where the terminal is observed, in the resolution pass below");
+                    rpc.ExcuseKey(
+                        "terminal_status",
+                        "asserted where the terminal is observed, in the resolution pass below");
                 });
 
             frameIndex++;
         }
 
-        expected.TryAssertKeyWith(
+        if (expected.TryAssertKeyDeep(
             "projection",
-            expectedProjection =>
-            {
-                AssertProjection(expectedProjection, projection.ToImage(), label);
-                assertions += expectedProjection.GetProperty("commands").GetArrayLength() * 7 + 1;
-            });
+            () => ProjectionBody(projection.ToImage())))
+        {
+            assertions += expected.Element.GetProperty("projection")
+                .GetProperty("commands").GetArrayLength() * 7 + 1;
+        }
 
         expected.TryAssertKeyWith(
             "ignored_frame_indices",
@@ -186,17 +196,19 @@ public sealed class CommandPlaneConformanceTests
                 assertions++;
             });
 
-        expected.TryAssertKeyWith(
+        expected.TryAssertObjectKey(
             "rpc",
             expectedRpc =>
             {
-                Assert.Equal(
-                    expectedRpc.GetProperty("resolves_after_frame_index").GetInt32(),
-                    terminalAfter);
+                expectedRpc.AssertKey("resolves_after_frame_index", terminalAfter);
                 var terminalEntry = Assert.Single(projection.ToImage().Commands);
-                Assert.Equal(
-                    expectedRpc.GetProperty("terminal_status").GetString(),
-                    StatusWire(terminalEntry.Status));
+                expectedRpc.AssertKey("terminal_status", StatusWire(terminalEntry.Status));
+                expectedRpc.ExcuseKey(
+                    "command_id",
+                    "the id under test drives this replay rather than being compared to it");
+                expectedRpc.ExcuseKey(
+                    "unresolved_after_frame_indices",
+                    "asserted per frame in the non-terminal pass above");
                 assertions += 2;
             });
 
@@ -217,9 +229,9 @@ public sealed class CommandPlaneConformanceTests
             expected.AssertKey("conflict_after_frame_index", conflictAfter);
             expected.AssertKey("conflict_command_id", conflictCommandId);
             Assert.NotNull(beforeConflict);
-            expected.AssertKeyWith(
+            expected.AssertKeyDeep(
                 "projection_before_conflict",
-                want => AssertProjection(want, beforeConflict!, label + " before conflict"));
+                ProjectionBody(beforeConflict!));
             assertions += 3;
         }
 
@@ -227,19 +239,16 @@ public sealed class CommandPlaneConformanceTests
         expected.Verify();
     }
 
-    private static void AssertProjection(
-        JsonElement expected,
-        CommandProjectionImage actual,
-        string label)
+    /// <remarks>
+    /// The projection is compared by DEEP EQUALITY, which covers its key set at every depth —
+    /// so it discharges <c>#lzsubblockkeyset</c> through <c>AssertKeyDeep</c> rather than
+    /// through a descent.
+    /// </remarks>
+    private static JsonNode? ProjectionBody(CommandProjectionImage actual)
     {
         var encoded = CommandWire.Serialize(new CommandMessage.Projection(actual));
         using var document = JsonDocument.Parse(encoded);
-        var body = document.RootElement.GetProperty("CommandProjection");
-        Assert.True(
-            JsonNode.DeepEquals(
-                JsonNode.Parse(expected.GetRawText()),
-                JsonNode.Parse(body.GetRawText())),
-            label);
+        return JsonNode.Parse(document.RootElement.GetProperty("CommandProjection").GetRawText());
     }
 
     private static string StatusWire(CommandStatus status) =>

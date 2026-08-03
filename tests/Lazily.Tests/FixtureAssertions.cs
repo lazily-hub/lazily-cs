@@ -93,14 +93,35 @@ public sealed class FixtureAssertions
     private readonly Dictionary<string, string> _excused = new(StringComparer.Ordinal);
     private readonly Dictionary<string, string[]> _discharged = new(StringComparer.Ordinal);
 
+    /// <summary>
+    /// Keys whose OBJECT value had its key set checked — by descent
+    /// (<see cref="AssertObjectKey"/>) or by comparison (<see cref="AssertKeySet"/>).
+    /// </summary>
+    /// <remarks>
+    /// <c>#lzsubblockkeyset</c>. Without this the tracker cannot tell an object-valued key
+    /// whose sub-fields were all accounted for from one where five were compared by name and
+    /// a sixth added upstream is compared by nothing.
+    /// </remarks>
+    private readonly HashSet<string> _descended = new(StringComparer.Ordinal);
+
     private FixtureAssertions(JsonElement block, string where, ProseLedger? ledger)
+        : this(block, where, ledger, recordBind: true)
+    {
+    }
+
+    private FixtureAssertions(JsonElement block, string where, ProseLedger? ledger, bool recordBind)
     {
         // Rung 0 (#lznullformblind): book this block as BOUND, keyed by its CONTENT rather
         // than by <paramref name="where"/>. Every other rung is scoped to a block a runner
         // already bound, so a block nothing binds reports nothing at all — its keys are not
         // unread, nothing reads them. Content keying is what stops the ledger inheriting the
         // inconsistent spellings runners give `where`.
-        SpecCorpus.RecordBlockBind(block);
+        //
+        // A CHILD tracker created by AssertObjectKey does NOT book: the bind ledger is
+        // two-directional against the blocks `SpecCorpus` inventoried at read time, and a
+        // sub-object is not one of them. Booking it would put a bind in the ledger with no
+        // inventory entry to match.
+        if (recordBind) SpecCorpus.RecordBlockBind(block);
         _block = block;
         _where = where;
         _ledger = ledger;
@@ -190,6 +211,24 @@ public sealed class FixtureAssertions
     }
 
     /// <summary>
+    /// Mark <paramref name="name"/> asserted and return <paramref name="project"/> applied to the
+    /// fixture's value.
+    /// </summary>
+    /// <remarks>
+    /// For a field that reaches its comparison as part of a COMPOSITE the caller assembles — an
+    /// expected record built out of several sibling keys and compared once. The fixture's value
+    /// still reaches the comparison, which is the requirement; what this does not do is compare
+    /// on its own, so it belongs only where the composite assertion immediately follows.
+    /// </remarks>
+    public T AssertKeyInto<T>(string name, Func<JsonElement, T> project)
+    {
+        _read.Add(name);
+        var value = _block.GetProperty(name);
+        MarkAsserted(name);
+        return project(value);
+    }
+
+    /// <summary>
     /// <see cref="AssertKeyWith"/> for a key the fixture may omit; returns whether it ran.
     /// </summary>
     public bool TryAssertKeyWith(string name, Action<JsonElement> check)
@@ -199,6 +238,132 @@ public sealed class FixtureAssertions
         MarkAsserted(name);
         Guarded(name, () => check(value));
         return true;
+    }
+
+    // ---------------------------------------------------------------------------
+    // Object-valued keys (#lzsubblockkeyset).
+    //
+    // An assertion key whose value is an OBJECT carries two obligations: the value of each
+    // sub-field, and the sub-field KEY SET. Discharging only the first makes the object the
+    // null form one level down — a field added to it upstream is compared by nothing, and
+    // the fixture reports clean over the very change it exists to catch. lazily-zig's corpus
+    // perturbation pass found exactly that: a key planted inside `arena_blob.json`'s
+    // `descriptor` left the suite green while every scalar sibling reddened.
+    //
+    // The obligation lives HERE rather than at the call site. A per-call-site field count
+    // relies on the next author remembering, which is the property this rung removes:
+    // Verify() fails an object-valued key that reached neither of the two entry points below.
+    // ---------------------------------------------------------------------------
+
+    /// <summary>
+    /// Consume the OBJECT under <paramref name="name"/> by descending into it: <paramref
+    /// name="check"/> receives a child tracker bound to the object, and every sub-field it
+    /// leaves unconsumed fails exactly as an unconsumed top-level key does.
+    /// </summary>
+    /// <remarks>
+    /// The form to prefer. The obligation moves DOWN rather than being restated — the child
+    /// runs the same unread / read-but-not-asserted / stale-excuse rungs the parent does, so
+    /// a sub-field the corpus grows later fails without anyone having edited this call site.
+    /// </remarks>
+    public void AssertObjectKey(string name, Action<FixtureAssertions> check) =>
+        Descend(name, _block.GetProperty(name), check);
+
+    /// <summary>
+    /// <see cref="AssertObjectKey"/> for a key the fixture may omit; returns whether it ran.
+    /// </summary>
+    public bool TryAssertObjectKey(string name, Action<FixtureAssertions> check)
+    {
+        _read.Add(name);
+        if (!_block.TryGetProperty(name, out var value)) return false;
+        Descend(name, value, check);
+        return true;
+    }
+
+    private void Descend(string name, JsonElement value, Action<FixtureAssertions> check)
+    {
+        _read.Add(name);
+        if (value.ValueKind != JsonValueKind.Object)
+            throw new Xunit.Sdk.XunitException(
+                $"{_where}: AssertObjectKey('{name}') on a {value.ValueKind} value — "
+                + "descending is for an object; use AssertKey/AssertKeyWith");
+        MarkAsserted(name);
+        _descended.Add(name);
+        var child = new FixtureAssertions(value, $"{_where}.{name}", _ledger, recordBind: false);
+        Guarded(name, () =>
+        {
+            check(child);
+            child.Verify();
+        });
+    }
+
+    /// <summary>
+    /// Consume the OBJECT under <paramref name="name"/> by comparing its KEY SET against
+    /// <paramref name="actual"/> — the set the run really produced.
+    /// </summary>
+    /// <remarks>
+    /// The form for a key whose sub-fields are a VOCABULARY rather than data:
+    /// <c>nodeid_exact_range.json</c>'s <c>outcomes</c> maps outcome tokens to English
+    /// glosses, and the assertion is which tokens exist, not what the glosses say. The
+    /// comparison is two-directional by construction — a fixture token nothing replayed and a
+    /// replayed token the fixture omits are each failures, and only the second direction
+    /// catches a runner that stopped exercising an arm.
+    /// </remarks>
+    /// <summary>
+    /// Consume the OBJECT under <paramref name="name"/> by comparing the WHOLE value
+    /// structurally against <paramref name="actual"/>.
+    /// </summary>
+    /// <remarks>
+    /// The third discharge, for a key compared by deep equality rather than field by field: a
+    /// structural comparison already covers the key set, in both directions, at every depth. It
+    /// is a separate entry point rather than a comment beside <see cref="AssertKeyWith"/>
+    /// because the tracker cannot see inside a closure — the point of <c>#lzsubblockkeyset</c>
+    /// is that "this really did compare everything" is a claim the guard checks, not one the
+    /// call site asserts.
+    /// </remarks>
+    public void AssertKeyDeep(string name, System.Text.Json.Nodes.JsonNode? actual) =>
+        DeepCompare(name, _block.GetProperty(name), actual);
+
+    /// <summary>
+    /// <see cref="AssertKeyDeep"/> for a key the fixture may omit; returns whether it ran.
+    /// </summary>
+    public bool TryAssertKeyDeep(string name, Func<System.Text.Json.Nodes.JsonNode?> actual)
+    {
+        _read.Add(name);
+        if (!_block.TryGetProperty(name, out var value)) return false;
+        DeepCompare(name, value, actual());
+        return true;
+    }
+
+    private void DeepCompare(string name, JsonElement value, System.Text.Json.Nodes.JsonNode? actual)
+    {
+        _read.Add(name);
+        MarkAsserted(name);
+        _descended.Add(name);
+        Guarded(name, () => Xunit.Assert.True(
+            System.Text.Json.Nodes.JsonNode.DeepEquals(
+                System.Text.Json.Nodes.JsonNode.Parse(value.GetRawText()),
+                actual),
+            $"{_where}: `{name}` — fixture and runner disagree structurally"));
+    }
+
+    public void AssertKeySet(string name, IEnumerable<string> actual)
+    {
+        _read.Add(name);
+        var value = _block.GetProperty(name);
+        if (value.ValueKind != JsonValueKind.Object)
+            throw new Xunit.Sdk.XunitException(
+                $"{_where}: AssertKeySet('{name}') on a {value.ValueKind} value — "
+                + "the key set of a non-object is not a thing this can compare");
+        MarkAsserted(name);
+        _descended.Add(name);
+        var want = value.EnumerateObject()
+            .Select(property => property.Name)
+            .OrderBy(key => key, StringComparer.Ordinal)
+            .ToArray();
+        var got = actual.Distinct(StringComparer.Ordinal)
+            .OrderBy(key => key, StringComparer.Ordinal)
+            .ToArray();
+        Guarded(name, () => Xunit.Assert.Equal(want, got));
     }
 
     /// <summary>Assert <paramref name="name"/>'s boolean value equals <paramref name="actual"/>.</summary>
@@ -388,6 +553,24 @@ public sealed class FixtureAssertions
                 + "never compared the fixture's own value against anything, so editing the "
                 + "fixture changes nothing; route it through AssertKey/AssertKeyWith, or "
                 + "declare an ExcuseKey with a reason");
+
+        // #lzsubblockkeyset. An OBJECT value that was asserted without its key set being
+        // checked is the null form one level down: the five sub-fields a call site named are
+        // compared, and a sixth the corpus grows later is compared by nothing. Every rung
+        // above is satisfied — the key is read, asserted, and not excused — by a check that
+        // cannot fail. This is the one that cannot be satisfied by remembering.
+        var undescended = present
+            .Where(name => _asserted.Contains(name)
+                && !_descended.Contains(name)
+                && _block.GetProperty(name).ValueKind == JsonValueKind.Object)
+            .OrderBy(name => name, StringComparer.Ordinal)
+            .ToArray();
+        if (undescended.Length > 0)
+            throw new Xunit.Sdk.XunitException(
+                $"{_where}: object-valued assertion key(s) "
+                + $"[{string.Join(", ", undescended)}] consumed without a key-set check — a "
+                + "sub-field the corpus adds later would be compared by nothing here; "
+                + "descend with AssertObjectKey, or compare the vocabulary with AssertKeySet");
     }
 
     /// <summary>

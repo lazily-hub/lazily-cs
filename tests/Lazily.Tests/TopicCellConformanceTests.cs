@@ -70,18 +70,26 @@ public sealed class TopicCellConformanceTests
 
                 var at = index;
                 var topicAtStep = topic;
-                expected.AssertKeyWith(
+                // Descended (#lzsubblockkeyset): the child tracker's teardown proves the loop
+                // reached every probe the matrix declares, which the raw enumeration could not.
+                expected.AssertObjectKey(
                     "invalidates",
                     want =>
                     {
                         foreach (var probe in want.EnumerateObject())
                         {
-                            var handle = before[probe.Name] ?? topicAtStep.ReaderHandle(probe.Name);
-                            Assert.NotNull(handle);
-                            var invalidated = !handle!.Peek(out _);
-                            Assert.True(
-                                invalidated == probe.Value.GetBoolean(),
-                                $"{fixture} step {at}: invalidates.{probe.Name}");
+                            var name = probe.Name;
+                            want.AssertKeyWith(
+                                name,
+                                wantProbe =>
+                                {
+                                    var handle = before[name] ?? topicAtStep.ReaderHandle(name);
+                                    Assert.NotNull(handle);
+                                    var invalidated = !handle!.Peek(out _);
+                                    Assert.True(
+                                        invalidated == wantProbe.GetBoolean(),
+                                        $"{fixture} step {at}: invalidates.{name}");
+                                });
                             invalidationChecks++;
                         }
                     });
@@ -165,7 +173,9 @@ public sealed class TopicCellConformanceTests
         expected.AssertKey("base_offset", topic.BaseOffset);
         expected.AssertKey("elements", topic.Elements());
 
-        expected.AssertKeyWith(
+        // Two levels of descent (#lzsubblockkeyset): the subscriber id set AND each
+        // subscriber's own field set are now owned by a tracker.
+        expected.AssertObjectKey(
             "subscriptions",
             expectedSubscriptions =>
             {
@@ -174,25 +184,30 @@ public sealed class TopicCellConformanceTests
                     topic.SubscriptionIds());
                 foreach (var pair in expectedSubscriptions.EnumerateObject())
                 {
-                    var actual = topic.SubscriptionState(pair.Name);
-                    Assert.NotNull(actual);
-                    Assert.Equal(pair.Value.GetProperty("cursor").GetInt64(), actual!.Cursor);
-                    Assert.Equal(
-                        ParseDurability(pair.Value.GetProperty("durability").GetString()!),
-                        actual.Durability);
-                    Assert.Equal(pair.Value.GetProperty("connected").GetBoolean(), actual.Connected);
+                    var id = pair.Name;
+                    expectedSubscriptions.AssertObjectKey(id, want =>
+                    {
+                        var actual = topic.SubscriptionState(id);
+                        Assert.NotNull(actual);
+                        want.AssertKey("cursor", actual!.Cursor);
+                        want.AssertKeyWith(
+                            "durability",
+                            d => Assert.Equal(ParseDurability(d.GetString()!), actual.Durability));
+                        want.AssertKey("connected", actual.Connected);
+                    });
                 }
             });
 
-        expected.AssertKeyWith(
+        expected.AssertObjectKey(
             "reads",
             reads =>
             {
                 foreach (var read in reads.EnumerateObject())
                 {
-                    Assert.Equal(
-                        read.Value.EnumerateArray().Select(value => value.GetString()),
-                        topic.ReadStream(read.Name));
+                    var name = read.Name;
+                    reads.AssertKeyWith(name, want => Assert.Equal(
+                        want.EnumerateArray().Select(value => value.GetString()),
+                        topic.ReadStream(name)));
                 }
             });
 

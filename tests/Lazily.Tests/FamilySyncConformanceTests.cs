@@ -121,16 +121,17 @@ public sealed class FamilySyncConformanceTests
                         string.Join(",", target.Keys(ns)),
                         string.Join(",", want.EnumerateArray().Select(x => x.GetString()!))));
 
-                expect.AssertKeyWith(
+                expect.AssertObjectKey(
                     "target_values",
                     wants =>
                     {
-                        foreach (var want in wants.EnumerateObject())
+                        foreach (var entry in wants.EnumerateObject())
                         {
-                            Check(
-                                $"target_values.{want.Name}",
-                                target.TryValue(ns, want.Name, out var v) ? v : null,
-                                want.Value.GetBoolean());
+                            var name = entry.Name;
+                            wants.AssertKeyWith(name, want => Check(
+                                $"target_values.{name}",
+                                target.TryValue(ns, name, out var v) ? v : null,
+                                want.GetBoolean()));
                         }
                     });
 

@@ -87,15 +87,16 @@ public sealed class ClusterConformanceTests
                 $"membership/{MembershipFixtures[0]} step {steps}");
             AssertInvalidation(expected, "invalidates", probe);
             expected.AssertKey("alive_set", cell.PeerSet);
-            expected.AssertKeyWith(
+            expected.AssertObjectKey(
                 "states",
                 want =>
                 {
                     foreach (var state in want.EnumerateObject())
                     {
-                        Assert.Equal(
-                            Enum.Parse<PeerState>(state.Value.GetString()!),
-                            cell.State(long.Parse(state.Name, System.Globalization.CultureInfo.InvariantCulture)));
+                        var name = state.Name;
+                        want.AssertKeyWith(name, wantState => Assert.Equal(
+                            Enum.Parse<PeerState>(wantState.GetString()!),
+                            cell.State(long.Parse(name, System.Globalization.CultureInfo.InvariantCulture))));
                     }
                 });
             _ = probe.Get();
@@ -465,7 +466,7 @@ public sealed class ClusterConformanceTests
             }
             var expected = FixtureAssertions.Of(step, "expected", $"{fixture} step {index}");
             AssertInvalidation(expected, "present", probe);
-            expected.AssertKeyWith("present", want => AssertLongStringMap(want, cell.Present));
+            expected.AssertObjectKey("present", want => AssertLongStringMap(want, cell.Present));
             _ = probe.Get();
             expected.Verify();
             index++;
@@ -506,7 +507,7 @@ public sealed class ClusterConformanceTests
             }
             var expected = FixtureAssertions.Of(step, "expected", $"{fixture} step {index}");
             AssertInvalidation(expected, "present", probe);
-            expected.AssertKeyWith("present", want => AssertLongStringMap(want, cell.Present));
+            expected.AssertObjectKey("present", want => AssertLongStringMap(want, cell.Present));
             _ = probe.Get();
             expected.Verify();
             index++;
@@ -737,7 +738,7 @@ public sealed class ClusterConformanceTests
             }
             var expected = FixtureAssertions.Of(step, "expected", $"{fixture} step {index}");
             AssertInvalidation(expected, "discovery", probe);
-            expected.AssertKeyWith("discovery", want => AssertStringMap(want, cell.Discovery));
+            expected.AssertObjectKey("discovery", want => AssertStringMap(want, cell.Discovery));
             _ = probe.Get();
             expected.Verify();
             index++;
@@ -776,7 +777,7 @@ public sealed class ClusterConformanceTests
             }
             var expected = FixtureAssertions.Of(step, "expected", $"{fixture} step {index}");
             AssertInvalidation(expected, "projection", probe);
-            expected.AssertKeyWith("projection", want => AssertStringMap(want, cell.Projection));
+            expected.AssertObjectKey("projection", want => AssertStringMap(want, cell.Projection));
             _ = probe.Get();
             expected.Verify();
             index++;
@@ -813,13 +814,21 @@ public sealed class ClusterConformanceTests
         Computed<T> probe)
     {
         var actual = !probe.Peek(out _);
-        expected.AssertKeyWith(
+        if (expected.GetProperty("invalidates").ValueKind is JsonValueKind.True or JsonValueKind.False)
+        {
+            expected.AssertKey("invalidates", actual);
+            return;
+        }
+
+        // The matrix form. This site used to read ONE named projection out of the object and
+        // ignore every other key in it (#lzsubblockkeyset) — a fixture saying
+        // `{"value": true, "membership": false}` had `membership` compared by nothing.
+        // Descending fixes it structurally: these fixtures carry exactly the projection this
+        // probe observes, and a reader class the corpus adds later reports as unconsumed
+        // rather than being silently skipped.
+        expected.AssertObjectKey(
             "invalidates",
-            invalidates => Assert.Equal(
-                invalidates.ValueKind is JsonValueKind.True or JsonValueKind.False
-                    ? invalidates.GetBoolean()
-                    : invalidates.GetProperty(projection).GetBoolean(),
-                actual));
+            invalidates => invalidates.AssertKey(projection, actual));
     }
 
     private static void AssertNullableLong(JsonElement expected, long? actual)
@@ -841,30 +850,46 @@ public sealed class ClusterConformanceTests
         Assert.Equal(expected.GetString(), actual.Value);
     }
 
+    /// <summary>
+    /// Compare a fixture map keyed by peer id against <paramref name="actual"/>, routing every
+    /// entry through the child tracker.
+    /// </summary>
+    /// <remarks>
+    /// The count comparison stays — it is what catches an entry the runtime grew — but the
+    /// per-entry assertions now go through <paramref name="expected"/> so the child's teardown
+    /// reports a fixture entry this loop never reached (<c>#lzsubblockkeyset</c>).
+    /// </remarks>
     private static void AssertLongStringMap(
-        JsonElement expected,
+        FixtureAssertions expected,
         IReadOnlyDictionary<long, string> actual)
     {
         Assert.Equal(expected.EnumerateObject().Count(), actual.Count);
         foreach (var property in expected.EnumerateObject())
         {
-            var key = long.Parse(
-                property.Name,
-                System.Globalization.CultureInfo.InvariantCulture);
-            Assert.True(actual.TryGetValue(key, out var value));
-            Assert.Equal(property.Value.GetString(), value);
+            var name = property.Name;
+            expected.AssertKeyWith(name, want =>
+            {
+                var key = long.Parse(name, System.Globalization.CultureInfo.InvariantCulture);
+                Assert.True(actual.TryGetValue(key, out var value));
+                Assert.Equal(want.GetString(), value);
+            });
         }
     }
 
+    /// <inheritdoc cref="AssertLongStringMap"/>
     private static void AssertStringMap(
-        JsonElement expected,
+        FixtureAssertions expected,
         IReadOnlyDictionary<string, string> actual)
     {
         Assert.Equal(expected.EnumerateObject().Count(), actual.Count);
         foreach (var property in expected.EnumerateObject())
         {
-            Assert.True(actual.TryGetValue(property.Name, out var value));
-            Assert.Equal(property.Value.GetString(), value);
+            var name = property.Name;
+            expected.AssertKeyWith(name, want =>
+            {
+                Assert.True(actual.TryGetValue(name, out var value));
+                Assert.Equal(want.GetString(), value);
+            });
         }
     }
 }
