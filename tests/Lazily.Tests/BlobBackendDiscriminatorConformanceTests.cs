@@ -239,13 +239,6 @@ public sealed class BlobBackendDiscriminatorConformanceTests
         // where this binding can see it.
         meta.ProseKey("theorem", "rejected", "decoded_backend");
 
-        // NOT prose, and not declared as such: it names the script that generated the wire
-        // frames, and there is nothing in this binding to compare it against.
-        meta.ExcuseKey(
-            "generator",
-            "names the corpus-side script that mints these frames; it states no obligation on a "
-            + "binding and nothing here could disagree with it");
-
         var scenarios = SpecCorpus.Scenarios(root, Corpus, Fixture);
 
         // Anti-vacuity, in every direction the fixture's own `anti_vacuity` note names.

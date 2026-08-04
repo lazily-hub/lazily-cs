@@ -179,13 +179,6 @@ public sealed class NodeKeyNullLeniencyConformanceTests
         meta.ProseKey("reencode_obligation", "reencoded_key_field_present");
         meta.ProseKey("anti_vacuity", "decoded_key", "key_forms");
 
-        // NOT prose, and not declared as such: it names the script that generated the wire
-        // frames, and there is nothing in this binding to compare it against.
-        meta.ExcuseKey(
-            "generator",
-            "names the corpus-side script that mints these frames; it states no obligation on a "
-            + "binding and nothing here could disagree with it");
-
         var scenarios = SpecCorpus.Scenarios(root, Corpus, Fixture);
 
         // Anti-vacuity in both directions. A runner that never decodes reports "absent" for

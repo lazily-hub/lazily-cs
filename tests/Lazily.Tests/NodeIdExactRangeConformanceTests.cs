@@ -106,11 +106,6 @@ public sealed class NodeIdExactRangeConformanceTests
 
         meta.ProseKey("anti_vacuity", "outcome", "node_id_decimal", "node_count");
 
-        meta.ExcuseKey(
-            "generator",
-            "names the corpus-side script that mints these frames; it states no obligation on a "
-            + "binding and nothing here could disagree with it");
-
         // The declared outcome vocabulary, read through the raw element: every scenario's
         // `outcome` is checked to be a member of it, and the SET is asserted against what the
         // run observed once the loop is done. Reading it here does not consume it.
