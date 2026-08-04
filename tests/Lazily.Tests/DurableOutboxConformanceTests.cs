@@ -55,6 +55,86 @@ public sealed class DurableOutboxConformanceTests
     }
 
     [Fact]
+    public void File_journal_decode_corpus_pins_unknown_and_torn_opposites()
+    {
+        const string fixture = "outbox_journal_decode.json";
+        using var document = SpecCorpus.Load("reliable-sync", fixture);
+        var scenarios = SpecCorpus.Scenarios(document.RootElement, "reliable-sync", fixture);
+        Assert.Equal(2, scenarios.Count);
+
+        foreach (var scenario in scenarios.All())
+        {
+            var path = TemporaryJournal();
+            var store = new FileOutboxStore(path);
+            foreach (var record in scenario.GetProperty("records").EnumerateArray())
+            {
+                var op = record.GetProperty("op").GetString()!;
+                var epoch = record.GetProperty("epoch").GetUInt64();
+                switch (op)
+                {
+                    case "put":
+                        store.Put(epoch, Bytes(record.GetProperty("frame")));
+                        break;
+                    case "delete":
+                        store.DeleteThrough(epoch);
+                        break;
+                    case "cursor":
+                        store.SaveCursor(epoch);
+                        break;
+                    default:
+                        AppendRawRecord(path, record);
+                        break;
+                }
+            }
+
+            if (scenario.TryGetProperty("tail_fault", out var tail))
+            {
+                Assert.Equal("torn_record", tail.GetProperty("kind").GetString());
+                var encoded = JsonSerializer.Serialize(new Dictionary<string, object?>
+                {
+                    ["op"] = tail.GetProperty("op").GetString(),
+                    ["epoch"] = tail.GetProperty("epoch").GetUInt64(),
+                    ["frame"] = Bytes(tail.GetProperty("frame")),
+                });
+                var keepBytes = tail.GetProperty("keep_bytes").GetInt32();
+                Assert.InRange(keepBytes, 1, Encoding.UTF8.GetByteCount(encoded) - 1);
+                File.AppendAllText(path, encoded[..keepBytes], Encoding.UTF8);
+            }
+
+            IReadOnlyList<StoredOutboxEntry>? entries = null;
+            var error = Record.Exception(() =>
+                entries = store.ScanAfter(scenario.GetProperty("scan_after").GetUInt64()));
+            var expected = FixtureAssertions.Of(
+                scenario,
+                "expect",
+                $"reliable-sync/{fixture} scenario {scenario.GetProperty("name").GetString()}");
+            expected.AssertKey("outcome", error is null ? "accept" : "reject");
+            if (error is null)
+            {
+                Assert.NotNull(entries);
+            }
+            else
+            {
+                Assert.IsType<InvalidDataException>(error);
+            }
+
+            expected.TryAssertKeyWith(
+                "retained_epochs",
+                want => Assert.Equal(Epochs(want), entries!.Select(entry => entry.Epoch)));
+            expected.TryAssertKeyWith("retained_frames", want =>
+            {
+                var frames = want.EnumerateArray().ToArray();
+                Assert.Equal(frames.Length, entries!.Count);
+                for (var index = 0; index < frames.Length; index++)
+                {
+                    Assert.Equal(Bytes(frames[index]), entries[index].Frame);
+                }
+            });
+            expected.Verify();
+        }
+    }
+
+    [Fact]
     public void DurableOutbox_crash_replay_corpus_is_at_least_once_in_epoch_order()
     {
         var fixture = Assert.Single(
@@ -234,6 +314,12 @@ public sealed class DurableOutboxConformanceTests
 
     private static ulong[] Epochs(JsonElement array) =>
         array.EnumerateArray().Select(item => item.GetUInt64()).ToArray();
+
+    private static byte[] Bytes(JsonElement array) =>
+        array.EnumerateArray().Select(item => (byte)item.GetInt32()).ToArray();
+
+    private static void AppendRawRecord(string path, JsonElement record) =>
+        File.AppendAllText(path, record.GetRawText() + "\n", Encoding.UTF8);
 
     private static DeltaMessage Frame(ulong epoch) =>
         new(
