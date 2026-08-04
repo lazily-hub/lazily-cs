@@ -95,6 +95,22 @@ public sealed record SessionHandshake(
                 "both peers must require ordered-reliable delivery");
         }
 
+        if (MaxFrameSize == 0 || other.MaxFrameSize == 0)
+        {
+            return Fail(
+                "max_frame_size",
+                "both peers must advertise a positive receive ceiling");
+        }
+
+        if (string.IsNullOrEmpty(SessionId)
+            || string.IsNullOrEmpty(other.SessionId)
+            || !string.Equals(SessionId, other.SessionId, StringComparison.Ordinal))
+        {
+            return Fail(
+                "session_id",
+                "both peers must name the same non-empty session");
+        }
+
         foreach (var feature in requiredFeatures.Distinct(StringComparer.Ordinal))
         {
             if (!HasFeature(feature) || !other.HasFeature(feature))
@@ -172,7 +188,7 @@ public sealed record SessionHandshake(
             RequireBoolean(root, "fragmentation_supported"),
             RequireBoolean(root, "ordered_reliable"),
             RequireUInt64(root, "peer_id"),
-            RequireString(root, "session_id"),
+            RequireString(root, "session_id", allowEmpty: true),
             features.EnumerateArray()
                 .Select((feature, index) =>
                     feature.ValueKind == JsonValueKind.String
@@ -186,12 +202,19 @@ public sealed record SessionHandshake(
             ? value
             : throw new JsonException($"Missing required property '{name}'.");
 
-    private static string RequireString(JsonElement element, string name)
+    private static string RequireString(
+        JsonElement element,
+        string name,
+        bool allowEmpty = false)
     {
         var value = Required(element, name);
-        if (value.ValueKind != JsonValueKind.String || string.IsNullOrEmpty(value.GetString()))
+        if (value.ValueKind != JsonValueKind.String
+            || (!allowEmpty && string.IsNullOrEmpty(value.GetString())))
         {
-            throw new JsonException($"{name} must be a non-empty string.");
+            throw new JsonException(
+                allowEmpty
+                    ? $"{name} must be a string."
+                    : $"{name} must be a non-empty string.");
         }
 
         return value.GetString()!;
@@ -258,6 +281,10 @@ public sealed class NegotiatedSession
         _features = local.Features
             .Intersect(remote.Features, StringComparer.Ordinal)
             .ToHashSet(StringComparer.Ordinal);
+        MaxFrameSize = Math.Min(local.MaxFrameSize, remote.MaxFrameSize);
+        FragmentationSupported =
+            local.FragmentationSupported && remote.FragmentationSupported;
+        SessionId = local.SessionId;
     }
 
     /// <summary>The local handshake.</summary>
@@ -265,6 +292,15 @@ public sealed class NegotiatedSession
 
     /// <summary>The remote handshake.</summary>
     public SessionHandshake Remote { get; }
+
+    /// <summary>The common positive receive ceiling used in both directions.</summary>
+    public ulong MaxFrameSize { get; }
+
+    /// <summary>Whether both peers can send and reassemble fragmented frames.</summary>
+    public bool FragmentationSupported { get; }
+
+    /// <summary>The shared non-empty graph/session identifier.</summary>
+    public string SessionId { get; }
 
     /// <summary>Returns whether both peers advertised the feature.</summary>
     public bool Supports(string feature) => _features.Contains(feature);

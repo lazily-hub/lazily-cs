@@ -65,7 +65,7 @@ KNOWN_UNCOVERED=(
 # reports "coverage OK: 2/2" and exits 0, which is the vacuous green #lzvacuousrun
 # named after this binding printed "0/0" on three rungs in a row.
 #
-# 137 = the 135 fixtures replayed before #lzmsgpackseven, PLUS ONE for
+# 140 = the 135 fixtures replayed before #lzmsgpackseven, PLUS ONE for
 # codec/frame_roundtrip_msgpack.json (whose KNOWN_UNCOVERED entry above is gone
 # now that MsgPackWire implements the wire the `msgpack` token names), PLUS ONE
 # for codec/nodeid_exact_range.json, the NodeId exact-representation bound
@@ -73,10 +73,12 @@ KNOWN_UNCOVERED=(
 # whole u64 range, so it asserts the `exact` branch for every scenario, PLUS ONE
 # for codec/nodekey_null_leniency.json, the NodeKey null-leniency rule
 # (#lzkeynullstrict), PLUS ONE for codec/blob_backend_discriminator.json, the
-# blob-backend discriminator strictness rule (#lzblobbackendstrict). NEVER lower
+# blob-backend discriminator strictness rule (#lzblobbackendstrict), PLUS ONE
+# for codec/capability_handshake.json, whose five scenarios pin negotiated frame
+# and session state (#lzhandshakedeadfields). NEVER lower
 # this to make the gate green: a drop means a replay was removed, renamed, or
 # short-circuited, and that is the finding, not the floor.
-MIN_FIXTURES="${MIN_FIXTURES:-139}"
+MIN_FIXTURES="${MIN_FIXTURES:-140}"
 
 # Scenarios deliberately not replayed, one per line as
 #   corpus/fixture.json|scenario-id|reason
@@ -118,7 +120,7 @@ KNOWN_UNREPLAYED_SCENARIOS=(
 # stopped matching cannot slip through. NEVER lower this to make the gate green: a
 # drop means scenarios stopped being reached, and that is the finding, not the
 # floor.
-MIN_SCENARIOS="${MIN_SCENARIOS:-134}"
+MIN_SCENARIOS="${MIN_SCENARIOS:-139}"
 
 MANIFEST="${LAZILY_CONFORMANCE_MANIFEST:-build/conformance-fixtures-loaded.txt}"
 TEST_DIRS=("tests")
