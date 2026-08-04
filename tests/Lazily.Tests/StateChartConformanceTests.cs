@@ -22,6 +22,8 @@ public sealed class StateChartConformanceTests
 
     /// <summary>Assertions this binding does not satisfy, keyed <c>fixture#step:key</c>.</summary>
     private static readonly Dictionary<string, string> KnownDivergences = [];
+    private static readonly HashSet<string> NegativeFixtures =
+        ["malformed_rejected.json"];
 
     [Fact]
     public void ReplaysTheWholeCorpusWithNoUnexpectedDivergence()
@@ -40,6 +42,7 @@ public sealed class StateChartConformanceTests
 
         foreach (var name in names)
         {
+            if (NegativeFixtures.Contains(name)) continue;
             if (Unsupported.ContainsKey(name)) continue;
 
             using var doc = SpecCorpus.Load(Corpus, name);
@@ -116,7 +119,8 @@ public sealed class StateChartConformanceTests
         }
 
         Assert.Equal(
-            names.Where(n => !Unsupported.ContainsKey(n)).Order(StringComparer.Ordinal).ToArray(),
+            names.Where(n => !Unsupported.ContainsKey(n) && !NegativeFixtures.Contains(n))
+                .Order(StringComparer.Ordinal).ToArray(),
             replayed.Order(StringComparer.Ordinal).ToArray());
         Assert.Equal(
             KnownDivergences.Values.Order(StringComparer.Ordinal).ToArray(),
@@ -127,6 +131,21 @@ public sealed class StateChartConformanceTests
 
     private static string ActiveOf(StateChart chart) => string.Join(",", chart.ActiveLeaves());
 
+    [Fact]
+    public void RejectsEveryMalformedCanonicalChart()
+    {
+        using var doc = SpecCorpus.Load(Corpus, "malformed_rejected.json");
+        var cases = doc.RootElement.GetProperty("cases").EnumerateArray().ToArray();
+        Assert.NotEmpty(cases);
+        foreach (var scenario in cases)
+        {
+            var name = scenario.GetProperty("name").GetString();
+            Assert.ThrowsAny<Exception>(
+                () => ReadChart(scenario.GetProperty("chart")));
+            Assert.False(string.IsNullOrWhiteSpace(name));
+        }
+    }
+
     /// <summary>The fixture writes a single leaf as a string and parallel leaves as an array.</summary>
     private static string ExpectedActive(JsonElement el) =>
         el.ValueKind is JsonValueKind.Array
@@ -135,6 +154,8 @@ public sealed class StateChartConformanceTests
 
     private static ChartDef ReadChart(JsonElement chart)
     {
+        var topInitial = chart.GetProperty("initial").GetString()
+            ?? throw new InvalidOperationException("chart.initial must be a string");
         var states = new List<KeyValuePair<string, StateDef>>();
         foreach (var s in chart.GetProperty("states").EnumerateObject())
         {
@@ -147,6 +168,7 @@ public sealed class StateChartConformanceTests
 
             states.Add(new(s.Name, new StateDef
             {
+                DeclaredKind = v.TryGetProperty("kind", out var kind) ? kind.GetString() : null,
                 Parent = v.TryGetProperty("parent", out var p) ? p.GetString() : null,
                 Initial = v.TryGetProperty("initial", out var i) ? i.GetString() : null,
                 Parallel = v.TryGetProperty("parallel", out var par) && par.GetBoolean(),
@@ -163,7 +185,12 @@ public sealed class StateChartConformanceTests
         // a future fixture omits it, rather than silently picking an arbitrary state.
         var root = states.Any(s => string.Equals(s.Key, "root", StringComparison.Ordinal))
             ? "root"
-            : chart.GetProperty("initial").GetString()!;
+            : topInitial;
+        if (!states.Any(s => string.Equals(s.Key, topInitial, StringComparison.Ordinal)))
+        {
+            throw new InvalidOperationException(
+                $"chart.initial names undeclared state '{topInitial}'");
+        }
         return new ChartDef(root, states);
     }
 

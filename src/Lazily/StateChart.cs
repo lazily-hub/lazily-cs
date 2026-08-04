@@ -36,6 +36,9 @@ public sealed record Transition(string Target, string? Guard, IReadOnlyList<stri
 /// <summary>One state's definition.</summary>
 public sealed class StateDef
 {
+    /// <summary>An explicit authoritative kind spelling, or null for inference.</summary>
+    public string? DeclaredKind { get; init; }
+
     /// <summary>The parent state id, or null for the root.</summary>
     public string? Parent { get; init; }
 
@@ -98,6 +101,52 @@ public sealed class ChartDef
             }
         }
 
+        if (!States.ContainsKey(Root))
+        {
+            throw new ArgumentException($"Root '{Root}' is not a declared state.", nameof(root));
+        }
+        foreach (var (id, def) in States)
+        {
+            RequireDeclared(id, "parent", def.Parent);
+            RequireDeclared(id, "initial", def.Initial);
+            RequireDeclared(id, "default", def.Default);
+            foreach (var (eventName, transition) in def.On)
+            {
+                RequireDeclared(id, $"transition '{eventName}' target", transition.Target);
+            }
+
+            var inferred = InferKind(id, def);
+            if (def.DeclaredKind is { } declared)
+            {
+                if (declared is not ("atomic" or "compound" or "parallel" or "history" or "final"))
+                {
+                    throw new ArgumentException($"State '{id}' has unknown kind '{declared}'.");
+                }
+                var inferredName = inferred switch
+                {
+                    StateKind.Atomic => "atomic",
+                    StateKind.Compound => "compound",
+                    StateKind.Parallel => "parallel",
+                    StateKind.HistoryShallow or StateKind.HistoryDeep => "history",
+                    StateKind.Final => "final",
+                    _ => throw new InvalidOperationException(),
+                };
+                if (declared == "final")
+                {
+                    if (inferred != StateKind.Atomic || def.Initial is not null)
+                    {
+                        throw new ArgumentException(
+                            $"State '{id}' kind 'final' contradicts '{inferredName}'.");
+                    }
+                }
+                else if (!string.Equals(declared, inferredName, StringComparison.Ordinal))
+                {
+                    throw new ArgumentException(
+                        $"State '{id}' kind '{declared}' contradicts '{inferredName}'.");
+                }
+            }
+        }
+
         ComputeDepth(Root, 0);
     }
 
@@ -118,17 +167,22 @@ public sealed class ChartDef
     /// <returns>The kind.</returns>
     public StateKind Kind(string id)
     {
-        // An id absent from `States` is a PSEUDO-ID, not a typo: `PathBelow` and the entry walk
-        // both call `Kind` on region and ancestor ids the chart names only as a parent, and a node
-        // with no definition has no children and no history, which is exactly Atomic. Deliberate
-        // leniency, pinned by `KindOfAnUndeclaredIdIsAtomic`.
-        if (!States.TryGetValue(id, out var sd)) return StateKind.Atomic;
+        if (!States.TryGetValue(id, out var sd))
+        {
+            throw new KeyNotFoundException($"Unknown state in this chart: '{id}'.");
+        }
 
         // `history` is a CLOSED two-value wire enum carried as a string by every binding's chart
         // fixture. It is NOT forward-compatible: a chart is authored data, and no producer
         // legitimately emits a third history kind, so an unrecognised spelling is a typo that
         // would otherwise demote a history pseudo-state to an ordinary compound state and
         // silently lose every resume. Fail closed, naming the value.
+        if (sd.DeclaredKind == "final") return StateKind.Final;
+        return InferKind(id, sd);
+    }
+
+    private StateKind InferKind(string id, StateDef sd)
+    {
         if (sd.History is { } history)
         {
             return history switch
@@ -145,6 +199,15 @@ public sealed class ChartDef
         if (sd.Final) return StateKind.Final;
         if (sd.Parallel) return StateKind.Parallel;
         return Children(id).Count > 0 ? StateKind.Compound : StateKind.Atomic;
+    }
+
+    private void RequireDeclared(string owner, string field, string? target)
+    {
+        if (target is not null && !States.ContainsKey(target))
+        {
+            throw new ArgumentException(
+                $"State '{owner}' {field} names undeclared state '{target}'.");
+        }
     }
 
     /// <summary>Whether <paramref name="id"/> is a leaf (atomic or final).</summary>

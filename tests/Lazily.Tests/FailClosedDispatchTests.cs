@@ -51,15 +51,14 @@ public sealed class FailClosedDispatchTests
     [InlineData("")]
     public void AnUnknownHistoryKindIsRejected(string history)
     {
-        var def = new ChartDef("root",
-        [
-            new("root", new StateDef { Initial = "region" }),
-            new("region", new StateDef { Parent = "root", Initial = "a" }),
-            new("a", new StateDef { Parent = "region" }),
-            new("hist", new StateDef { Parent = "region", History = history, Default = "a" }),
-        ]);
-
-        var error = Assert.Throws<ArgumentOutOfRangeException>(() => def.Kind("hist"));
+        var error = Assert.Throws<ArgumentOutOfRangeException>(() =>
+            new ChartDef("root",
+            [
+                new("root", new StateDef { Initial = "region" }),
+                new("region", new StateDef { Parent = "root", Initial = "a" }),
+                new("a", new StateDef { Parent = "region" }),
+                new("hist", new StateDef { Parent = "region", History = history, Default = "a" }),
+            ]));
         Assert.Equal(history, error.ActualValue);
     }
 
@@ -444,13 +443,9 @@ public sealed class FailClosedDispatchTests
         }
     }
 
-    /// <summary>An id the chart never declares is Atomic, because a pseudo-id has no children.</summary>
-    /// <remarks>
-    /// Site: <c>ChartDef.Kind</c>'s first guard. INTENTIONAL: the entry walk and <c>PathBelow</c>
-    /// both ask for the kind of ids the chart names only as a parent. Goes red if the guard throws.
-    /// </remarks>
+    /// <summary>An id the chart never declares is rejected rather than inferred as Atomic.</summary>
     [Fact]
-    public void KindOfAnUndeclaredIdIsAtomic()
+    public void KindOfAnUndeclaredIdThrows()
     {
         var def = new ChartDef("root",
         [
@@ -458,8 +453,8 @@ public sealed class FailClosedDispatchTests
             new("a", new StateDef { Parent = "root" }),
         ]);
 
-        Assert.Equal(StateKind.Atomic, def.Kind("never-declared"));
-        Assert.True(def.IsLeaf("never-declared"));
+        Assert.Throws<KeyNotFoundException>(() => def.Kind("never-declared"));
+        Assert.Throws<KeyNotFoundException>(() => def.IsLeaf("never-declared"));
     }
 
     /// <summary>Entering a leaf descends no further and fires only that leaf's entry actions.</summary>
