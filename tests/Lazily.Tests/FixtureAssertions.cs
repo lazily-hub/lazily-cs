@@ -195,8 +195,8 @@ public sealed class FixtureAssertions
     // ---------------------------------------------------------------------------
 
     /// <summary>
-    /// Read <paramref name="name"/>, mark it asserted, and hand its value to
-    /// <paramref name="check"/>.
+    /// Read <paramref name="name"/>, hand its value to <paramref name="check"/>,
+    /// and mark it asserted only after the check succeeds.
     /// </summary>
     /// <remarks>
     /// The general form, for comparisons that are not equality — a tolerance, a set
@@ -206,8 +206,8 @@ public sealed class FixtureAssertions
     {
         _read.Add(name);
         var value = _block.GetProperty(name);
-        MarkAsserted(name);
         Guarded(name, () => check(value));
+        MarkAsserted(name);
     }
 
     /// <summary>
@@ -224,8 +224,9 @@ public sealed class FixtureAssertions
     {
         _read.Add(name);
         var value = _block.GetProperty(name);
+        var projected = project(value);
         MarkAsserted(name);
-        return project(value);
+        return projected;
     }
 
     /// <summary>
@@ -235,8 +236,8 @@ public sealed class FixtureAssertions
     {
         _read.Add(name);
         if (!_block.TryGetProperty(name, out var value)) return false;
-        MarkAsserted(name);
         Guarded(name, () => check(value));
+        MarkAsserted(name);
         return true;
     }
 

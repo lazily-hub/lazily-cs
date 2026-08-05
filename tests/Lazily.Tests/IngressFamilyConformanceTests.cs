@@ -468,8 +468,12 @@ public sealed class IngressFamilyConformanceTests
 
                         if (want.GetProperty("authority").ValueKind == JsonValueKind.Null)
                         {
-                            want.AssertKeyWith("authority", _ =>
-                                Same<IngressAuthority?>(where, key, "authority", null, model.Authority(key)));
+                            want.AssertKeyWith("authority", value =>
+                            {
+                                Assert.Equal(JsonValueKind.Null, value.ValueKind);
+                                Same<IngressAuthority?>(
+                                    where, key, "authority", null, model.Authority(key));
+                            });
                         }
                         else
                         {
@@ -484,8 +488,12 @@ public sealed class IngressFamilyConformanceTests
 
                         if (want.GetProperty("retry").ValueKind == JsonValueKind.Null)
                         {
-                            want.AssertKeyWith("retry", _ =>
-                                Same<IngressRetry?>(where, key, "retry", null, model.Retry(key)));
+                            want.AssertKeyWith("retry", value =>
+                            {
+                                Assert.Equal(JsonValueKind.Null, value.ValueKind);
+                                Same<IngressRetry?>(
+                                    where, key, "retry", null, model.Retry(key));
+                            });
                         }
                         else
                         {
