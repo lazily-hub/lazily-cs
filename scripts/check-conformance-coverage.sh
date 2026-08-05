@@ -52,9 +52,12 @@ if [ ! -d "$SPEC_DIR" ]; then
   exit 0
 fi
 
-# Fixtures deliberately not covered by this binding yet. Keep this explicit even
-# while empty: any future entry is a reviewed finding, never a silent skip.
+# Fixtures deliberately not covered by this binding yet. Every entry is a
+# reviewed finding, never a silent skip.
 KNOWN_UNCOVERED=(
+  # Experimental protobuf-v1 generation is piloted in Rust/Kotlin/TypeScript;
+  # C# must negotiate the capability before replaying this typed trace.
+  "protobuf/graph_boundary_traces.json"
 )
 
 # Minimum DISTINCT canonical fixtures this binding must be observed OPENING.
