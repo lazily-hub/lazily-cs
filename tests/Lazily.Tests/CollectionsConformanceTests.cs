@@ -51,6 +51,7 @@ public sealed class CollectionsConformanceTests
     /// </remarks>
     private static readonly Dictionary<string, string> HandledElsewhere = new(StringComparer.Ordinal)
     {
+        ["dependency_reactive_availability.json"] = nameof(DependencyAvailabilityConformanceTests),
         ["mergecell_algebra.json"] = nameof(MergeCellConformanceTests),
         ["queuecell_bounded_backpressure.json"] = nameof(QueueCellConformanceTests),
         ["queuecell_closure_lifecycle.json"] = nameof(QueueCellConformanceTests),
