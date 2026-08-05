@@ -81,6 +81,13 @@ public sealed class StateChartConformanceTests
             var stepIndex = 0;
             foreach (var step in fx.GetProperty("steps").EnumerateArray())
             {
+                var expected = FixtureAssertions.Wrap(
+                    step,
+                    $"{Corpus}/{name} steps[{stepIndex}]");
+                expected.ExcuseKey("event", "operation input replayed by StateChart.Send");
+                if (step.TryGetProperty("guards", out _))
+                    expected.ExcuseKey("guards", "operation input replayed as guard resolutions");
+
                 var guards = step.TryGetProperty("guards", out var g)
                     ? g.EnumerateObject().ToDictionary(p => p.Name, p => p.Value.GetBoolean(), StringComparer.Ordinal)
                     : null;
@@ -90,27 +97,36 @@ public sealed class StateChartConformanceTests
                 _ = leaves.Get();
 
                 var where = $"#{stepIndex}";
-                Check($"{where}:accepted", accepted, step.GetProperty("accepted").GetBoolean());
-                Check($"{where}:active", ActiveOf(chart), ExpectedActive(step.GetProperty("active")));
+                expected.AssertKeyWith(
+                    "accepted",
+                    want => Check($"{where}:accepted", accepted, want.GetBoolean()));
+                expected.AssertKeyWith(
+                    "active",
+                    want => Check($"{where}:active", ActiveOf(chart), ExpectedActive(want)));
 
-                if (step.TryGetProperty("actions", out var wantActions))
-                {
-                    Check(
+                expected.TryAssertKeyWith(
+                    "actions",
+                    want => Check(
                         $"{where}:actions",
                         string.Join(",", chart.LastActions),
-                        string.Join(",", wantActions.EnumerateArray().Select(x => x.GetString()!)));
-                }
+                        string.Join(",", want.EnumerateArray().Select(x => x.GetString()!))));
 
-                if (step.TryGetProperty("matches", out var wantMatches))
+                expected.TryAssertObjectKey("matches", matches =>
                 {
-                    foreach (var m in wantMatches.EnumerateObject())
+                    foreach (var state in matches.EnumerateObject().Select(property => property.Name))
                     {
-                        Check($"{where}:matches.{m.Name}", chart.Matches(m.Name), m.Value.GetBoolean());
+                        matches.AssertKeyWith(
+                            state,
+                            want => Check(
+                                $"{where}:matches.{state}",
+                                chart.Matches(state),
+                                want.GetBoolean()));
                     }
-                }
+                });
 
                 // A rejected event leaves the reactive graph untouched; an accepted one moves it.
                 Check($"{where}:reader_invalidated", matchRuns > runsBefore, accepted);
+                expected.Verify();
 
                 stepIndex++;
             }
