@@ -799,12 +799,12 @@ public sealed class QueueFamilyConformanceTests
         var root = doc.RootElement;
         Assert.Equal("WorkQueueCell", root.GetProperty("model").GetString());
 
-        // The lease configuration is a fixture field, not a runner constant: a binding that
+        // The lease configuration is part of fixture.initial, not a runner constant: a binding that
         // hardcoded it could not notice the corpus changing under it.
-        var config = root.GetProperty("config");
+        var initial = root.GetProperty("initial");
         var queue = flavor.WorkQueue(
-            config.GetProperty("visibility_timeout").GetInt64(),
-            config.GetProperty("max_deliveries").GetInt32());
+            initial.GetProperty("visibility_timeout").GetInt64(),
+            initial.GetProperty("max_deliveries").GetInt32());
 
         var steps = 0;
         var checks = 0;

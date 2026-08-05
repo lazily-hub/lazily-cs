@@ -62,8 +62,12 @@ public sealed class WorkQueueConformanceTests
             using var doc = SpecCorpus.Load("collections", fixture);
             var root = doc.RootElement;
             Assert.Equal("WorkQueueCell", root.GetProperty("model").GetString());
+            var initial = root.GetProperty("initial");
             var ctx = new Context();
-            var queue = new WorkQueueCell<string>(ctx, visibilityTimeout: 10, maxDeliveries: 2);
+            var queue = new WorkQueueCell<string>(
+                ctx,
+                visibilityTimeout: initial.GetProperty("visibility_timeout").GetInt64(),
+                maxDeliveries: initial.GetProperty("max_deliveries").GetInt32());
             var readers = new Readers(ctx, queue);
 
             var index = 0;
