@@ -55,6 +55,11 @@ fi
 # Fixtures deliberately not covered by this binding yet. Every entry is a
 # reviewed finding, never a silent skip.
 KNOWN_UNCOVERED=(
+  # Reactive egress is currently Rust-only; C# has no egress replay runner.
+  "egress/egress_generation_fence.json"
+  "egress/egress_inflight_window.json"
+  "egress/egress_ordered_ack.json"
+  "egress/egress_retry_budget.json"
   # Experimental protobuf-v1 generation is piloted in Rust/Kotlin/TypeScript;
   # C# must negotiate the capability before replaying this typed trace.
   "protobuf/graph_boundary_traces.json"
