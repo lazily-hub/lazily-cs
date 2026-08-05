@@ -36,6 +36,7 @@ namespace Lazily.Tests;
 public sealed class IngressFamilyConformanceTests
 {
     private const string Corpus = "ingress";
+    private const string BoundaryFixture = "boundary_ingress_adapter.json";
 
     /// <summary>
     /// Every fixture the ingress corpus ships, named explicitly.
@@ -87,8 +88,10 @@ public sealed class IngressFamilyConformanceTests
         Assert.True(
             SpecCorpus.Root is not null,
             $"lazily-spec conformance corpus not found at {SpecCorpus.SiblingRelativePath}");
-        Assert.Equal(Fixtures.Order(StringComparer.Ordinal), SpecCorpus.FixtureNames(Corpus));
-        Assert.Equal(7, Fixtures.Length);
+        Assert.Equal(
+            Fixtures.Append(BoundaryFixture).Order(StringComparer.Ordinal),
+            SpecCorpus.FixtureNames(Corpus));
+        Assert.Equal(8, Fixtures.Length + 1);
 
         var total = ExpectedStepTotal();
         Assert.True(
