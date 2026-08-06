@@ -1,6 +1,6 @@
 # lazily-cs — build, test, and verification targets.
 
-.PHONY: all restore build test format format-check conformance pack package-check ffi-check interop-peer-check check clean conformance-coverage assertion-ordering-check ci-reach
+.PHONY: all restore build test format format-check conformance pack package-check ffi-check interop-peer-check benchmark-r3 check clean conformance-coverage assertion-ordering-check ci-reach
 
 DOTNET ?= dotnet
 
@@ -38,15 +38,20 @@ conformance:
 
 pack:
 	$(DOTNET) pack src/Lazily/Lazily.csproj -c Release --nologo
+	$(DOTNET) pack src/Lazily.R3/Lazily.R3.csproj -c Release --nologo
 
 package-check:
 	./scripts/check-package.sh
+	./scripts/check-r3-package.sh
 
 ffi-check:
 	./scripts/check-ffi.sh
 
 interop-peer-check:
 	$(DOTNET) run --project src/Lazily.InteropPeer/Lazily.InteropPeer.csproj --no-build -- --self-check
+
+benchmark-r3:
+	$(DOTNET) run -c Release --project benchmarks/Lazily.R3.Benchmarks/Lazily.R3.Benchmarks.csproj
 
 # Full local gate — run before committing.
 assertion-ordering-check:

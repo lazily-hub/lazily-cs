@@ -1,0 +1,23 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <LangVersion>latest</LangVersion>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <TreatWarningsAsErrors>true</TreatWarningsAsErrors>
+    <GenerateDocumentationFile>true</GenerateDocumentationFile>
+    <PackageId>Lazily.R3</PackageId>
+    <Version>0.4.0</Version>
+    <Authors>lazily-hub</Authors>
+    <Description>Optional R3 adapters for Lazily state graphs.</Description>
+    <PackageLicenseExpression>MIT</PackageLicenseExpression>
+    <PackageReadmeFile>README.md</PackageReadmeFile>
+    <RepositoryUrl>https://github.com/lazily-hub/lazily-cs</RepositoryUrl>
+    <PackageProjectUrl>https://github.com/lazily-hub/lazily-cs</PackageProjectUrl>
+  </PropertyGroup>
+  <ItemGroup>
+    <ProjectReference Include="../Lazily/Lazily.csproj" />
+    <PackageReference Include="R3" Version="1.3.1" />
+    <None Include="../../docs/r3-adapter.md" Pack="true" PackagePath="README.md" />
+  </ItemGroup>
+</Project>

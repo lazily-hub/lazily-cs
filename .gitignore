@@ -1,6 +1,7 @@
 # .NET
 bin/
 obj/
+BenchmarkDotNet.Artifacts/
 *.user
 *.suo
 artifacts/

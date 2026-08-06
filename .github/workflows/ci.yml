@@ -70,7 +70,7 @@ jobs:
       # else. The package and FFI scripts are the same category: a check that
       # only ever runs locally is a check that rots.
       - name: Package layout check (#lzinteroppeerci)
-        run: ./scripts/check-package.sh
+        run: make package-check
 
       - name: FFI surface check (#lzinteroppeerci)
         run: ./scripts/check-ffi.sh

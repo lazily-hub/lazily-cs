@@ -64,19 +64,28 @@ jobs:
         run: dotnet test --configuration Release --no-build --nologo
 
       - name: Pack
-        run: >
-          dotnet pack src/Lazily/Lazily.csproj
-          --configuration Release
-          --no-build
-          --nologo
-          --output artifacts
-          -p:Version=${{ steps.version.outputs.value }}
+        run: |
+          dotnet pack src/Lazily/Lazily.csproj \
+            --configuration Release \
+            --no-build \
+            --nologo \
+            --output artifacts \
+            -p:Version=${{ steps.version.outputs.value }}
+          dotnet pack src/Lazily.R3/Lazily.R3.csproj \
+            --configuration Release \
+            --no-build \
+            --nologo \
+            --output artifacts \
+            -p:Version=${{ steps.version.outputs.value }}
 
       - name: Verify package and assembly versions
         env:
           EXPECTED_VERSION: ${{ steps.version.outputs.value }}
           PACKAGE_PATH: artifacts/Lazily.${{ steps.version.outputs.value }}.nupkg
-        run: ./scripts/check-package.sh
+          R3_PACKAGE_PATH: artifacts/Lazily.R3.${{ steps.version.outputs.value }}.nupkg
+        run: |
+          ./scripts/check-package.sh
+          ./scripts/check-r3-package.sh
 
       - uses: actions/upload-artifact@v4
         with:

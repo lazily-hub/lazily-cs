@@ -1,10 +1,15 @@
 <Solution>
   <Folder Name="/src/">
     <Project Path="src/Lazily.InteropPeer/Lazily.InteropPeer.csproj" />
+    <Project Path="src/Lazily.R3/Lazily.R3.csproj" />
     <Project Path="src/Lazily/Lazily.csproj" />
     <Project Path="src/Lazily.Native/Lazily.Native.csproj" />
   </Folder>
   <Folder Name="/tests/">
+    <Project Path="tests/Lazily.R3.Tests/Lazily.R3.Tests.csproj" />
     <Project Path="tests/Lazily.Tests/Lazily.Tests.csproj" />
+  </Folder>
+  <Folder Name="/benchmarks/">
+    <Project Path="benchmarks/Lazily.R3.Benchmarks/Lazily.R3.Benchmarks.csproj" />
   </Folder>
 </Solution>

@@ -25,6 +25,15 @@ dotnet add package Lazily
 
 Targets `netstandard2.1`, `net8.0`, and `net10.0`.
 
+The optional net10-only R3 bridge is packaged separately:
+
+```bash
+dotnet add package Lazily.R3
+```
+
+See [R3 adapter semantics](docs/r3-adapter.md) for ownership, threading, errors, completion,
+batching, and the state-not-events boundary.
+
 ## Quick start
 
 ```csharp
