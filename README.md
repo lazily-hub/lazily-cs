@@ -277,7 +277,7 @@ Generated from `coverage.json` in lazily-spec — do not edit by hand.
 
 | Family | Rust | Python | Kotlin | JS | Dart | Zig | Go | C++ | C# | GDScript |
 | --------- | :----: | :------: | :------: | :--: | :----: | :---: | :--: | :---: | :--: | :--------: |
-| Reactive graph | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ~ | ✅ | ✅ | ~ |
+| Reactive graph | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ~ |
 | Materialization | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | — |
 | Family sync | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | — |
 | Statecharts | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | — |
