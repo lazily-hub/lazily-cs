@@ -38,6 +38,16 @@ public sealed class CollectionsConformanceTests
     /// </remarks>
     private static readonly Dictionary<string, string> Unsupported = new(StringComparer.Ordinal)
     {
+        // The register CRDTs (LWW / MV / PnCounter) are implemented here, but no runner replays
+        // the canonical registers corpus, so there is no scenario dispatch for its op vocabulary
+        // (`set`/`merge`/`fork` over three register kinds with the `(wall, logical, peer)`
+        // tiebreak). `scripts/check-conformance-coverage.sh` already carried this fixture in
+        // KNOWN_UNCOVERED; the test host did not, and the two ledgers disagreeing is what made a
+        // fixture ADDED to the shared corpus crash this suite instead of reporting a declared gap.
+        ["registers_convergence.json"] =
+            "no canonical registers replay: the scenario op vocabulary (set/merge/fork over " +
+            "LWW/MV/PnCounter) has no dispatch here — see KNOWN_UNCOVERED in " +
+            "scripts/check-conformance-coverage.sh",
     };
 
     /// <summary>
@@ -108,9 +118,21 @@ public sealed class CollectionsConformanceTests
                 ReplayReconcile(reconcile, reconcileExpected, Check);
                 reconcileExpected.Verify();
             }
-            else
+            else if (fx.TryGetProperty("initial", out _))
             {
                 ReplaySteps(fx, Check);
+            }
+            else
+            {
+                // Fail CLOSED on a shape this runner has no dispatch for. Falling through to
+                // ReplaySteps made an unrecognised fixture die on `GetProperty("initial")` with a
+                // bare KeyNotFoundException naming neither the fixture nor the reason — which is
+                // how a fixture newly added to the shared corpus presented as an unexplained
+                // crash rather than as the missing ledger entry it actually was.
+                throw new InvalidOperationException(
+                    $"{name}: neither `reconcile` nor `initial`, so no replay shape matches. " +
+                    "Add a runner, or record it in Unsupported / HandledElsewhere with the " +
+                    "exact op or assertion that blocks it.");
             }
 
             replayed.Add(name);
