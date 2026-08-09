@@ -55,6 +55,10 @@ fi
 # Fixtures deliberately not covered by this binding yet. Every entry is a
 # reviewed finding, never a silent skip.
 KNOWN_UNCOVERED=(
+  # Register CRDTs (LWW / MV / PnCounter + the CellCrdt projection bit) are
+  # implemented here, but this binding has no canonical replay for the new
+  # registers corpus yet; the Registers coverage row is `~` until it does.
+  "collections/registers_convergence.json"
   # Reactive egress is currently Rust-only; C# has no egress replay runner.
   "egress/egress_generation_fence.json"
   "egress/egress_inflight_window.json"
