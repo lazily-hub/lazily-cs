@@ -18,6 +18,26 @@
 set -euo pipefail
 
 SPEC_DIR="${LAZILY_SPEC_CONFORMANCE_DIR:-../lazily-spec/conformance}"
+
+# An EXPLICIT override that names no directory is a wrong invocation, never an
+# absent checkout, so it fails before the context-split skip below can see it
+# (#lzoverrideallrunners). The skip exists for a laptop with no sibling clone —
+# the operator asked for nothing in particular and got nothing. Someone who set
+# LAZILY_SPEC_CONFORMANCE_DIR asked for a SPECIFIC corpus, and exiting 0 there
+# reports "conformance OK" about a corpus that was never read: exactly the
+# perturbation probe this var exists for (copy the corpus, flip one assertion,
+# confirm the suite reddens) silently reporting green from a typo in the path.
+# `SpecCorpus.Locate()` in the test host already throws on this; the guard that
+# audits the same run must not be the softer of the two.
+if [ -n "${LAZILY_SPEC_CONFORMANCE_DIR:-}" ] && [ ! -d "$LAZILY_SPEC_CONFORMANCE_DIR" ]; then
+  echo "FAIL: LAZILY_SPEC_CONFORMANCE_DIR=$LAZILY_SPEC_CONFORMANCE_DIR names no directory." >&2
+  echo "      An explicit override is a request for one specific corpus. Skipping" >&2
+  echo "      here would report conformance OK having read nothing from it, and" >&2
+  echo "      falling back to the sibling would audit a corpus nobody asked for." >&2
+  echo "      Fix the path; do not unset the variable to make this pass." >&2
+  exit 1
+fi
+
 if [ ! -d "$SPEC_DIR" ]; then
   # The one remaining path out of this script that is not a measurement. It exists
   # for a working copy with no sibling checkout, where the alternative is a guard
