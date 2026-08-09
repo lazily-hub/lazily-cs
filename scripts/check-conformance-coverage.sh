@@ -75,10 +75,6 @@ fi
 # Fixtures deliberately not covered by this binding yet. Every entry is a
 # reviewed finding, never a silent skip.
 KNOWN_UNCOVERED=(
-  # Register CRDTs (LWW / MV / PnCounter + the CellCrdt projection bit) are
-  # implemented here, but this binding has no canonical replay for the new
-  # registers corpus yet; the Registers coverage row is `~` until it does.
-  "collections/registers_convergence.json"
   # Reactive egress is currently Rust-only; C# has no egress replay runner.
   "egress/egress_generation_fence.json"
   "egress/egress_inflight_window.json"
@@ -107,10 +103,13 @@ KNOWN_UNCOVERED=(
 # (#lzkeynullstrict), PLUS ONE for codec/blob_backend_discriminator.json, the
 # blob-backend discriminator strictness rule (#lzblobbackendstrict), PLUS ONE
 # for codec/capability_handshake.json, whose five scenarios pin negotiated frame
-# and session state (#lzhandshakedeadfields). NEVER lower
+# and session state (#lzhandshakedeadfields), PLUS ONE for
+# collections/registers_convergence.json, whose KNOWN_UNCOVERED entry above is
+# gone now that RegistersConformanceTests replays all nine LWW/MV/PnCounter
+# scenarios (#lzcsregistersreplay). NEVER lower
 # this to make the gate green: a drop means a replay was removed, renamed, or
 # short-circuited, and that is the finding, not the floor.
-MIN_FIXTURES="${MIN_FIXTURES:-140}"
+MIN_FIXTURES="${MIN_FIXTURES:-141}"
 
 # Scenarios deliberately not replayed, one per line as
 #   corpus/fixture.json|scenario-id|reason
@@ -144,7 +143,9 @@ KNOWN_UNREPLAYED_SCENARIOS=(
 # was first written, PLUS the eight scenarios of
 # codec/blob_backend_discriminator.json (#lzblobbackendstrict), PLUS the SIX that
 # fixture grew at v2: `in_process`, an explicit `null`, and a non-string
-# `backend`, each carried in both codecs. A fixture growing scenarios and the
+# `backend`, each carried in both codecs, PLUS the NINE of
+# collections/registers_convergence.json (#lzcsregistersreplay). A fixture
+# growing scenarios and the
 # floor staying put is how a binding replays the old half of a hardened fixture
 # and reports the same green as before, so the floor moves WITH the corpus.
 # Deliberately set slightly below the real number so ordinary corpus churn does
@@ -152,7 +153,7 @@ KNOWN_UNREPLAYED_SCENARIOS=(
 # stopped matching cannot slip through. NEVER lower this to make the gate green: a
 # drop means scenarios stopped being reached, and that is the finding, not the
 # floor.
-MIN_SCENARIOS="${MIN_SCENARIOS:-139}"
+MIN_SCENARIOS="${MIN_SCENARIOS:-148}"
 
 MANIFEST="${LAZILY_CONFORMANCE_MANIFEST:-build/conformance-fixtures-loaded.txt}"
 TEST_DIRS=("tests")

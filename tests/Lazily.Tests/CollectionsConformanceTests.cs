@@ -35,20 +35,13 @@ public sealed class CollectionsConformanceTests
     /// merge, CRDT, and semantic-tree fixtures are other rows. They are named individually rather
     /// than filtered by prefix, so a new fixture arriving upstream fails the completeness assertion
     /// below instead of being silently swept into a pattern.
+    /// <para>
+    /// Currently EMPTY: every fixture of this corpus is replayed, here or by a runner named in
+    /// <see cref="HandledElsewhere"/>. Keep it that way — an entry here is a declared gap in the
+    /// binding, and the ledger is asserted two-directionally, so a stale one fails the build.
+    /// </para>
     /// </remarks>
-    private static readonly Dictionary<string, string> Unsupported = new(StringComparer.Ordinal)
-    {
-        // The register CRDTs (LWW / MV / PnCounter) are implemented here, but no runner replays
-        // the canonical registers corpus, so there is no scenario dispatch for its op vocabulary
-        // (`set`/`merge`/`fork` over three register kinds with the `(wall, logical, peer)`
-        // tiebreak). `scripts/check-conformance-coverage.sh` already carried this fixture in
-        // KNOWN_UNCOVERED; the test host did not, and the two ledgers disagreeing is what made a
-        // fixture ADDED to the shared corpus crash this suite instead of reporting a declared gap.
-        ["registers_convergence.json"] =
-            "no canonical registers replay: the scenario op vocabulary (set/merge/fork over " +
-            "LWW/MV/PnCounter) has no dispatch here — see KNOWN_UNCOVERED in " +
-            "scripts/check-conformance-coverage.sh",
-    };
+    private static readonly Dictionary<string, string> Unsupported = [];
 
     /// <summary>
     /// Fixtures in this corpus that a DIFFERENT runner in this suite replays.
@@ -68,6 +61,7 @@ public sealed class CollectionsConformanceTests
         ["queuecell_mpsc_multi_writer.json"] = nameof(QueueCellConformanceTests),
         ["queuecell_popped_head_observation.json"] = nameof(QueueCellConformanceTests),
         ["queuecell_spsc_push_pop.json"] = nameof(QueueCellConformanceTests),
+        ["registers_convergence.json"] = nameof(RegistersConformanceTests),
         ["semtree_incremental.json"] = nameof(SemTreeConformanceTests),
         ["seqcrdt_convergence.json"] = nameof(CrdtConformanceTests),
         ["stableid_alignment.json"] = nameof(StableIdConformanceTests),
