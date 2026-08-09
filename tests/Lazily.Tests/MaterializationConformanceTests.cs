@@ -99,25 +99,41 @@ public sealed class MaterializationConformanceTests
             foreach (var e in entries.Where(e => e.Kind == EntryKind.Source)) eager.SeedCell(e.Key, e.Value);
             eager.MaterializeAll(entries.Where(e => e.Kind == EntryKind.Computed).Select(e => e.Key), k => canonical[k]);
 
-            // `default_mode` names the strategy the fixture was authored against. Assert the
-            // BEHAVIOUR it implies, not the label: under "eager" the pre-mint build must hold
-            // every key at build time, under "lazy" it must not.
+            // `default_mode` names the strategy a caller gets without asking for one. The value
+            // SELECTS the build; the fact asserted is that THAT build holds every declared entry
+            // at build time. Only the eager build does, so a corpus renaming its default reddens
+            // here, and so does a `MaterializeAll` that stopped materializing.
+            //
+            // Two shapes this must NOT go back to. Comparing the key to a literal `"eager"`
+            // asserts only that the fixture equals itself (`#lzconsumednotasserted`). Comparing
+            // each mode against "what that mode implies" — the previous form here, `"eager" =>
+            // presentAtBuild == sourceCount` / `"lazy" => presentAtBuild == 0` — is a TAUTOLOGY:
+            // it never ran the pre-mint loop, so for the two `spec.val` fixtures (which declare
+            // ZERO source entries) both arms reduced to `0 == 0` and passed either way, and for
+            // the mixed-kind fixture the eager arm was satisfied by a build with no derived entry
+            // materialized at all. That is green over a gutted library.
             expected.TryAssertKeyWith(
                 "default_mode",
                 defaultMode =>
                 {
+                    var mode = defaultMode.GetString();
                     using var defaults = NewModel(model);
                     foreach (var e in entries.Where(e => e.Kind == EntryKind.Source)) defaults.SeedCell(e.Key, e.Value);
-                    var presentAtBuild = keys.Count(defaults.IsPresent);
-                    Check(
-                        "default_mode",
-                        defaultMode.GetString() switch
-                        {
-                            "eager" => presentAtBuild == entries.Count(e => e.Kind == EntryKind.Source),
-                            "lazy" => presentAtBuild == 0,
-                            var other => throw new InvalidOperationException($"unknown default_mode {other}"),
-                        },
-                        true);
+                    switch (mode)
+                    {
+                        // Pre-mint: derived entries materialized at build beside the sources.
+                        case "eager":
+                            defaults.MaterializeAll(
+                                entries.Where(e => e.Kind == EntryKind.Computed).Select(e => e.Key),
+                                k => canonical[k]);
+                            break;
+                        // Mint-on-access: nothing derived is minted at build.
+                        case "lazy":
+                            break;
+                        default:
+                            throw new InvalidOperationException($"unknown default_mode {mode}");
+                    }
+                    Check("default_mode", keys.Count(defaults.IsPresent), keys.Length);
                 });
 
             expected.AssertKeyWith(

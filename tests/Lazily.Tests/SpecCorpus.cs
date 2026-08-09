@@ -23,8 +23,35 @@ public static class SpecCorpus
     /// <summary>The absolute conformance directory, or null when the sibling checkout is absent.</summary>
     public static string? Root => RootLazy.Value;
 
+    /// <summary>
+    /// The override <c>scripts/check-conformance-coverage.sh</c> already reads, honoured here so
+    /// the suite and the guard auditing it can never be pointed at two different corpora.
+    /// </summary>
+    /// <remarks>
+    /// Without this, a corpus-perturbation probe — flip one assertion key, confirm the suite
+    /// reddens — had nowhere to point but the shared <c>../lazily-spec</c> checkout itself, and
+    /// editing that reddens all nine bindings at once, so the probe could not be run at all. A
+    /// vacuous assertion is only visible when the fixture can be changed under the runner.
+    /// </remarks>
+    public const string DirOverrideVar = "LAZILY_SPEC_CONFORMANCE_DIR";
+
     private static string? Locate()
     {
+        var overridden = Environment.GetEnvironmentVariable(DirOverrideVar);
+        if (!string.IsNullOrWhiteSpace(overridden))
+        {
+            // Fail closed: an override naming a missing directory is a wrong invocation, not a
+            // reason to silently replay the canonical corpus and report green against it.
+            var resolved = Path.GetFullPath(overridden);
+            if (!Directory.Exists(resolved))
+            {
+                throw new DirectoryNotFoundException(
+                    $"{DirOverrideVar}={overridden} names no directory ({resolved}); " +
+                    "refusing to fall back to the sibling corpus.");
+            }
+            return resolved;
+        }
+
         var dir = AppContext.BaseDirectory;
         for (var i = 0; i < 12 && dir is not null; i++)
         {
