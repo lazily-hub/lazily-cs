@@ -50,10 +50,17 @@ reported green while testing nothing.
   produce an unreplayed scenario. A loop that finds no problems cannot tell "nothing is wrong"
   from "nothing was examined", so the magnitude is asserted explicitly before anything prints OK
   (`#lzvacuousrun`). Rung 1 fails on a corpus listing zero fixtures and on `covered <
-  MIN_FIXTURES` (139); rung 4 fails on zero scenarios across the opened fixtures and on
-  `replayed < MIN_SCENARIOS` (134, calibrated below the observed 139). Both floors are
-  env-overridable so they can be mutation-checked, and neither is ever lowered to make a red run
-  green — a drop is the finding. The scenario guard also refuses to run at all if `MIN_SCENARIOS`
+  MIN_FIXTURES` (145); rung 4 fails on zero scenarios across the opened fixtures and on
+  `replayed < MIN_SCENARIOS` (165); the assertion-block rung carries `MIN_BLOCKS` (33) on the
+  same terms. Each floor is the EXACT count a completed CI run reports against the published
+  corpus. This paragraph used to describe the scenario floor as "calibrated below the observed",
+  and that advice was the bug: a floor deliberately set under reality has stopped guarding,
+  because the drop it exists to catch fits inside its own margin. It let 17 scenarios of slack
+  accumulate here before the family-wide repin (`#lzscenariofloordrift`). Set a floor to the
+  number the gate itself prints, never to old-value-plus-your-delta, and prove it by setting it
+  to N+1 and watching the guard fail. Both floors are env-overridable so they can be
+  mutation-checked, and neither is ever lowered to make a red run green — a drop is the finding.
+  The scenario guard also refuses to run at all if `MIN_SCENARIOS`
   is not passed through to it: a floor that cannot be read is not a floor, and "cannot check"
   must never share a branch with "nothing to check".
 - **The evidence channel guards itself.** A floor asserts the manifest is big enough; it cannot
