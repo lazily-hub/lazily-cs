@@ -62,9 +62,13 @@ public sealed class CrdtConformanceTests
             expect.Verify();
         }
 
-        Assert.Equal(6, scenarios.Count);
-        Assert.True(stepCount >= 33, $"SeqCrdt runner replayed only {stepCount} steps");
-        Assert.True(assertions >= 16, $"SeqCrdt runner made only {assertions} assertions");
+        // 8 since the corpus pinned the fork-clock rule (#lzzigforkhlcpeer): a fork
+        // resumes the source's HLC causal position but stamps under its OWN peer.
+        // The step/assertion floors are the exact observed totals, so a scenario that
+        // stops being replayed reddens here rather than hiding behind the census.
+        Assert.Equal(8, scenarios.Count);
+        Assert.True(stepCount >= 42, $"SeqCrdt runner replayed only {stepCount} steps");
+        Assert.True(assertions >= 22, $"SeqCrdt runner made only {assertions} assertions");
     }
 
     [Fact]
