@@ -30,9 +30,15 @@ public sealed class CrdtConformanceTests
             ref steps,
             ref assertions);
 
-        Assert.Equal(10, scenarios);
-        Assert.True(steps >= 46, $"text CRDT runner replayed only {steps} steps");
-        Assert.True(assertions >= 24, $"text CRDT runner made only {assertions} assertions");
+        // 11 since the corpus pinned the conservative-GC rule
+        // (#lzspecgcreferencedtombstone): a stable tombstone that a survivor still
+        // names as its left origin must NOT be collected. The step/assertion floors
+        // are the EXACT observed totals of the two fixtures, so a scenario that stops
+        // being replayed reddens here rather than hiding under slack calibrated for
+        // an older scenario count.
+        Assert.Equal(11, scenarios);
+        Assert.True(steps >= 48, $"text CRDT runner replayed only {steps} steps");
+        Assert.True(assertions >= 33, $"text CRDT runner made only {assertions} assertions");
     }
 
     [Fact]
