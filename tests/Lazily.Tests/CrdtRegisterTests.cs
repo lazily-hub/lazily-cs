@@ -177,6 +177,92 @@ public sealed class CrdtRegisterTests
         Assert.Equal(MergeMechanism.Crdt, new PnCounter().Mechanism);
     }
 
+    [Fact]
+    public void Seq_fork_resumes_the_source_clock_so_a_skewed_local_write_survives()
+    {
+        // A fork has ALREADY OBSERVED everything the source holds, so its clock must
+        // resume from the source's causal position instead of restarting at zero
+        // (#lzzigforkhlcpeer). Routing `Fork` through a constructor that mints
+        // `new Hlc(peer)` discards that position, and then the first local write whose
+        // wall time sits below the source's newest stamp — ordinary skew, which is the
+        // entire reason a hybrid logical clock exists — stamps CAUSALLY BEHIND state the
+        // fork already carries. `LwwRegister.Set` adopts only on strictly-greater, so the
+        // fork's own write is dropped and returns false with no error anywhere:
+        //
+        //   a@peer1  insert x=1 @ now=100   -> (100, 0, 1)
+        //   b = a.Fork(2)                   -> clock must resume at (100, 0), not (0, 0)
+        //   b        set x=99 @ now=50      -> fresh clock mints (50, 0, 2), NOT > above
+        //
+        // seqcrdt fixtures in the shared corpus cannot reach this: every fork there is
+        // followed by an op whose `now` EXCEEDS the source's last wall time, so `Send`
+        // takes the `nowMicros > _lastMicros` branch and the counter resets to 0 no
+        // matter which clock the fork started from.
+        var source = new SeqCrdt<string, int>(peer: 1);
+        Assert.True(source.InsertBack("x", 1, nowMicros: 100));
+
+        var fork = source.Fork(peer: 2);
+        Assert.Equal(2, fork.Peer);
+
+        Assert.True(fork.SetValue("x", 99, nowMicros: 50));
+        Assert.True(fork.TryGetValue("x", out var forked));
+        Assert.Equal(99, forked);
+
+        Assert.True(source.MergeFrom(fork));
+        Assert.True(source.TryGetValue("x", out var converged));
+        Assert.Equal(99, converged);
+        Assert.False(fork.MergeFrom(source));
+        Assert.True(fork.TryGetValue("x", out var settled));
+        Assert.Equal(converged, settled);
+    }
+
+    [Fact]
+    public void Seq_fork_stamps_with_its_own_peer_so_equal_wall_edits_still_converge()
+    {
+        // The other half of #lzzigforkhlcpeer, and the reason carrying the source's clock
+        // must not become carrying the source's CLOCK OBJECT: the peer is the stamp's
+        // final tiebreaker. Two replicas stamping under one peer id mint the same
+        // (micros, counter, peer) triple, LWW adopts only on strictly-greater, so NEITHER
+        // side adopts and they diverge permanently — the one outcome a CRDT exists to make
+        // impossible. lazily-zig shipped exactly that. Convergence is asserted before which
+        // value won, because until the replicas agree at all the winner is not a question.
+        var source = new SeqCrdt<string, int>(peer: 1);
+        Assert.True(source.InsertBack("x", 1, nowMicros: 10));
+
+        var left = source.Fork(peer: 2);
+        var right = source.Fork(peer: 3);
+
+        Assert.True(left.SetValue("x", 55, nowMicros: 10));
+        Assert.True(right.SetValue("x", 99, nowMicros: 10));
+
+        left.MergeFrom(right, nowMicros: 20);
+        right.MergeFrom(left, nowMicros: 20);
+
+        Assert.True(left.TryGetValue("x", out var leftValue));
+        Assert.True(right.TryGetValue("x", out var rightValue));
+        Assert.Equal(rightValue, leftValue);
+        Assert.Equal(99, leftValue);
+    }
+
+    [Fact]
+    public void Seq_copy_retains_the_peer_and_the_clock_position()
+    {
+        // `Copy` is `Fork(Peer)`, so it inherits the fix above rather than needing one:
+        // same peer, and a clock that resumes where this replica left off. A copy that
+        // restarted its clock would silently drop its own next write under the same skew.
+        var source = new SeqCrdt<string, int>(peer: 1);
+        Assert.True(source.InsertBack("x", 1, nowMicros: 100));
+
+        var copy = source.Copy();
+        Assert.Equal(source.Peer, copy.Peer);
+
+        Assert.True(copy.SetValue("x", 42, nowMicros: 50));
+        Assert.True(copy.TryGetValue("x", out var copied));
+        Assert.Equal(42, copied);
+
+        Assert.True(source.TryGetValue("x", out var original));
+        Assert.Equal(1, original);
+    }
+
     private static MvRegister<string> Register(string value, int peer)
     {
         var register = new MvRegister<string>();

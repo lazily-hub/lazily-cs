@@ -80,14 +80,36 @@ public sealed class SeqCrdt<TKey, TValue>
         _clock = new Hlc(peer);
     }
 
+    /// <summary>
+    /// Builds a replica that has already observed <paramref name="entries"/>, resuming
+    /// <paramref name="observed"/>'s causal position under <paramref name="peer"/>'s identity.
+    /// </summary>
     private SeqCrdt(
         int peer,
         IEqualityComparer<TKey> keyComparer,
         IEqualityComparer<TValue> valueComparer,
-        IEnumerable<KeyValuePair<TKey, Entry>> entries)
-        : this(peer, keyComparer, valueComparer)
+        IEnumerable<KeyValuePair<TKey, Entry>> entries,
+        Hlc observed)
     {
+        Peer = peer;
+        _keyComparer = keyComparer;
+        _valueComparer = valueComparer;
+        _entries = new Dictionary<TKey, Entry>(_keyComparer);
         foreach (var pair in entries) _entries.Add(pair.Key, pair.Value.Copy());
+
+        // Resume the source's clock POSITION, never its peer (#lzzigforkhlcpeer). This
+        // constructor used to chain the public one, which mints `new Hlc(peer)` — a clock
+        // back at (0, 0) on a replica that already holds every stamp the source did. The
+        // first local write whose wall time sits below the source's newest stamp (ordinary
+        // skew, the entire reason a hybrid logical clock exists) then stamps CAUSALLY BEHIND
+        // state this replica carries, and `LwwRegister.Set` adopts only on strictly-greater,
+        // so the write vanishes with no error anywhere.
+        //
+        // The peer half is the mirror-image bug and matters just as much: the peer is the
+        // stamp's final tiebreaker, so two replicas stamping under one id can mint identical
+        // (micros, counter, peer) triples, neither adopts the other, and they diverge
+        // permanently. lazily-zig shipped exactly that. Position travels, identity does not.
+        _clock = new Hlc(peer, observed.LastMicros, observed.LastCounter);
     }
 
     /// <summary>The peer that owns local mutations on this replica.</summary>
@@ -99,9 +121,13 @@ public sealed class SeqCrdt<TKey, TValue>
     /// <summary>The number of deleted entries retained as tombstones.</summary>
     public int TombstoneCount => _entries.Values.Count(entry => entry.Deleted.Value);
 
-    /// <summary>Forks this sequence under a new peer identity while preserving all register stamps.</summary>
+    /// <summary>
+    /// Forks this sequence under a new peer identity while preserving all register stamps. The
+    /// fork resumes this replica's clock position, so its next local write cannot stamp behind
+    /// state it already holds (#lzzigforkhlcpeer).
+    /// </summary>
     public SeqCrdt<TKey, TValue> Fork(int peer) =>
-        new(peer, _keyComparer, _valueComparer, _entries);
+        new(peer, _keyComparer, _valueComparer, _entries, _clock);
 
     /// <summary>Returns an independent copy retaining this replica's peer identity.</summary>
     public SeqCrdt<TKey, TValue> Copy() => Fork(Peer);

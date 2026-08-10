@@ -51,8 +51,28 @@ public sealed class Hlc
         Peer = peer;
     }
 
+    /// <summary>
+    /// Creates a clock for <paramref name="peer"/> resuming from an already-observed causal
+    /// position. A replica forked from another has OBSERVED everything the source holds, so its
+    /// clock must not restart at zero: the next local write would stamp behind state the replica
+    /// already carries and last-writer-wins would silently drop it (#lzzigforkhlcpeer). The peer
+    /// stays the caller's — the position travels, the identity does not.
+    /// </summary>
+    internal Hlc(int peer, long lastMicros, long lastCounter)
+    {
+        Peer = peer;
+        _lastMicros = lastMicros;
+        _lastCounter = lastCounter;
+    }
+
     /// <summary>The clock's originating peer.</summary>
     public int Peer { get; }
+
+    /// <summary>The wall time of the most recent stamp, for seeding a forked replica's clock.</summary>
+    internal long LastMicros => _lastMicros;
+
+    /// <summary>The logical counter of the most recent stamp, for seeding a forked replica's clock.</summary>
+    internal long LastCounter => _lastCounter;
 
     /// <summary>Stamps a local event at <paramref name="nowMicros"/>.</summary>
     public HlcStamp Send(long nowMicros)
