@@ -93,23 +93,20 @@ KNOWN_UNCOVERED=(
 # reports "coverage OK: 2/2" and exits 0, which is the vacuous green #lzvacuousrun
 # named after this binding printed "0/0" on three rungs in a row.
 #
-# 140 = the 135 fixtures replayed before #lzmsgpackseven, PLUS ONE for
-# codec/frame_roundtrip_msgpack.json (whose KNOWN_UNCOVERED entry above is gone
-# now that MsgPackWire implements the wire the `msgpack` token names), PLUS ONE
-# for codec/nodeid_exact_range.json, the NodeId exact-representation bound
-# (#lzspecdecoderbound) — lazily-cs is one of the three bindings that decodes the
-# whole u64 range, so it asserts the `exact` branch for every scenario, PLUS ONE
-# for codec/nodekey_null_leniency.json, the NodeKey null-leniency rule
-# (#lzkeynullstrict), PLUS ONE for codec/blob_backend_discriminator.json, the
-# blob-backend discriminator strictness rule (#lzblobbackendstrict), PLUS ONE
-# for codec/capability_handshake.json, whose five scenarios pin negotiated frame
-# and session state (#lzhandshakedeadfields), PLUS ONE for
-# collections/registers_convergence.json, whose KNOWN_UNCOVERED entry above is
-# gone now that RegistersConformanceTests replays all nine LWW/MV/PnCounter
-# scenarios (#lzcsregistersreplay). NEVER lower
-# this to make the gate green: a drop means a replay was removed, renamed, or
-# short-circuited, and that is the finding, not the floor.
-MIN_FIXTURES="${MIN_FIXTURES:-141}"
+# EXACT: 145 is what a green CI run on the current corpus actually opens, with
+# no margin. NEVER lower this to make the gate green: a drop means a replay was
+# removed, renamed, or short-circuited, and that is the finding, not the floor.
+#
+# When you add replays, set this to the number the gate REPORTS afterwards — do
+# not tally "the N I just added" onto the old value (#lzscenariofloordrift).
+# That accounting, which the arithmetic this comment replaced used to spell out
+# fixture by fixture, adds your delta on top of a floor that already sat under
+# reality, so the gap only ever widens. It had reached 141 against an actual
+# 145: four fixtures could stop being opened while the gate kept printing OK.
+#
+# Pinned from CI run 31347367370 (`conformance coverage OK: 145/150`), which
+# matches a local green `make check`. Verified exact: 146 fails this floor.
+MIN_FIXTURES="${MIN_FIXTURES:-145}"
 
 # Scenarios deliberately not replayed, one per line as
 #   corpus/fixture.json|scenario-id|reason
@@ -138,22 +135,27 @@ KNOWN_UNREPLAYED_SCENARIOS=(
 # at 138/138 and then prints "0/0 scenarios across 0 opened fixtures" and exits 0.
 # That was reproducible on this script before this constant existed.
 #
-# 134 = calibrated from the observed run at the time of writing, which replayed
-# 139/139 scenarios across 36 opened fixtures — the 125 replayed when this floor
-# was first written, PLUS the eight scenarios of
-# codec/blob_backend_discriminator.json (#lzblobbackendstrict), PLUS the SIX that
-# fixture grew at v2: `in_process`, an explicit `null`, and a non-string
-# `backend`, each carried in both codecs, PLUS the NINE of
-# collections/registers_convergence.json (#lzcsregistersreplay). A fixture
-# growing scenarios and the
-# floor staying put is how a binding replays the old half of a hardened fixture
-# and reports the same green as before, so the floor moves WITH the corpus.
-# Deliberately set slightly below the real number so ordinary corpus churn does
-# not trip it, and far enough above zero that a detached ledger or a dispatch that
-# stopped matching cannot slip through. NEVER lower this to make the gate green: a
-# drop means scenarios stopped being reached, and that is the finding, not the
-# floor.
-MIN_SCENARIOS="${MIN_SCENARIOS:-148}"
+# EXACT: 165 is what a green CI run on the current corpus actually replays,
+# with no margin. A fixture growing scenarios while the floor stays put is how
+# a binding replays the old half of a hardened fixture and reports the same
+# green as before, so the floor moves WITH the corpus — all the way, not part
+# of the way.
+#
+# When you add replays, set this to the number the gate REPORTS afterwards — do
+# not tally "the N I just added" onto the old value, and do not leave it
+# "slightly below the real number" for churn headroom (#lzscenariofloordrift).
+# Both habits, which the arithmetic this comment replaced practiced, leave slack
+# on top of slack: this had reached 148 against an actual 165, so SEVENTEEN
+# scenarios could silently stop being reached while the gate kept printing OK.
+# Corpus churn tripping the floor is the guard working; that is when you re-pin
+# it to the new reported number.
+#
+# NEVER lower this to make the gate green: a drop means scenarios stopped being
+# reached, and that is the finding, not the floor.
+#
+# Pinned from CI run 31347367370 (`scenario replay coverage OK: 165/165`), which
+# matches a local green `make check`. Verified exact: 166 fails this floor.
+MIN_SCENARIOS="${MIN_SCENARIOS:-165}"
 
 MANIFEST="${LAZILY_CONFORMANCE_MANIFEST:-build/conformance-fixtures-loaded.txt}"
 TEST_DIRS=("tests")
@@ -380,7 +382,16 @@ if unbound:
 
 # Positive-evidence floor (#lzvacuousrun): zero declared blocks means zero
 # unbound blocks, which reports OK having compared nothing.
-min_blocks = int(os.environ.get("MIN_BLOCKS", "25"))
+#
+# EXACT: 33 is what a green CI run on the current corpus actually inventories,
+# with no margin. Set this to the number the guard REPORTS after adding
+# replays; do not add "the N I just added" to the old value and do not leave
+# headroom for churn (#lzscenariofloordrift). It had reached 25 against an
+# actual 33, so eight blocks could stop being inventoried while this printed OK.
+#
+# Pinned from CI run 31347367370 (`assertion-block bind OK: 33/33`), which
+# matches a local green `make check`. Verified exact: 34 fails this floor.
+min_blocks = int(os.environ.get("MIN_BLOCKS", "33"))
 if len(declared) < min_blocks:
     print(
         f"ERROR: only {len(declared)} distinct assertion blocks were inventoried, expected "
