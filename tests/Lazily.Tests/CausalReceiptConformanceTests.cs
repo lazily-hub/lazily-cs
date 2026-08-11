@@ -41,11 +41,20 @@ public sealed class CausalReceiptConformanceTests
             "terminal_outcome",
             OutcomeName(projection.TerminalFor(causationId)!.Outcome));
         expected.AssertKey("stale_receipt_ids", projection.StaleReceiptIds);
-        expected.AssertKeyWith(
-            "nonterminal_outcomes",
-            want => Assert.All(
-                want.EnumerateArray(),
-                item => Assert.False(ParseOutcome(item.GetString()!).IsTerminal())));
+        // Assert the outcomes the projection actually RECORDED as non-terminal, not
+        // the vocabulary of the names the fixture wrote down (#lzconvergedlistlength).
+        // The previous form was `Assert.All(want, item => !ParseOutcome(item).IsTerminal())`
+        // — a property of the ReceiptOutcome enum, never of this replay. Assert.All
+        // over an empty sequence is vacuously true, so `[]` passed, dropping an
+        // element passed, and reordering passed; the corpus could shrink its own
+        // claim to nothing without failing.
+        var recordedNonTerminal = message.Receipts
+            .Where((_, index) => statuses[index] is ReceiptApplyStatus.Recorded)
+            .Select(receipt => receipt.Outcome)
+            .Where(outcome => !outcome.IsTerminal())
+            .Select(OutcomeName)
+            .ToArray();
+        expected.AssertKey("nonterminal_outcomes", recordedNonTerminal);
 
         var actualJson = CausalReceiptWire.Serialize(message);
         Assert.True(
