@@ -505,9 +505,11 @@ KNOWN_UNCOVERED=(
 # reality, so the gap only ever widens. It had reached 141 against an actual
 # 145: four fixtures could stop being opened while the gate kept printing OK.
 #
-# Pinned from CI run 31347367370 (`conformance coverage OK: 145/150`), which
-# matches a local green `make check`. Verified exact: 146 fails this floor.
-MIN_FIXTURES="${MIN_FIXTURES:-145}"
+# Re-pinned for lazily-spec 39df4b3, which added `apply_update_advances_counter`
+# and `out_of_order_delivery_buffers` to lossless-tree; both are replayed here
+# (`conformance coverage OK: 147/152`), matching a local green `make check`.
+# Verified exact: 148 fails this floor.
+MIN_FIXTURES="${MIN_FIXTURES:-147}"
 
 # Scenarios deliberately not replayed, one per line as
 #   corpus/fixture.json|scenario-id|reason
@@ -554,9 +556,10 @@ KNOWN_UNREPLAYED_SCENARIOS=(
 # NEVER lower this to make the gate green: a drop means scenarios stopped being
 # reached, and that is the finding, not the floor.
 #
-# Pinned from CI run 31347367370 (`scenario replay coverage OK: 165/165`), which
-# matches a local green `make check`. Verified exact: 166 fails this floor.
-MIN_SCENARIOS="${MIN_SCENARIOS:-165}"
+# Re-pinned for lazily-spec 39df4b3: the two new lossless-tree fixtures carry one
+# scenario each (`scenario replay coverage OK: 167/167`), matching a local green
+# `make check`. Verified exact: 168 fails this floor.
+MIN_SCENARIOS="${MIN_SCENARIOS:-167}"
 
 MANIFEST="${LAZILY_CONFORMANCE_MANIFEST:-build/conformance-fixtures-loaded.txt}"
 if [ ! -s "$MANIFEST" ]; then
@@ -840,17 +843,19 @@ if unknown:
 # Positive-evidence floor (#lzvacuousrun): zero declared blocks means zero
 # unbound blocks, which reports OK having compared nothing.
 #
-# EXACT: 690 is the number of block SITES a green local run on the current corpus
+# EXACT: 692 is the number of block SITES a green local run on the current corpus
 # inventories, with no margin. Set this to the number the guard REPORTS after
 # adding replays; do not add "the N I just added" to the old value and do not
 # leave headroom for churn (#lzscenariofloordrift). It had reached 25 against an
 # actual 33, so eight blocks could stop being inventoried while this printed OK.
+# Re-pinned from 690 for lazily-spec 39df4b3, whose two new lossless-tree
+# fixtures are now replayed here.
 #
 # It counts SITES, not distinct digests: two sites carrying identical bytes are
 # one digest, so a digest count silently absorbs a deleted fixture whose blocks
-# happen to be spelled like another's. Verified exact: 691 fails this floor.
+# happen to be spelled like another's. Verified exact: 693 fails this floor.
 min_blocks = read_int(
-    os.environ.get("MIN_BLOCKS", "690"),
+    os.environ.get("MIN_BLOCKS", "692"),
     "MIN_BLOCKS",
     ("       Pass the count this guard REPORTS, or unset it to take the default.",),
 )

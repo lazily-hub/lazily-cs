@@ -10,6 +10,7 @@ public sealed class LosslessTreeConformanceTests
 
     private static readonly string[] ExpectedFixtures =
     [
+        "apply_update_advances_counter.json",
         "concurrent_conflict_preserves_text.json",
         "concurrent_insert_same_parent.json",
         "concurrent_reorder_and_leaf_edit.json",
@@ -17,6 +18,7 @@ public sealed class LosslessTreeConformanceTests
         "invalid_source_roundtrip.json",
         "non_contiguous_anti_entropy.json",
         "one_leaf_edit_delta.json",
+        "out_of_order_delivery_buffers.json",
         "split_merge.json",
         "token_trivia_preservation.json",
     ];
@@ -60,11 +62,11 @@ public sealed class LosslessTreeConformanceTests
             }
         }
 
-        Assert.Equal(9, fixtureCount);
-        Assert.Equal(14, scenarioCount);
-        Assert.True(stepCount >= 41, $"lossless-tree runner replayed only {stepCount} steps");
+        Assert.Equal(11, fixtureCount);
+        Assert.Equal(16, scenarioCount);
+        Assert.True(stepCount >= 57, $"lossless-tree runner replayed only {stepCount} steps");
         Assert.True(
-            assertionCount >= 29,
+            assertionCount >= 45,
             $"lossless-tree runner made only {assertionCount} assertions");
     }
 
@@ -172,6 +174,87 @@ public sealed class LosslessTreeConformanceTests
         }
     }
 
+    /// <summary>
+    /// `deliver.order` is a DELIVERY SEQUENCE, and an index outside the canonical diff fails.
+    /// </summary>
+    /// <remarks>
+    /// The corpus cannot catch either regression. `lossless-tree/out_of_order_delivery_buffers.json`
+    /// still converges when a runner re-sorts `order` into canonical order — it just stops testing
+    /// the dependency buffer and starts testing an ordinary sync — and a clamped index selects a
+    /// real operation, so the scenario keeps rendering something. Only a direct test pins them,
+    /// so this is that test.
+    /// </remarks>
+    [Fact]
+    public void DeliverOrderIsAnExactSequenceAndRejectsAnOutOfRangeIndex()
+    {
+        var (canonical, ids) = ThreeOperationDiff();
+
+        using var reversed = JsonDocument.Parse("""{"from": "a", "to": "b", "order": [2, 1, 0]}""");
+        Assert.Equal(
+            [ids[2], ids[1], ids[0]],
+            SelectDelivered(canonical, reversed.RootElement).Select(operation => operation.Id));
+
+        // The non-vacuity half: the reversal above only means anything while the canonical order
+        // it reverses is not already reversed.
+        Assert.NotEqual(ids, new[] { ids[2], ids[1], ids[0] });
+
+        // `only` is the OTHER contract, on the same indexes: the same SET, in canonical order.
+        using var subset = JsonDocument.Parse("""{"only": [2, 1, 0]}""");
+        Assert.Equal(
+            ids,
+            SelectDelivered(canonical, subset.RootElement).Select(operation => operation.Id));
+
+        foreach (var indexes in new[] { "[3]", "[0, 3]", "[-1]" })
+        {
+            using var document = JsonDocument.Parse("{\"order\": " + indexes + "}");
+            var failure = Assert.Throws<InvalidOperationException>(
+                () => SelectDelivered(canonical, document.RootElement));
+            Assert.Contains("outside the 3-operation canonical diff", failure.Message);
+        }
+    }
+
+    /// <summary>A `deliver` step carrying both selectors, or neither, is rejected rather than defaulted.</summary>
+    [Fact]
+    public void DeliverRequiresExactlyOneOfOnlyAndOrder()
+    {
+        var (canonical, _) = ThreeOperationDiff();
+
+        using var both = JsonDocument.Parse("""{"only": [0], "order": [0]}""");
+        Assert.Contains(
+            "BOTH `only` and `order`",
+            Assert.Throws<InvalidOperationException>(
+                () => SelectDelivered(canonical, both.RootElement)).Message);
+
+        using var neither = JsonDocument.Parse("""{"from": "a", "to": "b"}""");
+        Assert.Contains(
+            "NEITHER `only` nor `order`",
+            Assert.Throws<InvalidOperationException>(
+                () => SelectDelivered(canonical, neither.RootElement)).Message);
+    }
+
+    /// <summary>A three-operation canonical diff, plus the ids in that canonical order.</summary>
+    private static (IReadOnlyList<TreeOp> Canonical, TreeOpId[] Ids) ThreeOperationDiff()
+    {
+        var source = new LosslessTreeCrdt(1);
+        var para = source.CreateNode(TreeNodeId.Root, NodeSeed.Element("para"));
+        var target = source.Fork(2);
+        var one = source.CreateNode(para, NodeSeed.Leaf(LeafKind.Raw, "1"));
+        var two = source.CreateNode(
+            para,
+            Optional<TreeNodeId>.Some(one),
+            NodeSeed.Leaf(LeafKind.Raw, "2"));
+        var three = source.CreateNode(
+            para,
+            Optional<TreeNodeId>.Some(two),
+            NodeSeed.Leaf(LeafKind.Raw, "3"));
+
+        var canonical = source.Diff(target.Frontier()).Operations;
+        Assert.Equal(3, canonical.Count);
+        TreeOpId[] ids = [one.Operation, two.Operation, three.Operation];
+        Assert.Equal(ids, canonical.Select(operation => operation.Id));
+        return (canonical, ids);
+    }
+
     private static World SeedWorld(JsonElement scenario)
     {
         var seed = scenario.GetProperty("seed");
@@ -250,16 +333,77 @@ public sealed class LosslessTreeConformanceTests
             var source = world.Replicas[deliver.GetProperty("from").GetString()!];
             var target = world.Replicas[deliver.GetProperty("to").GetString()!];
             var full = source.Diff(target.Frontier());
-            var selected = deliver.GetProperty("only")
-                .EnumerateArray()
-                .Select(index => full.Operations[index.GetInt32()])
-                .ToArray();
-            target.ApplyUpdate(new TreeUpdate(selected));
+            target.ApplyUpdate(new TreeUpdate(SelectDelivered(full.Operations, deliver)));
             return;
         }
 
         var replica = step.GetProperty("on").GetString()!;
         ApplyOperation(world, world.Replicas[replica], step);
+    }
+
+    /// <summary>
+    /// Resolves a <c>deliver</c> step's operand selection against the CANONICAL diff — the same
+    /// <c>Diff(to.Frontier())</c> a <c>sync</c> would compute, which
+    /// <see cref="DiffReturnsOperationsInCanonicalCounterPeerOrder"/> pins to dotted
+    /// <c>(counter, peer)</c> order. Both selectors index into that list, 0-based.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// <c>only</c> names a SUBSET and is delivered in canonical order regardless of how the
+    /// fixture lists it — it exists to withhold operations
+    /// (<c>lossless-tree/non_contiguous_anti_entropy.json</c>). <c>order</c> names a SEQUENCE and
+    /// is delivered EXACTLY as listed, as ONE <c>ApplyUpdate</c> call: re-sorting it, splitting it
+    /// across calls, or dropping duplicates would restore the causal order the fixture exists to
+    /// destroy (<c>lossless-tree/out_of_order_delivery_buffers.json</c>), and the binding under
+    /// test would never be asked to buffer anything.
+    /// </para>
+    /// <para>
+    /// An out-of-range index is a FAILURE, never a clamp. Clamping would silently deliver a
+    /// different operation set than the fixture names, so a corpus that drifts out from under this
+    /// runner would keep reporting green against a scenario it is no longer replaying. Likewise
+    /// both selectors together, or neither: defaulting either way makes the same fixture mean two
+    /// different things in two bindings, which is exactly what a shared corpus is for ruling out.
+    /// </para>
+    /// </remarks>
+    internal static TreeOp[] SelectDelivered(IReadOnlyList<TreeOp> canonical, JsonElement deliver)
+    {
+        var hasOnly = deliver.TryGetProperty("only", out var only);
+        var hasOrder = deliver.TryGetProperty("order", out var order);
+        if (hasOnly == hasOrder)
+        {
+            throw new InvalidOperationException(
+                "deliver step carries "
+                + (hasOnly ? "BOTH `only` and `order`" : "NEITHER `only` nor `order`")
+                + "; exactly one is required — `only` is a subset in canonical order, `order` is "
+                + "an exact delivery sequence, and picking a default for a fixture would let the "
+                + "same bytes mean different things in different bindings");
+        }
+
+        var selector = hasOnly ? only : order;
+        var name = hasOnly ? "only" : "order";
+        if (selector.ValueKind != JsonValueKind.Array)
+        {
+            throw new InvalidOperationException(
+                $"deliver.{name} is {selector.ValueKind}, not an array of 0-based indexes into "
+                + "the canonical diff");
+        }
+
+        var indexes = selector.EnumerateArray().Select(index => index.GetInt32()).ToArray();
+        foreach (var index in indexes)
+        {
+            if (index < 0 || index >= canonical.Count)
+            {
+                throw new InvalidOperationException(
+                    $"deliver.{name} index {index} is outside the {canonical.Count}-operation "
+                    + "canonical diff. An out-of-range index is a fixture this runner cannot "
+                    + "replay, not a value to clamp into range");
+            }
+        }
+
+        // `only` is order-insensitive by contract, so it is normalised here rather than trusted to
+        // arrive sorted; `order` is delivered verbatim.
+        if (hasOnly) indexes = indexes.Order().ToArray();
+        return indexes.Select(index => canonical[index]).ToArray();
     }
 
     private static void ApplyOperation(
