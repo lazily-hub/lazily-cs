@@ -17,6 +17,313 @@
 # that state is the vacuous green this guard exists to prevent.
 set -euo pipefail
 
+# ---- RUNG: only the seam may SPELL the corpus root (#lzcorpusrootguards) ----
+#
+# `LAZILY_SPEC_CONFORMANCE_DIR` is what makes a conformance replay falsifiable:
+# copy the corpus, flip one assertion, confirm the suite reddens. A runner that
+# builds its own "../lazily-spec/conformance/<area>" instead of asking
+# SpecCorpus never sees the override — and the failure is SILENT, because a
+# runner reading the DEFAULT corpus while believing it was redirected is green
+# either way. Nothing else in this file can see it: the manifest legs below
+# audit fixtures that WERE opened, and a hardcoded root opens real fixtures.
+#
+# The measurement is what makes this worth a guard rather than a convention.
+# Truncating fixtures in a scratch corpus reddened ZERO lazily-zig tests before
+# its 14 hardcoded roots were removed and 26 after; lazily-rs reached 0 of 25
+# areas. lazily-cs measured CLEAN — 25/25 areas reddened, because
+# `SpecCorpus.Locate()` reads the env var first and fails closed — so this rung
+# is regression PREVENTION. Nothing but convention stops a new runner from
+# spelling the path itself, and that runner would be invisible.
+#
+# It runs FIRST, before the corpus is even located: it is a source-hygiene
+# check with no dependency on a sibling checkout, and the absent-corpus skip
+# further down must not be able to swallow it.
+#
+# `SpecCorpus.cs` is the one legitimate mention — it DECLARES the default as
+# `SiblingRelativePath`. The ~19 files that name `SpecCorpus.SiblingRelativePath`
+# as a SYMBOL inside assert messages are not literals and never trip this.
+CORPUS_ROOT_ALLOW="tests/Lazily.Tests/SpecCorpus.cs"
+read -r -a CORPUS_ROOT_SCAN_DIRS <<< "${LAZILY_CORPUS_ROOT_SCAN_DIRS:-src tests benchmarks}"
+
+# The floor exists because every clause above reasons about files the walk
+# FOUND, so all of it is vacuously satisfied by an empty file list: a scan that
+# examined nothing reports no offenders and would print OK. That is the vacuous
+# green the rest of this file refuses (#lzvacuousrun). Pinned below the real
+# tree (140 sources) with headroom; a drop this far means the walk is pointed
+# somewhere wrong, not that the repo shrank.
+MIN_SCANNED_SOURCES="${MIN_SCANNED_SOURCES:-100}"
+
+collect_sources() {
+  for d in "${CORPUS_ROOT_SCAN_DIRS[@]}"; do
+    [ -d "$d" ] || continue
+    find "$d" -type f -name '*.cs' -not -path '*/bin/*' -not -path '*/obj/*'
+  done | sort
+}
+
+CORPUS_ROOT_PY="$(cat <<'PY'
+import re
+import sys
+
+NEEDLE = "../lazily-spec/conformance"
+NEEDLE_SQUASHED = re.sub(r"[\\/\s]", "", NEEDLE)
+WINDOW_LITERALS = 12
+WINDOW_LINES = 10
+
+
+def _read_raw(text, i, line):
+    n = len(text)
+    q = 0
+    while i + q < n and text[i + q] == '"':
+        q += 1
+    i += q
+    start = i
+    while i < n:
+        if text[i] == '"':
+            run = 0
+            while i + run < n and text[i + run] == '"':
+                run += 1
+            if run >= q:
+                body = text[start:i]
+                return i + run, body, line + body.count("\n")
+            i += run
+            continue
+        i += 1
+    body = text[start:]
+    return n, body, line + body.count("\n")
+
+
+def _read_verbatim(text, i, line):
+    n = len(text)
+    i += 1
+    out = []
+    while i < n:
+        c = text[i]
+        if c == '"':
+            if i + 1 < n and text[i + 1] == '"':
+                out.append('"')
+                i += 2
+                continue
+            return i + 1, "".join(out), line
+        if c == "\n":
+            line += 1
+        out.append(c)
+        i += 1
+    return n, "".join(out), line
+
+
+def _read_regular(text, i, line, interp):
+    n = len(text)
+    i += 1
+    out = []
+    while i < n:
+        c = text[i]
+        if c == "\\" and i + 1 < n:
+            nxt = text[i + 1]
+            out.append("\\" if nxt == "\\" else nxt)
+            i += 2
+            continue
+        if c == '"':
+            return i + 1, "".join(out), line
+        if interp and c == "{":
+            if i + 1 < n and text[i + 1] == "{":
+                i += 2
+                continue
+            # Skip the interpolation hole, including any nested string literal,
+            # so a quote inside `{x ?? "y"}` cannot desync the scan.
+            depth = 1
+            i += 1
+            while i < n and depth > 0:
+                d = text[i]
+                if d == "{":
+                    depth += 1
+                elif d == "}":
+                    depth -= 1
+                elif d == '"':
+                    i, _, line = _read_regular(text, i, line, False)
+                    continue
+                elif d == "\n":
+                    line += 1
+                i += 1
+            continue
+        if c == "\n":
+            # Unterminated in valid C#; tolerate rather than desync.
+            line += 1
+        out.append(c)
+        i += 1
+    return n, "".join(out), line
+
+
+def literals(text):
+    """Every string-literal VALUE in source order, with its opening line.
+
+    Comments are skipped: a file may legitimately quote the corpus root while
+    explaining it, and lint-forcing an explanation to stop describing the thing
+    it explains trades real documentation for a guard that is easy to satisfy.
+    """
+    out = []
+    i = 0
+    n = len(text)
+    line = 1
+    while i < n:
+        c = text[i]
+        if c == "\n":
+            line += 1
+            i += 1
+            continue
+        if c == "/" and i + 1 < n and text[i + 1] == "/":
+            while i < n and text[i] != "\n":
+                i += 1
+            continue
+        if c == "/" and i + 1 < n and text[i + 1] == "*":
+            i += 2
+            while i + 1 < n and not (text[i] == "*" and text[i + 1] == "/"):
+                if text[i] == "\n":
+                    line += 1
+                i += 1
+            i += 2
+            continue
+        if c == "'":
+            i += 1
+            while i < n and text[i] != "'":
+                if text[i] == "\\":
+                    i += 1
+                if i < n and text[i] == "\n":
+                    line += 1
+                i += 1
+            i += 1
+            continue
+        if c in "@$":
+            j = i
+            verbatim = False
+            interp = False
+            while j < n and text[j] in "@$":
+                if text[j] == "@":
+                    verbatim = True
+                else:
+                    interp = True
+                j += 1
+            if j < n and text[j] == '"':
+                start = line
+                if not verbatim and text[j:j + 3] == '"""':
+                    i, val, line = _read_raw(text, j, line)
+                elif verbatim:
+                    i, val, line = _read_verbatim(text, j, line)
+                else:
+                    i, val, line = _read_regular(text, j, line, interp)
+                out.append((start, val))
+                continue
+            i = j
+            continue
+        if c == '"':
+            start = line
+            if text[i:i + 3] == '"""':
+                i, val, line = _read_raw(text, i, line)
+            else:
+                i, val, line = _read_regular(text, i, line, False)
+            out.append((start, val))
+            continue
+        i += 1
+    return out
+
+
+def squash(s):
+    return re.sub(r"[\\/\s]", "", s)
+
+
+def offenders(text):
+    found = []
+    lits = literals(text)
+    flagged = set()
+    # Pass 1 — the single-literal form.
+    for idx, (line, val) in enumerate(lits):
+        if NEEDLE in val.replace("\\", "/"):
+            found.append((line, "single literal", val))
+            flagged.add(idx)
+    # Pass 2 — the JOINED-SEGMENT form: Path.Combine("..", "lazily-spec",
+    # "conformance", area) or "../lazily-spec" + "/conformance". No single piece
+    # carries the root, so the match runs over a short run of ADJACENT literals
+    # with the separators squashed out. This is the form the lazily-go and
+    # lazily-js guards missed and were proven evadable on.
+    for idx, (line, val) in enumerate(lits):
+        if idx in flagged:
+            continue
+        joined = squash(val)
+        for j in range(idx + 1, min(idx + WINDOW_LITERALS, len(lits))):
+            if j in flagged:
+                break
+            nline, nval = lits[j]
+            if nline - line > WINDOW_LINES:
+                break
+            joined += squash(nval)
+            if NEEDLE_SQUASHED in joined:
+                found.append((line, "joined segments", " + ".join(
+                    repr(v) for _, v in lits[idx:j + 1])))
+                flagged.update(range(idx, j + 1))
+                break
+    found.sort()
+    return found
+
+
+def main(argv):
+    allow = set(argv[1].split(",")) if argv[1] else set()
+    paths = [p for p in sys.stdin.read().split("\n") if p]
+    examined = 0
+    hits = []
+    for p in paths:
+        rel = p[2:] if p.startswith("./") else p
+        if rel in allow:
+            continue
+        try:
+            with open(p, "r", encoding="utf-8", errors="replace") as fh:
+                text = fh.read()
+        except OSError as exc:
+            print("ERROR: cannot read %s: %s" % (p, exc), file=sys.stderr)
+            return 2
+        examined += 1
+        for line, form, detail in offenders(text):
+            hits.append((rel, line, form, detail))
+    print("EXAMINED %d" % examined)
+    for rel, line, form, detail in hits:
+        print("HIT %s:%d\t%s\t%s" % (rel, line, form, detail))
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main(sys.argv))
+PY
+)"
+
+corpus_root_report="$(collect_sources | python3 -c "$CORPUS_ROOT_PY" "$CORPUS_ROOT_ALLOW")"
+scanned="$(sed -n 's/^EXAMINED //p' <<< "$corpus_root_report")"
+
+if [ -z "$scanned" ]; then
+  echo "ERROR: the corpus-root scanner produced no verdict at all." >&2
+  echo "       That is missing EVIDENCE, not a clean tree." >&2
+  exit 1
+fi
+if [ "$scanned" -lt "$MIN_SCANNED_SOURCES" ]; then
+  echo "ERROR: corpus-root scan examined only $scanned C# sources, expected >= $MIN_SCANNED_SOURCES." >&2
+  echo "       Searched: ${CORPUS_ROOT_SCAN_DIRS[*]} (from \$PWD=$PWD)." >&2
+  echo "       Reporting OK here would be a pass over nothing: no files means no" >&2
+  echo "       offenders, which is not the same finding as no offenders in the" >&2
+  echo "       tree (#lzvacuousrun)." >&2
+  exit 1
+fi
+if grep -q '^HIT ' <<< "$corpus_root_report"; then
+  echo "ERROR: these sources SPELL the canonical corpus root instead of resolving it" >&2
+  echo "       through SpecCorpus:" >&2
+  grep '^HIT ' <<< "$corpus_root_report" | sed 's/^HIT /         /' >&2
+  echo "       LAZILY_SPEC_CONFORMANCE_DIR does not reach a hardcoded path, so those" >&2
+  echo "       fixtures are replayed unfalsifiably — a perturbation probe cannot" >&2
+  echo "       redden them and the runner looks green either way. Resolve the corpus" >&2
+  echo "       with SpecCorpus.Root / SpecCorpus.Load (#lzcorpusrootguards)." >&2
+  exit 1
+fi
+
+echo "corpus-root guard OK: $scanned C# sources examined, none spell '../lazily-spec/conformance'" \
+     "(single-literal AND joined-segment forms; comments skipped; 1 allowlisted seam)"
+
+
 SPEC_DIR="${LAZILY_SPEC_CONFORMANCE_DIR:-../lazily-spec/conformance}"
 
 # An EXPLICIT override that names no directory is a wrong invocation, never an
@@ -158,18 +465,6 @@ KNOWN_UNREPLAYED_SCENARIOS=(
 MIN_SCENARIOS="${MIN_SCENARIOS:-165}"
 
 MANIFEST="${LAZILY_CONFORMANCE_MANIFEST:-build/conformance-fixtures-loaded.txt}"
-TEST_DIRS=("tests")
-EXTS=(".cs")
-
-collect_sources() {
-  for d in "${TEST_DIRS[@]}"; do
-    [ -d "$d" ] || continue
-    for e in "${EXTS[@]}"; do
-      find "$d" -type f -name "*$e" -print0
-    done
-  done
-}
-
 if [ ! -s "$MANIFEST" ]; then
   echo "FAIL: no conformance manifest at $MANIFEST." >&2
   echo "      Run the suite with LAZILY_CONFORMANCE_MANIFEST set so the recorder" >&2
