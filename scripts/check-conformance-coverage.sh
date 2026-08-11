@@ -17,6 +17,88 @@
 # that state is the vacuous green this guard exists to prevent.
 set -euo pipefail
 
+# ---- Shared diagnostics for every python leg (#lzcorpusabsencehandling) ------
+#
+# Every rung in this script fails with a sentence that names the file, says what
+# is wrong with it, and says what to do. The python legs did not: an input that
+# was PRESENT but unparseable — a truncated corpus fixture, exactly what a
+# perturbation probe leaves behind when it is interrupted — died on an unhandled
+# `json.decoder.JSONDecodeError` and handed the operator a stack trace that did
+# not even name the fixture. That was a DIAGNOSABILITY gap, never a correctness
+# one: the exit code was always right and nothing passed that should have failed.
+# It surfaced during #lzoverrideallrunnersaudit, beside a legitimate finding, and
+# made the run harder to read than the finding was.
+#
+# The distinction these helpers PRESERVE is the one the bash legs above and below
+# already draw:
+#
+#   * a corpus that is ABSENT is a local-checkout state, decided by CONTEXT (CI,
+#     LAZILY_CONFORMANCE_STRICT, an explicit override) further down;
+#   * a file that is PRESENT but unreadable or unparseable is a BROKEN INPUT —
+#     under an explicit LAZILY_SPEC_CONFORMANCE_DIR, a broken PROBE — and stays a
+#     HARD failure. Legible is not lenient, and neither a warning nor a skip is
+#     available here: coverage computed over a corpus that could not be fully
+#     read is untrustworthy in both directions, which is the same reasoning the
+#     manifest self-check makes one rung up.
+#
+# They live in ONE prelude prepended to all three legs rather than at the one
+# call site that crashed, because the exposure was never specific to that call:
+# both corpus readers, both manifest readers, and both integer floors could each
+# have produced a traceback where a message belongs.
+PY_DIAG="$(cat <<'PY'
+import json
+import sys
+
+
+def die(lines, code=1):
+    for line in lines:
+        print(line, file=sys.stderr)
+    sys.exit(code)
+
+
+def diagnose(what, exc, advice=()):
+    """The message lines for an input that is PRESENT but unusable.
+
+    `what` is a noun phrase naming the thing, path included — the fault is
+    useless without it, and the traceback this replaced printed no path at all.
+    """
+    if isinstance(exc, UnicodeDecodeError):
+        problem = f"is not valid UTF-8: {exc}"
+    elif isinstance(exc, ValueError):
+        problem = f"is not valid JSON: {exc}"
+    else:
+        problem = f"could not be read: {exc}"
+    return [
+        f"ERROR: {what} {problem}",
+        "       It is PRESENT but unusable, which is a BROKEN INPUT and never the",
+        "       absent-corpus case this script skips on a laptop with no sibling",
+        "       checkout. A broken input stays a hard failure (#lzcorpusabsencehandling).",
+        *advice,
+    ]
+
+
+def read_text(path, what, advice=(), code=1, errors="strict"):
+    try:
+        with open(path, "r", encoding="utf-8", errors=errors) as handle:
+            return handle.read()
+    except (OSError, UnicodeDecodeError) as exc:
+        die(diagnose(f"{what} '{path}'", exc, advice), code=code)
+
+
+def read_int(raw, name, advice=()):
+    """A floor that cannot be read is not a floor — and must say so in words."""
+    try:
+        return int(raw)
+    except (TypeError, ValueError):
+        die([
+            f"ERROR: {name}={raw!r} is not an integer.",
+            "       A floor that cannot be parsed cannot be evaluated, and a guard that",
+            "       cannot read its own threshold must never be the guard that says OK.",
+            *advice,
+        ])
+PY
+)"
+
 # ---- RUNG: only the seam may SPELL the corpus root (#lzcorpusrootguards) ----
 #
 # `LAZILY_SPEC_CONFORMANCE_DIR` is what makes a conformance replay falsifiable:
@@ -273,12 +355,23 @@ def main(argv):
         rel = p[2:] if p.startswith("./") else p
         if rel in allow:
             continue
-        try:
-            with open(p, "r", encoding="utf-8", errors="replace") as fh:
-                text = fh.read()
-        except OSError as exc:
-            print("ERROR: cannot read %s: %s" % (p, exc), file=sys.stderr)
-            return 2
+        # `errors="replace"` on purpose: an odd byte in a C# source is not this
+        # rung's finding, and a decode fault must not stop the scan. An OSError
+        # still is one — a source the walk FOUND but could not open leaves the
+        # scan reporting on fewer files than it examined, which is the vacuous
+        # pass the floor below exists to refuse — so it fails by NAME rather
+        # than by traceback.
+        text = read_text(
+            p,
+            "C# source",
+            (
+                "       The corpus-root scan cannot report on a file it could not read,",
+                "       and reporting OK without it is a pass over an unexamined source",
+                "       (#lzvacuousrun). Fix the file or its permissions.",
+            ),
+            code=2,
+            errors="replace",
+        )
         examined += 1
         for line, form, detail in offenders(text):
             hits.append((rel, line, form, detail))
@@ -293,7 +386,8 @@ if __name__ == "__main__":
 PY
 )"
 
-corpus_root_report="$(collect_sources | python3 -c "$CORPUS_ROOT_PY" "$CORPUS_ROOT_ALLOW")"
+corpus_root_report="$(collect_sources | python3 -c "$PY_DIAG
+$CORPUS_ROOT_PY" "$CORPUS_ROOT_ALLOW")"
 scanned="$(sed -n 's/^EXAMINED //p' <<< "$corpus_root_report")"
 
 if [ -z "$scanned" ]; then
@@ -661,15 +755,25 @@ for raw in sys.argv[2:]:
         sys.exit(1)
     excuses[f"{parts[0]}|{parts[1]}"] = parts[2].strip()
 
+# The manifest is EVIDENCE, and evidence that cannot be decoded is not evidence
+# of absence. The bash leg proved it non-empty; bytes the recorder interleaved or
+# truncated at process exit — the exact failure the fixture self-check below
+# reasons about — would otherwise surface here as a UnicodeDecodeError traceback
+# instead of a sentence naming the file (#lzcorpusabsencehandling).
+MANIFEST_ADVICE = (
+    "       Re-run the suite with LAZILY_CONFORMANCE_MANIFEST set to an ABSOLUTE",
+    "       path, truncated first (what `make test` does), so the recorder rewrites",
+    "       this file. Do not hand-edit it: it is the run's own evidence.",
+)
+
 declared = {}
 bound = set()
-with open(manifest_path, encoding="utf-8") as handle:
-    for line in handle:
-        parts = line.rstrip("\n").split("\t")
-        if parts[0] == "blocks-declared" and len(parts) == 4:
-            declared.setdefault(parts[2], set()).add(f"{parts[1]}|{parts[3]}")
-        elif parts[0] == "blocks-bound" and len(parts) == 2:
-            bound.add(parts[1])
+for line in read_text(manifest_path, "conformance manifest", MANIFEST_ADVICE).splitlines():
+    parts = line.split("\t")
+    if parts[0] == "blocks-declared" and len(parts) == 4:
+        declared.setdefault(parts[2], set()).add(f"{parts[1]}|{parts[3]}")
+    elif parts[0] == "blocks-bound" and len(parts) == 2:
+        bound.add(parts[1])
 
 unbound = []
 bound_sites = set()
@@ -745,7 +849,11 @@ if unknown:
 # It counts SITES, not distinct digests: two sites carrying identical bytes are
 # one digest, so a digest count silently absorbs a deleted fixture whose blocks
 # happen to be spelled like another's. Verified exact: 691 fails this floor.
-min_blocks = int(os.environ.get("MIN_BLOCKS", "690"))
+min_blocks = read_int(
+    os.environ.get("MIN_BLOCKS", "690"),
+    "MIN_BLOCKS",
+    ("       Pass the count this guard REPORTS, or unset it to take the default.",),
+)
 if len(declared_sites) < min_blocks:
     print(
         f"ERROR: only {len(declared_sites)} assertion block SITES were inventoried, expected "
@@ -764,7 +872,8 @@ print(
 PY
 )"
 
-python3 -c "$BLOCK_GUARD_PY" "$MANIFEST" \
+python3 -c "$PY_DIAG
+$BLOCK_GUARD_PY" "$MANIFEST" \
   ${KNOWN_UNBOUND_BLOCKS[@]+"${KNOWN_UNBOUND_BLOCKS[@]}"}
 
 # -- Per-scenario replay accounting (#lzscenariocoverage) ---------------------
@@ -824,30 +933,34 @@ PROSE_VERIFIED = "prose-verified"
 # "blocks-bound".
 BLOCK_MARKERS = ("blocks-declared", "blocks-bound")
 
+MANIFEST_ADVICE = (
+    "       Re-run the suite with LAZILY_CONFORMANCE_MANIFEST set to an ABSOLUTE",
+    "       path, truncated first (what `make test` does), so the recorder rewrites",
+    "       this file. Do not hand-edit it: it is the run's own evidence.",
+)
+
 opened = set()
 replayed = set()
 prose_verified = set()
-with open(manifest_path, encoding="utf-8") as handle:
-    for line in handle:
-        line = line.rstrip("\n")
-        if not line:
+for line in read_text(manifest_path, "conformance manifest", MANIFEST_ADVICE).splitlines():
+    if not line:
+        continue
+    if "\t" in line:
+        head, tail = line.split("\t", 1)
+        # The prose marker is a PREFIX (see SpecCorpus.RecordProseVerified): a
+        # `fixture<TAB>id` line already means "this scenario was replayed", so a
+        # trailing marker would be read below as an id the fixture does not carry.
+        if head == PROSE_VERIFIED:
+            prose_verified.add(tail)
+        elif head in BLOCK_MARKERS:
             continue
-        if "\t" in line:
-            head, tail = line.split("\t", 1)
-            # The prose marker is a PREFIX (see SpecCorpus.RecordProseVerified): a
-            # `fixture<TAB>id` line already means "this scenario was replayed", so a
-            # trailing marker would be read below as an id the fixture does not carry.
-            if head == PROSE_VERIFIED:
-                prose_verified.add(tail)
-            elif head in BLOCK_MARKERS:
-                continue
-            else:
-                replayed.add((head, tail))
         else:
-            opened.add(line)
+            replayed.add((head, tail))
+    else:
+        opened.add(line)
 
 
-def ids_of(path):
+def ids_of(document):
     """`id`, else `name` — the fixed resolution order, with no third step.
 
     The positional `#<n>` fallback is gone (#lzspecscenarioids). It let the ledger
@@ -858,8 +971,6 @@ def ids_of(path):
     an invented id. A blank identifier is refused too: it would file every blank-id
     scenario under a single ledger entry.
     """
-    with open(path, encoding="utf-8") as handle:
-        document = json.load(handle)
     scenarios = document.get("scenarios") if isinstance(document, dict) else None
     if not isinstance(scenarios, list):
         return []
@@ -876,15 +987,13 @@ def ids_of(path):
     return resolved
 
 
-def declares_prose(path):
+def declares_prose(document):
     """Does this fixture's `assertions` block declare prose keys (#lzprosekeyconvention)?
 
     Read from the CORPUS, never from a list kept here: rule 8's required set of
     verifications is derived, so a fixture that grows an `assertions.prose` array
     upstream starts demanding a discharge here without anyone updating a count.
     """
-    with open(path, encoding="utf-8") as handle:
-        document = json.load(handle)
     if not isinstance(document, dict):
         return False
     assertions = document.get("assertions")
@@ -893,19 +1002,55 @@ def declares_prose(path):
     return isinstance(assertions.get("prose"), list) and bool(assertions["prose"])
 
 
+# A fixture the walk FOUND but could not parse is a broken input, and it is
+# collected rather than raised (#lzcorpusabsencehandling). Two reasons the
+# collection matters more than the catch: every broken fixture is named in ONE
+# run, so an operator repairing a scratch corpus is not handed them one at a
+# time; and the failure lands BEFORE any coverage arithmetic, because a count
+# computed over a corpus that was only partly readable is wrong in both
+# directions — understated by the scenarios nobody could read, and unable to say
+# which of the remaining gaps is real.
+#
+# The parse happens ONCE per fixture and both readers above take the parsed
+# document. Reading each file twice doubled the surface a traceback could escape
+# from and proved nothing extra.
+BROKEN_FIXTURE_ADVICE = (
+    "       Restore it from a clean lazily-spec checkout. If this is a perturbation",
+    "       probe under LAZILY_SPEC_CONFORMANCE_DIR, the PROBE is broken, not this",
+    "       binding: a truncated fixture perturbs nothing a runner can disagree with.",
+    "       Flip an assertion VALUE instead, and restore the file from the scratch",
+    "       copy taken before the edit.",
+)
+
 on_disk = {}
 declaring = set()
+broken = []
 for root, _, files in os.walk(spec_dir):
     for name in sorted(files):
         if not name.endswith(".json"):
             continue
         full = os.path.join(root, name)
         key = os.path.relpath(full, spec_dir)
-        found = ids_of(full)
+        try:
+            with open(full, "r", encoding="utf-8") as handle:
+                document = json.loads(handle.read())
+        except (OSError, ValueError) as exc:
+            broken.append((key, full, exc))
+            continue
+        found = ids_of(document)
         if found:
             on_disk[key] = found
-        if declares_prose(full):
+        if declares_prose(document):
             declaring.add(key)
+
+if broken:
+    lines = []
+    for key, full, exc in sorted(broken, key=lambda item: item[0]):
+        lines.extend(diagnose(f"canonical fixture '{key}' ({full})", exc, BROKEN_FIXTURE_ADVICE))
+    lines.append(
+        f"scenario replay coverage FAILED: {len(broken)} unreadable fixture(s) under {spec_dir}"
+    )
+    die(lines)
 
 errors = list(excuse_errors)
 unidentified = []
@@ -1054,7 +1199,11 @@ if "MIN_SCENARIOS" not in os.environ:
         file=sys.stderr,
     )
     sys.exit(1)
-min_scenarios = int(os.environ["MIN_SCENARIOS"])
+min_scenarios = read_int(
+    os.environ["MIN_SCENARIOS"],
+    "MIN_SCENARIOS",
+    ("       Pass the count this guard REPORTS — the floor is EXACT, never a margin.",),
+)
 if scenarios_total == 0:
     print(
         "ERROR: ZERO scenarios were found across the opened fixtures.\n"
@@ -1090,5 +1239,6 @@ PY
 )"
 
 MIN_SCENARIOS="$MIN_SCENARIOS" \
-python3 -c "$SCENARIO_GUARD_PY" "$SPEC_DIR" "$MANIFEST" \
+python3 -c "$PY_DIAG
+$SCENARIO_GUARD_PY" "$SPEC_DIR" "$MANIFEST" \
   ${KNOWN_UNREPLAYED_SCENARIOS[@]+"${KNOWN_UNREPLAYED_SCENARIOS[@]}"}
