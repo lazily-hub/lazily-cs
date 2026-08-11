@@ -384,7 +384,36 @@ public sealed class ReliableSyncConformanceTests
         Assert.Single(stateOutbox.ReplayFrom(0)).Message);
         var coalescedRun = new GraphProjector();
         coalescedRun.Apply(retainedSnapshot);
-        Assert.Equal(fullRun.State, coalescedRun.State);
+
+        // #lzunboundblockguard. This scenario's `expect` was bound by nothing: the runner
+        // compared the two projections and stopped, so the block's five claims — the
+        // receiver's cursor before and after, the decision it returned, the graph
+        // equivalence — were asserted by a hand-written `Assert.Equal` at best and by
+        // nothing at all at worst. A stalled receiver at `peer_acked_through` now really
+        // ingests the coalesced snapshot and every key is compared against what it did.
+        var stateExpect = FixtureAssertions.Of(
+            stateScenario,
+            "expect",
+            $"reliable-sync/coalesce scenario {stateScenario.GetProperty("id").GetString()}");
+        var receiver = new ResyncCoordinator(
+        stateScenario.GetProperty("peer_acked_through").GetUInt64());
+        stateExpect.AssertKey("receiver_from_last_epoch", receiver.LastEpoch);
+        var adoption = receiver.Ingest(retainedSnapshot);
+        stateExpect.AssertKey("action", adoption.Action.ToString());
+        stateExpect.AssertKey("receiver_last_epoch_after", receiver.LastEpoch);
+        stateExpect.AssertKey(
+            "graph_equals_full_run",
+            fullRun.State.SequenceEqual(coalescedRun.State, StringComparer.Ordinal));
+        // The one claim with nothing here to compare: this plane's projector records node
+        // STATE, and has no channel that records which effects an application ran, so
+        // "identical effects" has no observable on this side. `graph_equals_full_run` above
+        // is the strongest thing this binding can compare, and it is asserted, not assumed.
+        stateExpect.ExcuseKey(
+            "effects_observed_identical",
+            "the reliable-sync projector records node state, not effect runs; this binding "
+            + "has no effect-observation channel on the receive path, so the observable it "
+            + "can compare is `graph_equals_full_run`, asserted above");
+        stateExpect.Verify();
 
         var queueScenario = scenarios[1];
         var queueOutbox = new DurableOutbox<InMemoryOutboxStore>(new InMemoryOutboxStore());
@@ -397,17 +426,49 @@ public sealed class ReliableSyncConformanceTests
         queueOutbox.CoalesceToSnapshot(
         3,
         new SnapshotMessage(2, [], [], [])));
+        var pushedBeforeFusion = QueuePayloads(queueOutbox.ReplayFrom(0).Select(entry => entry.Message));
         Assert.True(queueOutbox.FuseQueueDeltaBatch());
         var fused = Assert.IsType<DeltaMessage>(Assert.Single(queueOutbox.ReplayFrom(0)).Message);
         Assert.Equal(0UL, fused.BaseEpoch);
         Assert.Equal(3UL, fused.Epoch);
-        Assert.Equal(
-        new byte[] { 97, 98, 99 },
-        fused.Ops.Select(
-        operation =>
-        Assert.Single(
-        Assert.IsType<IpcValue.Inline>(
-        Assert.IsType<DeltaOp.QueuePush>(operation).Payload).Bytes)));
+        var fusedPayloads = QueuePayloads([fused]);
+        Assert.Equal(new byte[] { 97, 98, 99 }, fusedPayloads);
+
+        // #lzunboundblockguard. Bound by nothing until now: fusion was asserted against the
+        // literal `{97, 98, 99}` above, and the block's own claims about order, folding, and
+        // the multiset went uncompared — a fixture that dropped an element would have
+        // reddened only the literal, and a fixture that dropped a CLAIM would have reddened
+        // nothing at all.
+        var queueExpect = FixtureAssertions.Of(
+            queueScenario,
+            "expect",
+            $"reliable-sync/coalesce scenario {queueScenario.GetProperty("id").GetString()}");
+        var queueReceiver = new ResyncCoordinator(
+        queueScenario.GetProperty("peer_acked_through").GetUInt64());
+        queueExpect.AssertKey("receiver_from_last_epoch", queueReceiver.LastEpoch);
+        queueExpect.AssertKey("action", queueReceiver.Ingest(fused).Action.ToString());
+        queueExpect.AssertKey("receiver_last_epoch_after", queueReceiver.LastEpoch);
+        // Three claims, three different comparisons — not one assertion written three times.
+        // `order_preserved` compares the fused frame against the order the OUTBOX retained;
+        // `fold_equivalent` compares applying the fused batch against applying the three unit
+        // deltas the FIXTURE declares, which is the equivalence the corpus states; and the
+        // multiset is order-INSENSITIVE, so it is the one a reordering fusion would still
+        // satisfy — which is why the corpus states both it and the order.
+        queueExpect.AssertKey("order_preserved", fusedPayloads.SequenceEqual(pushedBeforeFusion));
+        var unitFold = QueuePayloads(
+        queueScenario.GetProperty("appended").EnumerateArray().Select(ParseDelta));
+        queueExpect.AssertKey("fold_equivalent", fusedPayloads.SequenceEqual(unitFold));
+        queueExpect.AssertKey(
+            "element_multiset_preserved",
+            fusedPayloads.Order().SequenceEqual(pushedBeforeFusion.Order()));
+        // A queue cannot drop elements, so fusing frames leaves the retained PAYLOAD volume
+        // untouched — the bound is the source-side QueueCell fullness, not the outbox depth.
+        // Derived from the two volumes rather than written down, so a fusion that started
+        // discarding elements would change the classification instead of quietly passing.
+        queueExpect.AssertKey(
+            "memory_bounded_by",
+            fusedPayloads.Count == pushedBeforeFusion.Count ? "source_is_full" : "outbox_depth");
+        queueExpect.Verify();
 
         var ackScenario = scenarios[2];
         var ackOutbox = new DurableOutbox<InMemoryOutboxStore>(new InMemoryOutboxStore());
@@ -471,36 +532,117 @@ public sealed class ReliableSyncConformanceTests
         slowExpect.AssertKey("A_stalled_by_B", rungA != PeerEscalationRung.Healthy);
         slowExpect.Verify();
 
+        // The three blocks below were bound by NOTHING until #lzunboundblockguard: each
+        // scenario was replayed against hand-written expectations (`Evict`, `0`, `Apply`)
+        // while its own `expect` sat there uncompared, so a corpus that changed its claim
+        // would not have reddened this run.
         var expired = scenarios[1];
         var expiredPeer = expired.GetProperty("peers").GetProperty("B");
-        Assert.Equal(
-        PeerEscalationRung.Evict,
-        PeerEvictionPolicy.Evaluate(
-        new PeerHealth(expiredPeer.GetProperty("lease_fresh").GetBoolean(), IsFull: true)));
+        var expiredHealth = new PeerHealth(
+        expiredPeer.GetProperty("lease_fresh").GetBoolean(),
+        IsFull: expiredPeer.GetProperty("retained_before").GetInt32() >= 3);
+        var expiredRung = PeerEvictionPolicy.Evaluate(expiredHealth);
+        var expiredExpect = FixtureAssertions.Of(
+            expired,
+            "expect",
+            $"reliable-sync/liveness_lease_eviction.json scenario {expired.GetProperty("id").GetString()}");
+        expiredExpect.AssertKey("rung", expiredRung.ToString().ToLowerInvariant());
+        expiredExpect.AssertKey("B_evicted", expiredRung == PeerEscalationRung.Evict);
+        // What the eviction is GATED on, decided differentially rather than restated: the
+        // same peer with a FRESH lease is not evicted, so the lease expiry is the gate. A
+        // policy that started evicting on backlog alone would change this classification.
+        var withFreshLease = PeerEvictionPolicy.Evaluate(expiredHealth with { LeaseFresh = true });
+        expiredExpect.AssertKey(
+            "eviction_gated_on",
+            expiredRung == PeerEscalationRung.Evict && withFreshLease != PeerEscalationRung.Evict
+                ? "lease_expiry"
+                : "backlog");
         var reclaimed = new DurableOutbox<InMemoryOutboxStore>(new InMemoryOutboxStore());
-        for (ulong epoch = 1; epoch <= 3; epoch++)
+        var retainedBefore = expiredPeer.GetProperty("retained_before").GetInt32();
+        for (var epoch = 1UL; epoch <= (ulong)retainedBefore; epoch++)
         {
             reclaimed.Append(epoch, new DeltaMessage(epoch - 1, epoch, []));
         }
+        Assert.Equal(retainedBefore, reclaimed.RetainedDepth);
         reclaimed.ReclaimUnacked();
-        Assert.Equal(0, reclaimed.RetainedDepth);
+        expiredExpect.AssertKey("outbox_reclaimed", reclaimed.RetainedDepth == 0);
+        // Presence is an OR-set: evicting B shadows exactly the add tags the eviction
+        // observed, and that is what "presence removed" has to mean for a set that converges.
+        var presence = new OrSet();
+        presence.Add("B@1");
+        presence.RemoveObserved(["B@1"]);
+        expiredExpect.AssertKey("orset_presence_removed", !presence.Present);
+        expiredExpect.Verify();
 
         var rejoin = scenarios[2];
         var fresh = new ResyncCoordinator(rejoin.GetProperty("returning_peer_last_epoch").GetUInt64());
         var senderEpoch = rejoin.GetProperty("sender_final_epoch").GetUInt64();
-        Assert.Equal(
-        ResyncAction.Apply,
-        fresh.Ingest(new SnapshotMessage(senderEpoch, [], [], [])).Action);
-        Assert.Equal(senderEpoch, fresh.LastEpoch);
+        var rejoinExpect = FixtureAssertions.Of(
+            rejoin,
+            "expect",
+            $"reliable-sync/liveness_lease_eviction.json scenario {rejoin.GetProperty("id").GetString()}");
+        var rejoinDecision = fresh.Ingest(new SnapshotMessage(senderEpoch, [], [], []));
+        rejoinExpect.AssertKey("action", rejoinDecision.Action.ToString());
+        rejoinExpect.AssertKey("adopts_snapshot", fresh.LastEpoch == senderEpoch);
+        rejoinExpect.AssertKey("receiver_last_epoch_after", fresh.LastEpoch);
+        // "Does not replay from the stale cursor": a delta based at the epoch the returning
+        // peer left off at is now BEHIND the adopted snapshot, so ingesting it must not apply.
+        var staleCursor = rejoin.GetProperty("returning_peer_last_epoch").GetUInt64();
+        var stale = fresh.Ingest(new DeltaMessage(staleCursor, staleCursor + 1, []));
+        rejoinExpect.AssertKey("replays_stale_cursor", stale.Action == ResyncAction.Apply);
+        // A fresh add is not shadowed by a remove that observed only the pre-eviction tag —
+        // the add-wins rule this scenario names, asserted against the OR-set that implements it.
+        var rejoined = new OrSet();
+        rejoined.Add("B@stale");
+        rejoined.Add("B@rejoin");
+        rejoined.RemoveObserved(["B@stale"]);
+        rejoinExpect.AssertKey("add_wins_over_stale_remove", rejoined.Present);
+        // The scenario declares no wire frames — its snapshot carries no nodes and no edges —
+        // so there is no graph here to compare, and manufacturing one would be inventing test
+        // data rather than replaying the corpus. The epoch claims above are what this fixture
+        // can prove; `coalesce_bounds_outbox.json` asserts the graph equivalence over a
+        // scenario that does carry state.
+        rejoinExpect.ExcuseKey(
+            "graph_equals_full_run",
+            "this scenario's snapshot carries no nodes or edges, so both projections are "
+            + "empty and the comparison would be vacuous; the graph-equivalence claim is "
+            + "asserted over real state in coalesce_bounds_outbox.json "
+            + "state_suffix_collapses_to_snapshot");
+        rejoinExpect.Verify();
 
         var queue = scenarios[3];
         var quorum = queue.GetProperty("queue");
+        var queueExpect = FixtureAssertions.Of(
+            queue,
+            "expect",
+            $"reliable-sync/liveness_lease_eviction.json scenario {queue.GetProperty("id").GetString()}");
         Assert.True(
         PeerEvictionPolicy.DistributedQueueAllowsWrite(
         quorum.GetProperty("majority_has_quorum").GetBoolean()));
-        Assert.False(
-        PeerEvictionPolicy.DistributedQueueAllowsWrite(
-        quorum.GetProperty("minority_has_quorum").GetBoolean()));
+        var minorityWrites = PeerEvictionPolicy.DistributedQueueAllowsWrite(
+        quorum.GetProperty("minority_has_quorum").GetBoolean());
+        queueExpect.AssertKey("minority_writes_blocked", !minorityWrites);
+        // A partition escalates to retain-and-replay, never to eviction: dropping a peer for
+        // being unreachable is the failure mode this rung exists to prevent.
+        var partitioned = PeerEvictionPolicy.Evaluate(
+        new PeerHealth(LeaseFresh: true, IsFull: false, Partitioned: true));
+        queueExpect.AssertKey("peer_dropped_on_partition", partitioned == PeerEscalationRung.Evict);
+        // The two convergence models, derived from the two policies rather than written down:
+        // the queue refuses a write without quorum (CP), and the state cell has no quorum gate
+        // at all — a partitioned peer keeps its own state and reconciles later (AP).
+        queueExpect.AssertKey("queue_convergence_model", minorityWrites ? "AP" : "CP");
+        queueExpect.AssertKey(
+            "state_cell_convergence_model",
+            partitioned == PeerEscalationRung.RetainAndReplay ? "AP" : "CP");
+        // The read side of the AP claim has no policy seam here: this binding gates WRITES on
+        // quorum and exposes nothing that classifies a read as stale, so there is no observable
+        // to compare. `state_cell_convergence_model` above is the claim it can carry.
+        queueExpect.ExcuseKey(
+            "minority_reads_may_be_stale",
+            "this binding gates writes on quorum and exposes no read-staleness classifier, so "
+            + "there is no observable here to compare; the AP claim it can carry is "
+            + "`state_cell_convergence_model`, asserted above");
+        queueExpect.Verify();
     }
 
     [Fact]
@@ -530,6 +672,24 @@ replay.RootElement.GetProperty("wire").GetRawText(),
         Assert.Throws<JsonException>(
         () => IpcWire.Deserialize("{\"ResyncRequest\":{}}"));
     }
+
+    /// <summary>
+    /// The queue a run of frames folds to: every <c>QueuePush</c> payload byte, in frame order.
+    /// </summary>
+    /// <remarks>
+    /// A queue's state IS its ordered elements, so this fold is what "the fused batch applies
+    /// equal to the unit deltas" means. It deliberately does NOT go through
+    /// <c>GraphProjector</c>: that projector treats a queue op as an explicit no-op, so folding
+    /// through it would compare two empty states and satisfy the claim vacuously.
+    /// </remarks>
+    private static List<byte> QueuePayloads(IEnumerable<IpcMessage> frames) =>
+    [
+        .. frames
+        .OfType<DeltaMessage>()
+        .SelectMany(delta => delta.Ops)
+        .OfType<DeltaOp.QueuePush>()
+        .Select(push => Assert.Single(Assert.IsType<IpcValue.Inline>(push.Payload).Bytes)),
+    ];
 
     private static bool ApplyOrSet(OrSet set, JsonElement operation) =>
     operation.GetProperty("op").GetString() switch

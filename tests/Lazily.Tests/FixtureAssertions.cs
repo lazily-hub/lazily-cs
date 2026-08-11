@@ -56,6 +56,34 @@ namespace Lazily.Tests;
 /// with nothing here to compare against.
 /// </para>
 /// <para>
+/// WHAT THIS STILL DOES NOT PROVE (<c>#lzunboundblockguard</c>). Reaching
+/// <see cref="AssertKeyWith"/> proves the callback RECEIVED the fixture's value, never that
+/// it COMPARED it against anything the run produced. <c>CausalReceiptConformanceTests</c>
+/// held the live example until 1df7e7e: <c>AssertKeyWith("nonterminal_outcomes", want =>
+/// Assert.All(want.EnumerateArray(), item =&gt; Assert.False(ParseOutcome(item.GetString()!)
+/// .IsTerminal())))</c> asserted a property of the <c>ReceiptOutcome</c> ENUM and never
+/// touched the projection. <c>Assert.All</c> over an empty sequence is vacuously true, so
+/// <c>[]</c> passed, dropping an element passed, and reordering passed — and the key was
+/// still marked SATISFIED, which means every rung below was green over an assertion that
+/// could not fail. The tracker cannot see inside a closure, so nothing here catches it.
+/// </para>
+/// <para>
+/// Two mechanisms were considered and both are recorded rather than half-built. (1) A
+/// RECORDING WRAPPER handed to the callback in place of the raw <see cref="JsonElement"/>
+/// would catch a callback that ignores its argument, but NOT this one — it read the fixture
+/// value at every element. Making it catch this one means the wrapper has to be the only
+/// route to a comparison, which is ~186 call sites and does not distinguish a run-produced
+/// operand from a literal. (2) DIFFERENTIAL RE-EXECUTION — run the callback a second time
+/// against a type-preserving perturbation and require it to fail — needs no call-site edits
+/// and does catch this one (dropping an array element leaves the vacuous <c>Assert.All</c>
+/// green). It was spiked here and rejected on evidence: the runners in this repo RECORD
+/// divergences into a ledger instead of throwing (<c>Check(...)</c>), so a perturbed re-run
+/// signals nothing and instead appends phantom divergences — 8 tests broke that way and 288
+/// keys reported "insensitive", most of them artifacts of that style rather than findings.
+/// Closing this direction means giving the divergence-recording runners a comparison seam
+/// the tracker owns, which is a rewrite of the runner style and not a guard.
+/// </para>
+/// <para>
 /// A key the CORPUS declares to be an English paragraph (<c>assertions.prose</c>,
 /// <c>#lzprosekeyconvention</c>) takes neither route: it is DISCHARGED through
 /// <see cref="ProseKey"/>, which names the executable keys carrying its obligation and hands
@@ -147,6 +175,63 @@ public sealed class FixtureAssertions
     /// <summary>Track a block the caller already holds.</summary>
     public static FixtureAssertions Wrap(JsonElement block, string where, ProseLedger? ledger = null) =>
         new(block, where, ledger);
+
+    /// <summary>
+    /// Bind the WHOLE block and consume it by comparing it structurally against
+    /// <paramref name="actual"/> — the object the run really produced.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// The block-level analogue of <see cref="AssertKeyDeep"/>, and it earns the same
+    /// blanket discharge for the same reason: a structural comparison is two-directional
+    /// at every depth, so a key the corpus adds tomorrow is compared by this call without
+    /// anyone editing it. A key set, a value, and a nesting level are all covered.
+    /// </para>
+    /// <para>
+    /// It exists because a runner that already compared a whole `expect` with
+    /// <c>JsonNode.DeepEquals</c> — the portable-stdlib replay does exactly that for all 54
+    /// of its per-step blocks — was invisible to rung 0: the comparison is complete, and the
+    /// bind ledger still read "no runner bound this block", which is indistinguishable from
+    /// a block nobody checks. Reporting a complete assertion as a gap trains the reader to
+    /// excuse gaps, so the honest fix is a binding entry point rather than an excuse.
+    /// </para>
+    /// <para>
+    /// A block declaring <c>prose</c> is refused: rule 1 says a paragraph is discharged and
+    /// never asserted, and a deep comparison would assert it (<c>#lzprosekeyconvention</c>).
+    /// </para>
+    /// </remarks>
+    public static void Deep(
+        JsonElement block,
+        string where,
+        System.Text.Json.Nodes.JsonNode? actual,
+        string? detail = null)
+    {
+        var tracker = Wrap(block, where);
+        if (block.ValueKind == JsonValueKind.Object
+            && block.TryGetProperty(ProseDeclaration, out _))
+            throw new Xunit.Sdk.XunitException(
+                $"{where}: this block declares `{ProseDeclaration}`, so a structural comparison "
+                + "would ASSERT a paragraph; discharge its prose keys with ProseKey instead");
+
+        var want = System.Text.Json.Nodes.JsonNode.Parse(block.GetRawText());
+        Xunit.Assert.True(
+            System.Text.Json.Nodes.JsonNode.DeepEquals(want, actual),
+            $"{where}: got {actual?.ToJsonString()}, want {want?.ToJsonString()}"
+            + (detail is null ? string.Empty : $" ({detail})"));
+
+        // Every key is asserted AND key-set checked by construction — that is what
+        // "structural, in both directions" means. Marking them keeps Verify()'s rungs
+        // uniform rather than making this a path that skips them.
+        if (block.ValueKind != JsonValueKind.Object) return;
+        foreach (var property in block.EnumerateObject())
+        {
+            tracker._read.Add(property.Name);
+            tracker.MarkAsserted(property.Name);
+            tracker._descended.Add(property.Name);
+        }
+
+        tracker.Verify();
+    }
 
     /// <summary>The underlying element, for reads that are not key lookups.</summary>
     public JsonElement Element => _block;

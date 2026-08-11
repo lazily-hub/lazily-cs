@@ -609,14 +609,33 @@ echo "conformance coverage OK: $covered/$total canonical fixtures OPENED by the 
 # two such blocks carrying eight silent keys, lazily-cpp a third, lazily-zig
 # twenty-two.
 #
-# `SpecCorpus.Load` inventories every `assertions` block at read time and the
-# `FixtureAssertions` constructor books one as BOUND, both riding this same
-# manifest under `blocks-` prefixes. The two sides are matched by CONTENT digest
-# and never by the block's label: runners spell those inconsistently, and a
-# label-keyed ledger would silently miss the mismatch rather than report it.
+# `SpecCorpus.Load` inventories every assertion block at read time — a general
+# walk of the fixture, at any depth, over every name a runner binds (`assertions`,
+# `expect`, `expected`) — and the `FixtureAssertions` constructor books one as
+# BOUND, both riding this same manifest under `blocks-` prefixes. The two sides are
+# matched by CONTENT digest and never by the block's label: runners spell those
+# inconsistently, and a label-keyed ledger would silently miss the mismatch rather
+# than report it.
+#
+# The inventory was FIXED-PLACE until #lzunboundblockguard: the root `assertions`
+# plus one per element of `frames`/`scenarios`/`rejects`. That found 33 blocks in a
+# corpus carrying 690, and reported "33/33 bound, OK" while every per-step `expect`
+# in the stdlib and reactive-graph corpora was bound by nothing — rung 0 wearing the
+# null form it exists to catch. Widening it surfaced seven scenarios whose `expect`
+# the runner replaced with hand-written literals (crdt-tree/algebra scenarios 1-2,
+# reliable-sync coalesce 0-1 and lease-eviction 1-3).
+#
+# Content keying has one known consequence, and it is recorded rather than papered
+# over: two sites carrying IDENTICAL bytes share a digest, so binding one marks
+# both. That is bounded by the rung below — a scenario nobody replayed is a
+# scenario-ledger failure — and the alternative, keying by the runner's own label,
+# is what this ledger exists NOT to do.
 #
 # An unbindable block belongs HERE, as a documented excuse read on every run, not
 # as a runner fabricated to manufacture coverage. Format: "fixture|where|reason".
+# Two-directional, exactly like KNOWN_UNCOVERED and ExcuseKey: an excuse for a block
+# this run DID bind fails as stale, and so does one naming a site no opened fixture
+# declares. An excuse nothing can falsify is an allowlist entry wearing a hat.
 KNOWN_UNBOUND_BLOCKS=(
 )
 
@@ -653,8 +672,12 @@ with open(manifest_path, encoding="utf-8") as handle:
             bound.add(parts[1])
 
 unbound = []
+bound_sites = set()
+declared_sites = set()
 for digest, sites in sorted(declared.items()):
+    declared_sites |= sites
     if digest in bound:
+        bound_sites |= sites
         continue
     unbound.extend(site for site in sorted(sites) if site not in excuses)
 
@@ -675,32 +698,68 @@ if unbound:
     )
     sys.exit(1)
 
+# The OTHER direction. An excuse is a claim that a block CANNOT be bound here; a run
+# that binds it has falsified the claim, and leaving it in the array means the next
+# unbindable block at that site is excused by a reason that has become a lie. Same
+# contract as ExcuseKey and KNOWN_UNCOVERED: a fixed gap fails the build until the
+# entry is deleted.
+stale = sorted(site for site in excuses if site in bound_sites)
+if stale:
+    print(
+        f"ERROR: {len(stale)} KNOWN_UNBOUND_BLOCKS entr(ies) name a block this run DID\n"
+        "       bind. The excuse hides nothing and its reason is now false:",
+        file=sys.stderr,
+    )
+    for site in stale:
+        print(f"         {site} — \"{excuses[site]}\"", file=sys.stderr)
+    print("       Delete each one.", file=sys.stderr)
+    sys.exit(1)
+
+# And the third: an excuse for a site the opened corpus does not carry at all. The
+# fixture was renamed, the path moved, or the block was deleted upstream — either
+# way the entry now excuses nothing and would silently keep excusing nothing.
+unknown = sorted(site for site in excuses if site not in declared_sites)
+if unknown:
+    print(
+        f"ERROR: {len(unknown)} KNOWN_UNBOUND_BLOCKS entr(ies) name a block no OPENED\n"
+        "       fixture declares — the fixture, the path, or the block is gone:",
+        file=sys.stderr,
+    )
+    for site in unknown:
+        print(f"         {site} — \"{excuses[site]}\"", file=sys.stderr)
+    print(
+        "       Delete each one, or fix its `fixture|where` to the path the walk prints.",
+        file=sys.stderr,
+    )
+    sys.exit(1)
+
 # Positive-evidence floor (#lzvacuousrun): zero declared blocks means zero
 # unbound blocks, which reports OK having compared nothing.
 #
-# EXACT: 33 is what a green CI run on the current corpus actually inventories,
-# with no margin. Set this to the number the guard REPORTS after adding
-# replays; do not add "the N I just added" to the old value and do not leave
-# headroom for churn (#lzscenariofloordrift). It had reached 25 against an
+# EXACT: 690 is the number of block SITES a green local run on the current corpus
+# inventories, with no margin. Set this to the number the guard REPORTS after
+# adding replays; do not add "the N I just added" to the old value and do not
+# leave headroom for churn (#lzscenariofloordrift). It had reached 25 against an
 # actual 33, so eight blocks could stop being inventoried while this printed OK.
 #
-# Pinned from CI run 31347367370 (`assertion-block bind OK: 33/33`), which
-# matches a local green `make check`. Verified exact: 34 fails this floor.
-min_blocks = int(os.environ.get("MIN_BLOCKS", "33"))
-if len(declared) < min_blocks:
+# It counts SITES, not distinct digests: two sites carrying identical bytes are
+# one digest, so a digest count silently absorbs a deleted fixture whose blocks
+# happen to be spelled like another's. Verified exact: 691 fails this floor.
+min_blocks = int(os.environ.get("MIN_BLOCKS", "690"))
+if len(declared_sites) < min_blocks:
     print(
-        f"ERROR: only {len(declared)} distinct assertion blocks were inventoried, expected "
+        f"ERROR: only {len(declared_sites)} assertion block SITES were inventoried, expected "
         f">= {min_blocks}.\n"
-        "       The loader-side inventory detached, or fixtures stopped being read.\n"
+        "       The loader-side walk detached, or fixtures stopped being read.\n"
         "       Do not lower MIN_BLOCKS to fix this.",
         file=sys.stderr,
     )
     sys.exit(1)
 
 print(
-    f"assertion-block bind OK: {len(declared)}/{len(declared)} assertion blocks carried by "
-    f"opened fixtures were BOUND to a tracker ({len(excuses)} declared unbindable; floor "
-    f"{min_blocks}; content-keyed, so a runner's block NAME cannot satisfy it)"
+    f"assertion-block bind OK: {len(bound_sites)}/{len(declared_sites)} assertion block sites "
+    f"carried by opened fixtures were BOUND to a tracker ({len(excuses)} declared unbindable; "
+    f"floor {min_blocks}; content-keyed, so a runner's block NAME cannot satisfy it)"
 )
 PY
 )"

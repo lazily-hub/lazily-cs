@@ -344,24 +344,39 @@ public sealed class ReactiveGraphEngine
     // Assertions
     // -----------------------------------------------------------------------
 
+    /// <remarks>
+    /// The whole `expect` block is BOUND to a tracker (<c>#lzunboundblockguard</c>). It used to
+    /// be read straight off the <see cref="JsonElement"/>: every key was evaluated and an
+    /// unknown one threw, so the keys were covered — but rung 0 asks a different question, and
+    /// to it these 113 per-step blocks were indistinguishable from blocks nobody checks. The
+    /// switch below is unchanged in what it compares; each arm now receives the fixture's value
+    /// THROUGH the tracker, which is what books the block as bound and lets
+    /// <see cref="FixtureAssertions.Verify"/> raise the key-level rungs here too.
+    /// </remarks>
     private void Assert(JsonElement expect, JsonElement op, long? opValue, bool opError, List<string> observed)
     {
+        var tracked = FixtureAssertions.Wrap(expect, $"{_fixture}#{_step}.expect");
+
         // `computes_of` is evaluated BEFORE every other key, and deliberately. A step asserting
         // `computes_of` alongside `value`/`read`/`readable` is asserting a count that a read would
         // change: on a de-eagered signal the read triggers the lazy recompute, so evaluating the
         // read first would raise the count to the number a CONFORMING binding shows and make a
         // non-conforming one agree with it.
-        if (expect.TryGetProperty("computes_of", out var computesOf))
+        tracked.TryAssertObjectKey("computes_of", computesOf =>
         {
             foreach (var p in computesOf.EnumerateObject())
             {
-                var got = _model.ComputesOf(p.Name);
-                // "computes" of an effect are its runs, already recorded in the run log.
-                if (got == 0 && _nodes.TryGetValue(p.Name, out var n) && n.Kind == NodeKind.Effect)
-                    got = _model.RunLog.Count(x => x == p.Name);
-                Check($"computes_of.{p.Name}", got, p.Value.GetInt32());
+                var name = p.Name;
+                computesOf.AssertKeyWith(name, want =>
+                {
+                    var got = _model.ComputesOf(name);
+                    // "computes" of an effect are its runs, already recorded in the run log.
+                    if (got == 0 && _nodes.TryGetValue(name, out var n) && n.Kind == NodeKind.Effect)
+                        got = _model.RunLog.Count(x => x == name);
+                    Check($"computes_of.{name}", got, want.GetInt32());
+                });
             }
-        }
+        });
 
         foreach (var prop in expect.EnumerateObject())
         {
@@ -372,90 +387,159 @@ public sealed class ReactiveGraphEngine
                     break;
 
                 case "merges_of":
-                    foreach (var p in prop.Value.EnumerateObject())
+                    tracked.AssertObjectKey("merges_of", merges =>
                     {
-                        if (!_model.KnowsMerge(p.Name))
-                            throw new InvalidOperationException($"{_fixture}: merges_of unknown cell {p.Name}");
-                        Check($"merges_of.{p.Name}", _model.MergesOf(p.Name), p.Value.GetInt32());
-                    }
+                        foreach (var p in merges.EnumerateObject())
+                        {
+                            var name = p.Name;
+                            merges.AssertKeyWith(name, want =>
+                            {
+                                if (!_model.KnowsMerge(name))
+                                    throw new InvalidOperationException($"{_fixture}: merges_of unknown cell {name}");
+                                Check($"merges_of.{name}", _model.MergesOf(name), want.GetInt32());
+                            });
+                        }
+                    });
                     break;
 
                 case "drain_exhausted":
-                    Check("drain_exhausted", _model.DrainExhausted, prop.Value.GetBoolean());
+                    tracked.AssertKeyWith(
+                        "drain_exhausted",
+                        want => Check("drain_exhausted", _model.DrainExhausted, want.GetBoolean()));
                     break;
 
                 case "dependents_of":
-                    foreach (var p in prop.Value.EnumerateObject())
-                        Check($"dependents_of.{p.Name}", _model.DependentCount(_nodes[p.Name]), p.Value.GetInt32());
+                    tracked.AssertObjectKey("dependents_of", deps =>
+                    {
+                        foreach (var p in deps.EnumerateObject())
+                        {
+                            var name = p.Name;
+                            deps.AssertKeyWith(name, want => Check(
+                                $"dependents_of.{name}", _model.DependentCount(_nodes[name]), want.GetInt32()));
+                        }
+                    });
                     break;
 
                 case "dependencies_of":
-                    foreach (var p in prop.Value.EnumerateObject())
-                        Check($"dependencies_of.{p.Name}", _model.DependencyCount(_nodes[p.Name]), p.Value.GetInt32());
+                    tracked.AssertObjectKey("dependencies_of", deps =>
+                    {
+                        foreach (var p in deps.EnumerateObject())
+                        {
+                            var name = p.Name;
+                            deps.AssertKeyWith(name, want => Check(
+                                $"dependencies_of.{name}", _model.DependencyCount(_nodes[name]), want.GetInt32()));
+                        }
+                    });
                     break;
 
                 case "error":
-                    Check("error", opError, prop.Value.ValueKind is not JsonValueKind.Null);
+                    tracked.AssertKeyWith(
+                        "error",
+                        want => Check("error", opError, want.ValueKind is not JsonValueKind.Null));
                     break;
 
                 case "value":
                     {
-                        if (expect.TryGetProperty("error", out var e) && e.ValueKind is not JsonValueKind.Null) break;
+                        if (expect.TryGetProperty("error", out var e) && e.ValueKind is not JsonValueKind.Null)
+                        {
+                            // The step also asserts a non-null `error`: the op failed, so there is
+                            // no value it could have produced, and `error` carries the whole
+                            // assertion. Excused rather than skipped, so the claim is written down
+                            // and fails as stale the day a step asserts both.
+                            tracked.ExcuseKey(
+                                "value",
+                                "the same step asserts a non-null `error`; a failed op produces no "
+                                + "value, and the `error` assertion is what this step proves");
+                            break;
+                        }
+
                         // A feed effect's op id is the effect (unreadable), so its `value` assertion
                         // targets the merge cell it feeds. Otherwise (signal creation) the op id is
                         // itself the readable node. The read is issued AFTER `computes_of` has been
                         // evaluated, so it cannot mask a deferred materialization.
-                        var target = Str(op, "merges_into") ?? Str(op, "id");
-                        long? got = opValue;
-                        if (got is null && target is not null)
+                        tracked.AssertKeyWith("value", want =>
                         {
-                            var r = Read(target);
-                            got = r.Ok ? r.Value : null;
-                        }
-                        Check<long?>("value", got, prop.Value.GetInt64());
+                            var target = Str(op, "merges_into") ?? Str(op, "id");
+                            long? got = opValue;
+                            if (got is null && target is not null)
+                            {
+                                var r = Read(target);
+                                got = r.Ok ? r.Value : null;
+                            }
+                            Check<long?>("value", got, want.GetInt64());
+                        });
                         break;
                     }
 
                 case "read":
-                    foreach (var p in prop.Value.EnumerateObject())
+                    tracked.AssertObjectKey("read", reads =>
                     {
-                        var r = Read(p.Name);
-                        Check<long?>($"read.{p.Name}", r.Ok ? r.Value : null, p.Value.GetInt64());
-                    }
+                        foreach (var p in reads.EnumerateObject())
+                        {
+                            var name = p.Name;
+                            reads.AssertKeyWith(name, want =>
+                            {
+                                var r = Read(name);
+                                Check<long?>($"read.{name}", r.Ok ? r.Value : null, want.GetInt64());
+                            });
+                        }
+                    });
                     break;
 
                 case "readable":
-                    foreach (var p in prop.Value.EnumerateObject())
-                        Check($"readable.{p.Name}", Readable(p.Name), p.Value.GetBoolean());
+                    tracked.AssertObjectKey("readable", readable =>
+                    {
+                        foreach (var p in readable.EnumerateObject())
+                        {
+                            var name = p.Name;
+                            readable.AssertKeyWith(
+                                name,
+                                want => Check($"readable.{name}", Readable(name), want.GetBoolean()));
+                        }
+                    });
                     break;
 
                 case "observed_by":
-                    Check("observed_by", string.Join(",", observed), string.Join(",", Strings(prop.Value)));
+                    tracked.AssertKeyWith("observed_by", want => Check(
+                        "observed_by", string.Join(",", observed), string.Join(",", Strings(want))));
                     break;
 
                 case "observed_count":
-                    Check("observed_count", observed.Count, prop.Value.GetInt32());
+                    tracked.AssertKeyWith(
+                        "observed_count",
+                        want => Check("observed_count", observed.Count, want.GetInt32()));
                     break;
 
                 case "cleanup_order":
+                    // Only effects run a cleanup callback, so the expected order is projected onto
+                    // its effect entries. `cleanup_order` is cumulative, not per-step.
+                    tracked.AssertKeyWith("cleanup_order", value =>
                     {
-                        // Only effects run a cleanup callback, so the expected order is projected onto
-                        // its effect entries. `cleanup_order` is cumulative, not per-step.
-                        var want = Strings(prop.Value)
+                        var want = Strings(value)
                             .Where(id => _stale.TryGetValue(id, out var h) && h.Kind == NodeKind.Effect);
                         Check("cleanup_order", string.Join(",", _model.CleanupLog), string.Join(",", want));
-                        break;
-                    }
+                    });
+                    break;
 
                 case "scope_owned_count":
-                    foreach (var p in prop.Value.EnumerateObject())
-                        Check($"scope_owned_count.{p.Name}", _scopes[p.Name].Owned, p.Value.GetInt32());
+                    tracked.AssertObjectKey("scope_owned_count", owned =>
+                    {
+                        foreach (var p in owned.EnumerateObject())
+                        {
+                            var name = p.Name;
+                            owned.AssertKeyWith(
+                                name,
+                                want => Check($"scope_owned_count.{name}", _scopes[name].Owned, want.GetInt32()));
+                        }
+                    });
                     break;
 
                 default:
                     throw new NotSupportedException($"{_fixture}: unknown expectation {prop.Name}");
             }
         }
+
+        tracked.Verify();
     }
 
     private void Check<T>(string key, T got, T want)

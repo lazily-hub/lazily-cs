@@ -670,10 +670,23 @@ public sealed class CrdtConformanceTests
         var restored = new TextCrdt(scenario.GetProperty("restore_peer").GetInt64());
         assertions++;
         Assert.True(restored.ApplyDelta(snapshot));
+
+        // #lzunboundblockguard. This scenario's `expect` was bound by nothing: the three
+        // claims below were replayed as bare `Assert.Equal`s against values written here, so
+        // the fixture could have dropped a claim — or stated the opposite — without reddening
+        // the run. Each is now compared against what the restore actually produced.
+        var expected = FixtureAssertions.Of(
+            scenario,
+            "expect",
+            $"crdt-tree/algebra.json scenario {scenario.GetProperty("id").GetString()}");
         assertions++;
-        Assert.Equal(original.Text, restored.Text);
+        expected.AssertKey(
+            "restored_text_equal",
+            string.Equals(original.Text, restored.Text, StringComparison.Ordinal));
         assertions++;
-        Assert.Equal(snapshot, restored.DeltaSince(new Dictionary<long, long>()));
+        expected.AssertKey(
+            "op_ids_equal",
+            snapshot.SequenceEqual(restored.DeltaSince(new Dictionary<long, long>())));
 
         original.InsertString(original.Length, "a");
         restored.InsertString(restored.Length, "b");
@@ -684,7 +697,10 @@ public sealed class CrdtConformanceTests
         assertions++;
         Assert.Equal(original.Text, restored.Text);
         assertions++;
-        Assert.Equal(0, CountDuplicateInsertIds(original.DeltaSince(new Dictionary<long, long>())));
+        expected.AssertKey(
+            "later_merge_duplicates",
+            CountDuplicateInsertIds(original.DeltaSince(new Dictionary<long, long>())));
+        expected.Verify();
     }
 
     private static void ReplayOwnFrontier(JsonElement scenario, ref int assertions)
@@ -694,10 +710,21 @@ public sealed class CrdtConformanceTests
             seed.GetProperty("peer").GetInt64(),
             seed.GetProperty("text").GetString()!);
         var delta = tree.DeltaSince(tree.VersionVector());
+
+        // #lzunboundblockguard. `Assert.Empty` / `Assert.False` restated the fixture's two
+        // claims in C# instead of comparing against them, so the block was bound by nothing
+        // and a corpus that expected a non-empty delta would still have passed here.
+        var expected = FixtureAssertions.Of(
+            scenario,
+            "expect",
+            $"crdt-tree/algebra.json scenario {scenario.GetProperty("id").GetString()}");
         assertions++;
-        Assert.Empty(delta);
+        expected.AssertKeyWith(
+            "delta",
+            want => Assert.Equal(want.GetArrayLength(), delta.Count));
         assertions++;
-        Assert.False(tree.ApplyDelta(delta));
+        expected.AssertKey("apply_changed", tree.ApplyDelta(delta));
+        expected.Verify();
     }
 
     private static int CountDuplicateInsertIds(IEnumerable<TextOp> operations)

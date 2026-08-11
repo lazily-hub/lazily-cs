@@ -200,25 +200,67 @@ public static class SpecCorpus
         Append(BlockBoundMarker + "\t" + BlockDigest(block));
     }
 
-    private static void RecordDeclaredBlocks(string fixtureKey, JsonElement root)
+    /// <summary>
+    /// The property names that carry an assertion BLOCK — the same three
+    /// <see cref="FixtureAssertions.Of"/> is bound to across every runner here.
+    /// </summary>
+    /// <remarks>
+    /// Read off the runners, not invented: `assertions`, `expect`, and `expected` are the only
+    /// names any call site passes. Adding a fourth upstream means adding it here, and until then
+    /// blocks under that name are invisible to rung 0 — which is why the name set lives in ONE
+    /// place rather than being spelled per container.
+    /// </remarks>
+    private static readonly HashSet<string> AssertionBlockNames =
+        new(StringComparer.Ordinal) { "assertions", "expect", "expected" };
+
+    /// <summary>
+    /// Inventory every assertion block these bytes carry, at any depth.
+    /// </summary>
+    /// <remarks>
+    /// This used to look in four fixed places — the root `assertions`, and one inside each
+    /// element of `frames` / `scenarios` / `rejects` — which found 33 of the 690 blocks the
+    /// opened corpus actually carries. A fixed-place inventory is the null form of rung 0
+    /// itself: it cannot report a block it never looked for, so the guard read
+    /// "33/33 bound, OK" over a corpus whose per-step `expect` blocks were bound by nothing.
+    /// The walk is now general and the shape is discovered rather than declared, because
+    /// `scenarios[2].steps[7].expect` is a depth no enumeration of container names reaches.
+    ///
+    /// Descent STOPS at a declared block: what lives inside one is a KEY, and keys are the
+    /// business of the rungs `FixtureAssertions.Verify` raises. Walking into it would book a
+    /// sub-object as a block in its own right, and the tracker never binds those separately —
+    /// every such site would be reported unbound forever.
+    /// </remarks>
+    private static void RecordDeclaredBlocks(string fixtureKey, JsonElement root) =>
+        DeclareWalk(fixtureKey, root, string.Empty);
+
+    private static void DeclareWalk(string fixtureKey, JsonElement node, string path)
     {
-        if (root.ValueKind != JsonValueKind.Object) return;
-        if (root.TryGetProperty("assertions", out var top)) Declare(fixtureKey, "assertions", top);
-        foreach (var container in new[] { "frames", "scenarios", "rejects" })
+        switch (node.ValueKind)
         {
-            if (!root.TryGetProperty(container, out var items)) continue;
-            if (items.ValueKind != JsonValueKind.Array) continue;
-            var index = 0;
-            foreach (var item in items.EnumerateArray())
-            {
-                if (item.ValueKind == JsonValueKind.Object
-                    && item.TryGetProperty("assertions", out var block))
+            case JsonValueKind.Object:
+                foreach (var property in node.EnumerateObject())
                 {
-                    Declare(fixtureKey, $"{container}[{index}].assertions", block);
+                    var child = path.Length == 0 ? property.Name : path + "." + property.Name;
+                    if (property.Value.ValueKind == JsonValueKind.Object
+                        && AssertionBlockNames.Contains(property.Name))
+                    {
+                        Declare(fixtureKey, child, property.Value);
+                        continue;
+                    }
+
+                    DeclareWalk(fixtureKey, property.Value, child);
                 }
 
-                index++;
-            }
+                break;
+            case JsonValueKind.Array:
+                var index = 0;
+                foreach (var item in node.EnumerateArray())
+                {
+                    DeclareWalk(fixtureKey, item, $"{path}[{index}]");
+                    index++;
+                }
+
+                break;
         }
     }
 

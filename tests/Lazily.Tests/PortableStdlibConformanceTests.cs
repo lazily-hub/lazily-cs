@@ -405,16 +405,18 @@ public sealed class PortableStdlibConformanceTests
         return result;
     }
 
+    // Each step's `expect` is compared STRUCTURALLY, which covers its key set in both
+    // directions — but until #lzunboundblockguard it was compared by a bare
+    // `JsonNode.DeepEquals` that bound no tracker, so all 54 of these blocks were
+    // "carried by an opened fixture and bound by nothing" as far as rung 0 could see.
+    // `FixtureAssertions.Deep` performs the same comparison through the ledger.
     private static void AssertStep(
         JsonElement scenario,
         int index,
         JsonElement step,
-        JsonObject actual)
-    {
-        var expected = JsonNode.Parse(step.GetProperty("expect").GetRawText());
-        Assert.True(
-            JsonNode.DeepEquals(expected, actual),
-            $"{scenario.GetProperty("id").GetString()} step {index}: "
-            + $"got {actual.ToJsonString()}, want {expected?.ToJsonString()}");
-    }
+        JsonObject actual) =>
+        FixtureAssertions.Deep(
+            step.GetProperty("expect"),
+            $"stdlib/{scenario.GetProperty("id").GetString()} step {index}",
+            actual);
 }
