@@ -99,6 +99,79 @@ public sealed class LosslessTreeConformanceTests
         Assert.Equal(source.Render(), target.Render());
     }
 
+    /// <summary>
+    /// `Diff` must return operations in canonical `(counter, peer)` order. That order is a
+    /// CROSS-BINDING contract, not an implementation detail: the shared corpus addresses diff
+    /// results POSITIONALLY — `lossless-tree/non_contiguous_anti_entropy.json` carries
+    /// `deliver.only: [0, 2]` — so the fixture only means the same thing in every binding while
+    /// every binding returns the same order.
+    ///
+    /// The corpus cannot catch a regression here. Measured in lazily-zig (#lzzigdiffmutant):
+    /// reversing the sort, or deleting it outright, left the entire suite green, because the two
+    /// indices select the same SET either way and applying an update is order-tolerant by design.
+    /// Only a direct test pins it, so this is that test.
+    /// </summary>
+    [Fact]
+    public void DiffReturnsOperationsInCanonicalCounterPeerOrder()
+    {
+        var a = new LosslessTreeCrdt(1);
+        var para = a.CreateNode(TreeNodeId.Root, NodeSeed.Element("para"));
+        var baseLeaf = a.CreateNode(para, NodeSeed.Leaf(LeafKind.Trivia, "0"));
+
+        var b = a.Fork(2);
+
+        // `a` runs ahead to counter 4 while `b`'s single op stays at counter 3. The remote op
+        // therefore lands LAST in a's log while sorting EARLIER than a's own later ops — the only
+        // shape in which arrival order and canonical order genuinely disagree.
+        var one = a.CreateNode(
+            para,
+            Optional<TreeNodeId>.Some(baseLeaf),
+            NodeSeed.Leaf(LeafKind.Trivia, "1"));
+        var two = a.CreateNode(
+            para,
+            Optional<TreeNodeId>.Some(one),
+            NodeSeed.Leaf(LeafKind.Trivia, "2"));
+        var remote = b.CreateNode(
+            para,
+            Optional<TreeNodeId>.Some(baseLeaf),
+            NodeSeed.Leaf(LeafKind.Trivia, "9"));
+        a.ApplyUpdate(b.Diff(a.Frontier()));
+
+        // The operation log is private, so arrival order is RECONSTRUCTED from the ids the create
+        // calls returned rather than read out of the replica. That keeps the two failure modes
+        // apart: "diff returns the wrong order" and "the test has gone vacuous" fail on different
+        // assertions instead of collapsing into one.
+        TreeOpId[] arrival =
+        [
+            para.Operation,
+            baseLeaf.Operation,
+            one.Operation,
+            two.Operation,
+            remote.Operation,
+        ];
+        var canonical = arrival.OrderBy(id => id).ToArray();
+
+        // Non-vacuity gate, asserted BEFORE the ordering check. If arrival order and canonical
+        // order ever coincide, the ordering assertion below holds for an unsorted or reversed
+        // diff too and pins nothing — so a refactor that makes them coincide must fail HERE,
+        // loudly, rather than quietly hollowing the test out.
+        Assert.NotEqual(arrival, canonical);
+
+        var all = a.Diff(new TreeVersionFrontier());
+        Assert.Equal(arrival.Length, all.Operations.Count);
+        Assert.Equal(canonical, all.Operations.Select(operation => operation.Id).ToArray());
+
+        for (var index = 1; index < all.Operations.Count; index++)
+        {
+            var previous = all.Operations[index - 1].Id;
+            var current = all.Operations[index].Id;
+            Assert.True(
+                previous.CompareTo(current) < 0,
+                $"diff op {index - 1} {previous} does not strictly precede op {index} {current} "
+                + "in canonical (counter, peer) order");
+        }
+    }
+
     private static World SeedWorld(JsonElement scenario)
     {
         var seed = scenario.GetProperty("seed");
