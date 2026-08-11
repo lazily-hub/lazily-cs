@@ -188,6 +188,13 @@ public sealed class PortableStdlibConformanceTests
 
         Assert.True(scenarios.Length >= fixture.GetProperty("scenario_floor").GetInt32());
         Assert.True(assertions >= fixture.GetProperty("assertion_floor").GetInt32());
+        // `mutation_floor` bounds the ledger's SIZE, and that is all it can do. The loop below
+        // likewise only checks the ledger against the fixture's OWN scenario ids. Whether each
+        // entry's central claim — "mutating the implementation this way breaks exactly these
+        // scenarios" — actually holds is decided by `PortableStdlibMutationTests`, which applies
+        // every operator to an independent interpreter; until that landed, rebinding an entry's
+        // `must_fail` to a scenario the operator does not break stayed green here
+        // (`#lzstdlibmutantsallbindings`).
         Assert.True(mutations.Length >= fixture.GetProperty("mutation_floor").GetInt32());
         foreach (var mutation in mutations)
         {
