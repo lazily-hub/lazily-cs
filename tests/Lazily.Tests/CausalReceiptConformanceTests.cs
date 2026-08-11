@@ -132,9 +132,8 @@ public sealed class CausalReceiptConformanceTests
 
     private static void AssertSchemaValid(string json)
     {
-        ArgumentNullException.ThrowIfNull(SpecCorpus.Root);
-        var schemaPath = Path.GetFullPath(
-            Path.Combine(SpecCorpus.Root, "..", "schemas", "receipts.json"));
+        // #lzspecschemasoverride: resolved independently of the corpus root.
+        var schemaPath = Path.Combine(SpecCorpus.RequireSchemasRoot(), "receipts.json");
         var schema = JsonSchema.FromText(File.ReadAllText(schemaPath));
         using var document = System.Text.Json.JsonDocument.Parse(json);
         var result = schema.Evaluate(document.RootElement);

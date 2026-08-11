@@ -781,8 +781,8 @@ replay.RootElement.GetProperty("wire").GetRawText(),
     private static ulong[] Ulongs(JsonElement values) =>
     values.EnumerateArray().Select(value => value.GetUInt64()).ToArray();
 
-    private static string SchemaRoot() =>
-    Path.GetFullPath(Path.Combine(SpecCorpus.Root!, "..", "schemas"));
+    // #lzspecschemasoverride: resolved independently of the corpus root.
+    private static string SchemaRoot() => SpecCorpus.RequireSchemasRoot();
 
     private sealed class GraphProjector
     {

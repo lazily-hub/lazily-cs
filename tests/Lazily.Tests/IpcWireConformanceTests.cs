@@ -370,12 +370,8 @@ public sealed class IpcWireConformanceTests
         return JsonSchema.Build(schema.RootElement.Clone(), options);
     }
 
-    private static string SchemaRoot()
-    {
-        var corpus = SpecCorpus.Root;
-        Assert.NotNull(corpus);
-        var root = Path.Combine(Path.GetDirectoryName(corpus)!, "schemas");
-        Assert.True(Directory.Exists(root), $"missing lazily-spec schemas: {root}");
-        return root;
-    }
+    // #lzspecschemasoverride: resolved independently of the corpus root, so
+    // LAZILY_SPEC_SCHEMAS_DIR can point a probe at perturbed schema bytes without dirtying the
+    // shared checkout, and LAZILY_SPEC_CONFORMANCE_DIR can name a corpus-only scratch copy.
+    private static string SchemaRoot() => SpecCorpus.RequireSchemasRoot();
 }

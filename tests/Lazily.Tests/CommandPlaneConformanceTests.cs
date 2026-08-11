@@ -285,11 +285,6 @@ public sealed class CommandPlaneConformanceTests
         return JsonSchema.Build(schema.RootElement.Clone(), options);
     }
 
-    private static string SchemaRoot()
-    {
-        Assert.NotNull(SpecCorpus.Root);
-        var root = Path.Combine(Path.GetDirectoryName(SpecCorpus.Root)!, "schemas");
-        Assert.True(Directory.Exists(root), $"missing lazily-spec schemas: {root}");
-        return root;
-    }
+    // #lzspecschemasoverride: resolved independently of the corpus root.
+    private static string SchemaRoot() => SpecCorpus.RequireSchemasRoot();
 }

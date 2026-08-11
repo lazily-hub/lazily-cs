@@ -307,9 +307,8 @@ public sealed class SignalingConformanceTests
 
     private static JsonSchema LoadSchema()
     {
-        ArgumentNullException.ThrowIfNull(SpecCorpus.Root);
-        var path = Path.GetFullPath(
-            Path.Combine(SpecCorpus.Root, "..", "schemas", "signaling.json"));
+        // #lzspecschemasoverride: resolved independently of the corpus root.
+        var path = Path.Combine(SpecCorpus.RequireSchemasRoot(), "signaling.json");
         return JsonSchema.FromText(File.ReadAllText(path));
     }
 }

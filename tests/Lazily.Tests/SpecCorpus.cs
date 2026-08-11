@@ -35,6 +35,56 @@ public static class SpecCorpus
     /// </remarks>
     public const string DirOverrideVar = "LAZILY_SPEC_CONFORMANCE_DIR";
 
+    /// <summary>The sibling schemas path, relative to the repository root.</summary>
+    public const string SchemasSiblingRelativePath = "../lazily-spec/schemas";
+
+    /// <summary>
+    /// The schemas-directory override (<c>#lzspecschemasoverride</c>), resolved INDEPENDENTLY of
+    /// <see cref="Root"/>.
+    /// </summary>
+    /// <remarks>
+    /// Five runners here validate wire bytes against <c>lazily-spec/schemas</c>, and each one used
+    /// to spell that directory as <c>Root/../schemas</c>. Deriving it from the corpus root has two
+    /// consequences, and both are defects:
+    /// <list type="number">
+    /// <item><description>
+    /// A schema-perturbation probe — flip one field in a schema, confirm a runner reddens — had
+    /// nowhere to point but the shared <c>../lazily-spec</c> checkout, because
+    /// <see cref="DirOverrideVar"/> redirects only the CORPUS. Editing that reddens all ten
+    /// bindings at once and dirties a shared repository, so the probe could not be run at all —
+    /// exactly the state <see cref="DirOverrideVar"/> was introduced to fix one level up.
+    /// </description></item>
+    /// <item><description>
+    /// It made a corpus-only scratch copy unusable: pointing <see cref="DirOverrideVar"/> at a
+    /// scratch directory with no <c>schemas/</c> sibling resolved the schemas to
+    /// <c>&lt;scratch&gt;/../schemas</c> and threw <see cref="DirectoryNotFoundException"/> out of
+    /// every schema-validating test. A previous corpus audit hit precisely that and had to copy
+    /// the sibling directories in as a workaround.
+    /// </description></item>
+    /// </list>
+    /// Hence: the schemas root is located on its own. With no override at all it is the canonical
+    /// sibling, so an ordinary run is unchanged; with only <see cref="DirOverrideVar"/> set it is
+    /// STILL the canonical sibling, which is what makes a corpus-only scratch copy work; and an
+    /// explicit override that cannot be read throws rather than falling back, because a probe that
+    /// silently validates against the canonical bytes it was told to replace is a broken probe
+    /// reporting green.
+    /// </remarks>
+    public const string SchemasDirOverrideVar = "LAZILY_SPEC_SCHEMAS_DIR";
+
+    private static readonly Lazy<string?> SchemasRootLazy = new(LocateSchemas);
+
+    /// <summary>The absolute schemas directory, or null when the sibling checkout is absent.</summary>
+    public static string? SchemasRoot => SchemasRootLazy.Value;
+
+    /// <summary>
+    /// <see cref="SchemasRoot"/>, or a throw — the form every runner uses, so an absent schemas
+    /// directory is a loud failure rather than a null dereference deep inside a schema build.
+    /// </summary>
+    public static string RequireSchemasRoot() =>
+        SchemasRoot ?? throw new DirectoryNotFoundException(
+            $"lazily-spec schemas not found at {SchemasSiblingRelativePath}; " +
+            $"clone lazily-spec beside this repo or set {SchemasDirOverrideVar}.");
+
     private static string? Locate()
     {
         var overridden = Environment.GetEnvironmentVariable(DirOverrideVar);
@@ -52,10 +102,36 @@ public static class SpecCorpus
             return resolved;
         }
 
+        return LocateSibling(SiblingRelativePath);
+    }
+
+    private static string? LocateSchemas()
+    {
+        var overridden = Environment.GetEnvironmentVariable(SchemasDirOverrideVar);
+        if (!string.IsNullOrWhiteSpace(overridden))
+        {
+            // Fail closed, on the same terms as the corpus override above.
+            var resolved = Path.GetFullPath(overridden);
+            if (!Directory.Exists(resolved))
+            {
+                throw new DirectoryNotFoundException(
+                    $"{SchemasDirOverrideVar}={overridden} names no directory ({resolved}); " +
+                    "refusing to fall back to the sibling schemas.");
+            }
+            return resolved;
+        }
+
+        // Deliberately NOT Root/../schemas: see SchemasDirOverrideVar. A corpus override must not
+        // drag the schemas along with it.
+        return LocateSibling(SchemasSiblingRelativePath);
+    }
+
+    private static string? LocateSibling(string relativePath)
+    {
         var dir = AppContext.BaseDirectory;
         for (var i = 0; i < 12 && dir is not null; i++)
         {
-            var candidate = Path.GetFullPath(Path.Combine(dir, SiblingRelativePath));
+            var candidate = Path.GetFullPath(Path.Combine(dir, relativePath));
             if (Directory.Exists(candidate)) return candidate;
             dir = Path.GetDirectoryName(dir.TrimEnd(Path.DirectorySeparatorChar));
         }
