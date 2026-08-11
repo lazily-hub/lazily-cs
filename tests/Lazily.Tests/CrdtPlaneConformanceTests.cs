@@ -30,7 +30,9 @@ public sealed class CrdtPlaneConformanceTests
             expected.AssertKey("applied_count", applied);
             assertions++;
 
-            expected.AssertKeyWith("converged", want => AssertConverged(want, runtime.Converged()));
+            expected.AssertKeyWith("converged", want => want.Against(
+                runtime.Converged(),
+                (expect, got) => AssertConverged(expect, got)));
             assertions++;
 
             if (scenario.TryGetProperty("redeliver", out var redeliver)
@@ -52,7 +54,9 @@ public sealed class CrdtPlaneConformanceTests
                 reversed.Ingest(new CrdtSyncMessage(operations.Reverse().ToArray())));
                 expected.AssertKeyWith(
                     "converged",
-                    want => AssertConverged(want, reversed.Converged()));
+                    want => want.Against(
+                        reversed.Converged(),
+                        (expect, got) => AssertConverged(expect, got)));
                 if (declaresOrderIndependent)
                 {
                     expected.AssertKey(
@@ -70,10 +74,10 @@ public sealed class CrdtPlaneConformanceTests
             // resolved by arrival order and happened to agree.
             expected.AssertKeyWith(
                 "resolution",
-                want =>
+                want => want.Against(runtime.Converged(), (expect, converged) =>
                 {
-                    Assert.Equal("max_stamp", want.GetString());
-                    foreach (var entry in runtime.Converged())
+                    Assert.Equal("max_stamp", expect.GetString());
+                    foreach (var entry in converged)
                     {
                         var rivals = operations.Where(operation => operation.Node == entry.Node).ToArray();
                         Assert.NotEmpty(rivals);
@@ -87,7 +91,7 @@ public sealed class CrdtPlaneConformanceTests
                             Assert.IsType<IpcValue.Inline>(entry.State).Bytes);
                         assertions++;
                     }
-                });
+                }));
 
             expected.Verify();
         }

@@ -114,9 +114,9 @@ public sealed class MaterializationConformanceTests
             // materialized at all. That is green over a gutted library.
             expected.TryAssertKeyWith(
                 "default_mode",
-                defaultMode =>
+                defaultMode => defaultMode.Against(keys, (want, allKeys) =>
                 {
-                    var mode = defaultMode.GetString();
+                    var mode = want.GetString();
                     using var defaults = NewModel(model);
                     foreach (var e in entries.Where(e => e.Kind == EntryKind.Source)) defaults.SeedCell(e.Key, e.Value);
                     switch (mode)
@@ -133,15 +133,15 @@ public sealed class MaterializationConformanceTests
                         default:
                             throw new InvalidOperationException($"unknown default_mode {mode}");
                     }
-                    Check("default_mode", keys.Count(defaults.IsPresent), keys.Length);
-                });
+                    Check("default_mode", allKeys.Count(defaults.IsPresent), allKeys.Length);
+                }));
 
             expected.AssertKeyWith(
                 "eager_present",
-                want => Check(
+                want => want.Against(Join(keys.Where(eager.IsPresent)), (expect, got) => Check(
                     "eager_present",
-                    Join(keys.Where(eager.IsPresent)),
-                    Join(want.EnumerateArray().Select(x => x.GetString()!))));
+                    got,
+                    Join(expect.EnumerateArray().Select(x => x.GetString()!)))));
 
             // ---- LAZY: mint-on-access, nothing pre-minted. ---------------------------------
             using var lazy = NewModel(model);
@@ -152,10 +152,10 @@ public sealed class MaterializationConformanceTests
 
             expected.TryAssertKeyWith(
                 "lazy_present_at_build",
-                atBuild => Check(
+                atBuild => atBuild.Against(Join(keys.Where(lazy.IsPresent)), (expect, got) => Check(
                     "lazy_present_at_build",
-                    Join(keys.Where(lazy.IsPresent)),
-                    Join(atBuild.EnumerateArray().Select(x => x.GetString()!))));
+                    got,
+                    Join(expect.EnumerateArray().Select(x => x.GetString()!)))));
 
             // The read sequence, with the cumulative present-set size sampled after each read.
             // Monotone by construction and unchanged by a re-read — a map that re-minted on every
@@ -169,17 +169,17 @@ public sealed class MaterializationConformanceTests
 
             expected.TryAssertKeyWith(
                 "present_after_each_read",
-                afterEach => Check(
+                afterEach => afterEach.Against(string.Join(",", sizes), (expect, got) => Check(
                     "present_after_each_read",
-                    string.Join(",", sizes),
-                    string.Join(",", afterEach.EnumerateArray().Select(x => x.GetInt32()))));
+                    got,
+                    string.Join(",", expect.EnumerateArray().Select(x => x.GetInt32())))));
 
             expected.AssertKeyWith(
                 "lazy_present_after_reads",
-                want => Check(
+                want => want.Against(Join(keys.Where(lazy.IsPresent)), (expect, got) => Check(
                     "lazy_present_after_reads",
-                    Join(keys.Where(lazy.IsPresent)),
-                    Join(want.EnumerateArray().Select(x => x.GetString()!))));
+                    got,
+                    Join(expect.EnumerateArray().Select(x => x.GetString()!)))));
 
             // ---- Observational transparency: identical values from both builds. -------------
             expected.AssertObjectKey(
@@ -189,11 +189,14 @@ public sealed class MaterializationConformanceTests
                     foreach (var entry in observe.EnumerateObject())
                     {
                         var key = entry.Name;
-                        observe.AssertKeyWith(key, want =>
-                        {
-                            Check($"observe.eager.{key}", eager.GetOrInsert(key, k => canonical[k]), want.GetInt32());
-                            Check($"observe.lazy.{key}", lazy.GetOrInsert(key, k => canonical[k]), want.GetInt32());
-                        });
+                        observe.AssertKeyWith(key, want => want.Against(
+                            (eager: eager.GetOrInsert(key, k => canonical[k]),
+                             lazy: lazy.GetOrInsert(key, k => canonical[k])),
+                            (expect, got) =>
+                            {
+                                Check($"observe.eager.{key}", got.eager, expect.GetInt32());
+                                Check($"observe.lazy.{key}", got.lazy, expect.GetInt32());
+                            }));
                     }
                 });
 

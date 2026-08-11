@@ -304,21 +304,21 @@ public sealed class CrdtConformanceTests
 
         expect.TryAssertKeyWith(
             "texts_equal",
-            equalGroups =>
+            equalGroups => equalGroups.Against(replicas, (expect, got) =>
             {
-                foreach (var group in equalGroups.EnumerateArray())
+                foreach (var group in expect.EnumerateArray())
                 {
                     var names = group.EnumerateArray().Select(item => item.GetString()!).ToArray();
-                    var convergedText = replicas[names[0]].Text;
+                    var convergedText = got[names[0]].Text;
                     foreach (var name in names.Skip(1))
                     {
                         assertions++;
-                        Assert.Equal(convergedText, replicas[name].Text);
+                        Assert.Equal(convergedText, got[name].Text);
                     }
                 }
-            });
+            }));
 
-        if (expect.TryAssertKeyWith("text", text => Assert.Equal(text.GetString(), replicas["a"].Text)))
+        if (expect.TryAssertKeyWith("text", text => text.AssertEqual(w => w.GetString(), replicas["a"].Text)))
             assertions++;
 
         expect.TryAssertObjectKey(
@@ -331,32 +331,32 @@ public sealed class CrdtConformanceTests
                     assertions++;
                     perReplica.AssertKeyWith(
                         name,
-                        want => Assert.Equal(want.GetString(), replicas[name].Text));
+                        want => want.AssertEqual(w => w.GetString(), replicas[name].Text));
                 }
             });
 
-        if (expect.TryAssertKeyWith("len", length => Assert.Equal(length.GetInt32(), replicas["a"].Length)))
+        if (expect.TryAssertKeyWith("len", length => length.AssertEqual(w => w.GetInt32(), replicas["a"].Length)))
             assertions++;
 
         if (expect.TryAssertKeyWith(
                 "tombstone_count",
-                tombstones => Assert.Equal(tombstones.GetInt32(), replicas["a"].TombstoneCount)))
+                tombstones => tombstones.AssertEqual(w => w.GetInt32(), replicas["a"].TombstoneCount)))
             assertions++;
 
         if (expect.TryAssertKeyWith(
                 "a_starts_with",
-                startsWith => Assert.StartsWith(
-                    startsWith.GetString()!,
-                    replicas["a"].Text,
-                    StringComparison.Ordinal)))
+                startsWith => startsWith.Against(replicas["a"].Text, (expect, got) => Assert.StartsWith(
+                    expect.GetString()!,
+                    got,
+                    StringComparison.Ordinal))))
             assertions++;
 
         if (expect.TryAssertKeyWith(
                 "a_ends_with",
-                endsWith => Assert.EndsWith(
-                    endsWith.GetString()!,
-                    replicas["a"].Text,
-                    StringComparison.Ordinal)))
+                endsWith => endsWith.Against(replicas["a"].Text, (expect, got) => Assert.EndsWith(
+                    expect.GetString()!,
+                    got,
+                    StringComparison.Ordinal))))
             assertions++;
 
         expect.TryAssertObjectKey(
@@ -368,15 +368,25 @@ public sealed class CrdtConformanceTests
                     var name = property.Name;
                     vectors.AssertObjectKey(name, want =>
                     {
-                        var actual = replicas[name].VersionVector();
-                        var expected = new Dictionary<long, long>();
-                        foreach (var item in want.EnumerateObject())
-                        {
-                            var node = item.Name;
-                            expected[long.Parse(node, System.Globalization.CultureInfo.InvariantCulture)] =
-                                want.AssertKeyInto(node, v => v.GetInt64());
-                        }
-                        Assert.Equal(expected.OrderBy(item => item.Key), actual.OrderBy(item => item.Key));
+                        // CompareInto, not a bare projection (#lzcsuncomparedvalues): the vector is
+                        // assembled from every node key of the block and compared once, so the keys
+                        // are booked by the comparison that consumed them rather than by the
+                        // projection returning.
+                        want.CompareInto(
+                            into =>
+                            {
+                                var expected = new Dictionary<long, long>();
+                                foreach (var item in into.EnumerateObject())
+                                {
+                                    var node = item.Name;
+                                    expected[long.Parse(node, System.Globalization.CultureInfo.InvariantCulture)] =
+                                        into.AssertKeyInto(node, v => v.GetInt64());
+                                }
+
+                                return expected.OrderBy(item => item.Key).ToArray();
+                            },
+                            replicas[name].VersionVector().OrderBy(item => item.Key).ToArray(),
+                            Assert.Equal);
                     });
                     assertions++;
                 }
@@ -486,7 +496,9 @@ public sealed class CrdtConformanceTests
     {
         var assertions = 0;
 
-        expect.TryAssertKeyWith("order", order => assertions += AssertOrder(replicas["a"], order));
+        expect.TryAssertKeyWith("order", order => order.Against(
+                replicas["a"],
+                (expect, replica) => assertions += AssertOrder(replica, expect)));
 
         expect.TryAssertObjectKey(
             "order_on",
@@ -495,27 +507,29 @@ public sealed class CrdtConformanceTests
                 foreach (var property in orderOn.EnumerateObject())
                 {
                     var name = property.Name;
-                    assertions += orderOn.AssertKeyInto(
+                    orderOn.AssertKeyWith(
                         name,
-                        want => AssertOrder(replicas[name], want));
+                        want => want.Against(
+                            replicas[name],
+                            (expect, replica) => assertions += AssertOrder(replica, expect)));
                 }
             });
 
         expect.TryAssertKeyWith(
             "orders_equal",
-            groups =>
+            groups => groups.Against(replicas, (expect, got) =>
             {
-                foreach (var group in groups.EnumerateArray())
+                foreach (var group in expect.EnumerateArray())
                 {
                     var names = group.EnumerateArray().Select(item => item.GetString()!).ToArray();
-                    var first = replicas[names[0]].Order();
+                    var first = got[names[0]].Order();
                     foreach (var name in names.Skip(1))
                     {
                         assertions++;
-                        Assert.Equal(first, replicas[name].Order());
+                        Assert.Equal(first, got[name].Order());
                     }
                 }
-            });
+            }));
 
         // Descended (#lzsubblockkeyset): the id set of `get` — and of each replica's block
         // under `get_on` — is now owned by a child tracker rather than by a loop that could
@@ -539,19 +553,19 @@ public sealed class CrdtConformanceTests
 
         if (expect.TryAssertKeyWith(
                 "len",
-                length => Assert.Equal(length.GetInt32(), replicas[convergedTarget].Count)))
+                length => length.AssertEqual(w => w.GetInt32(), replicas[convergedTarget].Count)))
             assertions++;
 
         expect.TryAssertKeyWith(
             "contains_all",
-            contains =>
+            contains => contains.Against(replicas[convergedTarget], (expect, replica) =>
             {
-                foreach (var id in contains.EnumerateArray())
+                foreach (var id in expect.EnumerateArray())
                 {
                     assertions++;
-                    Assert.True(replicas[convergedTarget].Contains(id.GetString()!));
+                    Assert.True(replica.Contains(id.GetString()!));
                 }
-            });
+            }));
 
         expect.TryAssertObjectKey(
             "not_contains_on",
@@ -560,14 +574,14 @@ public sealed class CrdtConformanceTests
                 foreach (var property in absentOn.EnumerateObject())
                 {
                     var name = property.Name;
-                    absentOn.AssertKeyWith(name, want =>
+                    absentOn.AssertKeyWith(name, want => want.Against(replicas[name], (expect, replica) =>
                     {
-                        foreach (var id in want.EnumerateArray())
+                        foreach (var id in expect.EnumerateArray())
                         {
                             assertions++;
-                            Assert.False(replicas[name].Contains(id.GetString()!));
+                            Assert.False(replica.Contains(id.GetString()!));
                         }
-                    });
+                    }));
                 }
             });
 
@@ -592,7 +606,7 @@ public sealed class CrdtConformanceTests
             expected.AssertKeyWith(name, want =>
             {
                 Assert.True(sequence.TryGetValue(name, out var actual));
-                Assert.Equal(SequenceValue(want), actual);
+                want.AssertEqual(SequenceValue, actual);
             });
         }
         return made;
@@ -721,7 +735,7 @@ public sealed class CrdtConformanceTests
         assertions++;
         expected.AssertKeyWith(
             "delta",
-            want => Assert.Equal(want.GetArrayLength(), delta.Count));
+            want => want.AssertEqual(w => w.GetArrayLength(), delta.Count));
         assertions++;
         expected.AssertKey("apply_changed", tree.ApplyDelta(delta));
         expected.Verify();

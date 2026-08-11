@@ -325,7 +325,7 @@ public sealed class LosslessTreeConformanceTests
 
         if (expect.TryAssertKeyWith(
                 "render",
-                render => Assert.Equal(render.GetString(), world.Replicas["a"].Render())))
+                render => render.AssertEqual(w => w.GetString(), world.Replicas["a"].Render())))
             assertions++;
 
         expect.TryAssertObjectKey(
@@ -338,27 +338,27 @@ public sealed class LosslessTreeConformanceTests
                     assertions++;
                     renderOn.AssertKeyWith(
                         name,
-                        want => Assert.Equal(want.GetString(), world.Replicas[name].Render()));
+                        want => want.AssertEqual(w => w.GetString(), world.Replicas[name].Render()));
                 }
             });
 
         if (expect.TryAssertKeyWith(
                 "live_nodes",
-                liveNodes => Assert.Equal(liveNodes.GetInt32(), world.Replicas["a"].LiveNodeCount)))
+                liveNodes => liveNodes.AssertEqual(w => w.GetInt32(), world.Replicas["a"].LiveNodeCount)))
             assertions++;
 
         expect.TryAssertKeyWith(
             "converged",
-            converged =>
+            converged => converged.Against(world.Replicas, (expect, replicas) =>
             {
-                var names = converged.EnumerateArray().Select(value => value.GetString()!).ToArray();
-                var expected = world.Replicas[names[0]].Render();
+                var names = expect.EnumerateArray().Select(value => value.GetString()!).ToArray();
+                var rendered = replicas[names[0]].Render();
                 foreach (var name in names.Skip(1))
                 {
                     assertions++;
-                    Assert.Equal(expected, world.Replicas[name].Render());
+                    Assert.Equal(rendered, replicas[name].Render());
                 }
-            });
+            }));
 
         assertionsOut += assertions;
     }

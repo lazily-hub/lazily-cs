@@ -388,8 +388,8 @@ public sealed class BlobBackendDiscriminatorConformanceTests
                             // as "optional".
                             var namesToken = expect.TryAssertKeyWith(
                                 "error_names_token",
-                                want => Assert.Contains(
-                                    want.GetString()!, failure.Message, StringComparison.Ordinal));
+                                want => want.Against(failure.Message, (expect, message) => Assert.Contains(
+                                    expect.GetString()!, message, StringComparison.Ordinal)));
                             Assert.Equal(kind == "unknown_token", namesToken);
                             break;
                         }
@@ -419,38 +419,40 @@ public sealed class BlobBackendDiscriminatorConformanceTests
         meta.AssertKey("scenario_count", replayed);
         meta.AssertKeyWith(
             "codecs",
-            want => Assert.Equal(
-                want.EnumerateArray().Select(item => item.GetString())
+            want => want.AssertEqual(
+                w => w.EnumerateArray().Select(item => item.GetString())
                     .OrderBy(item => item, StringComparer.Ordinal).ToArray(),
                 codecsReplayed.ToArray()));
         meta.AssertKeyWith(
             "outcomes",
-            want => Assert.Equal(
-                want.EnumerateArray().Select(item => item.GetString())
+            want => want.AssertEqual(
+                w => w.EnumerateArray().Select(item => item.GetString())
                     .OrderBy(item => item, StringComparer.Ordinal).ToArray(),
                 outcomesReplayed.ToArray()));
 
         meta.AssertKeyWith(
             "backend_forms",
-            want => Assert.Equal(
-                want.EnumerateArray().Select(item => item.GetString())
+            want => want.AssertEqual(
+                w => w.EnumerateArray().Select(item => item.GetString())
                     .OrderBy(item => item, StringComparer.Ordinal).ToArray(),
                 formsReplayed.ToArray()));
 
         meta.AssertKeyWith(
             "rejection_kinds",
-            want => Assert.Equal(
-                want.EnumerateArray().Select(item => item.GetString())
+            want => want.AssertEqual(
+                w => w.EnumerateArray().Select(item => item.GetString())
                     .OrderBy(item => item, StringComparer.Ordinal).ToArray(),
                 rejectionKinds.ToArray()));
 
-        meta.AssertKeyWith("backends", want =>
+        meta.AssertKeyWith("backends", want => want.Against(
+            Enum.GetValues<BlobBackendKind>().Select(TokenOf).ToArray(),
+            (expect, implemented) =>
         {
-            var declared = want.EnumerateArray().Select(item => item.GetString()!).ToArray();
+            var declared = expect.EnumerateArray().Select(item => item.GetString()!).ToArray();
 
             // (a) The fixture's vocabulary and the LIBRARY's enum are the same set, in the same
             //     order — a backend added upstream or dropped here is a mismatch either way.
-            Assert.Equal(Enum.GetValues<BlobBackendKind>().Select(TokenOf).ToArray(), declared);
+            Assert.Equal(implemented, declared);
 
             // (b) VOCABULARY COMPLETENESS, and the reason v1 stayed green with `in_process`
             //     uncarried: every declared backend must be the decoded_backend of some ACCEPT
@@ -463,7 +465,7 @@ public sealed class BlobBackendDiscriminatorConformanceTests
                 $"declared backend(s) [{string.Join(", ", uncarried)}] are never the "
                 + "decoded_backend of an accept scenario, so nothing here proves this binding "
                 + $"implements them; accepted backends were [{string.Join(", ", decodedBackends)}]");
-        });
+        }));
 
         meta.Verify();
         // Rule 6: every key the nine discharges name was really asserted by this run. A claim

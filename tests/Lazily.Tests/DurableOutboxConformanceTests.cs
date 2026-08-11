@@ -120,16 +120,16 @@ public sealed class DurableOutboxConformanceTests
 
             expected.TryAssertKeyWith(
                 "retained_epochs",
-                want => Assert.Equal(Epochs(want), entries!.Select(entry => entry.Epoch)));
-            expected.TryAssertKeyWith("retained_frames", want =>
+                want => want.AssertEqual(w => Epochs(w), entries!.Select(entry => entry.Epoch)));
+            expected.TryAssertKeyWith("retained_frames", want => want.Against(entries!, (expect, got) =>
             {
-                var frames = want.EnumerateArray().ToArray();
-                Assert.Equal(frames.Length, entries!.Count);
+                var frames = expect.EnumerateArray().ToArray();
+                Assert.Equal(frames.Length, got.Count);
                 for (var index = 0; index < frames.Length; index++)
                 {
-                    Assert.Equal(Bytes(frames[index]), entries[index].Frame);
+                    Assert.Equal(Bytes(frames[index]), got[index].Frame);
                 }
-            });
+            }));
             expected.Verify();
         }
     }
@@ -170,16 +170,16 @@ public sealed class DurableOutboxConformanceTests
             {
                 expected.AssertKeyWith(
                     "retained_after_ack",
-                    want => Assert.Equal(Epochs(want), restarted.RetainedEpochs));
+                    want => want.AssertEqual(w => Epochs(w), restarted.RetainedEpochs));
                 var cursor = scenario.GetProperty("reconnect_cursor").GetUInt64();
                 var replayed = restarted.ReplayFrom(cursor).Select(entry => entry.Epoch).ToArray();
                 expected.AssertKeyWith(
                     "replayed_from_cursor",
-                    want => Assert.Equal(Epochs(want), replayed));
+                    want => want.AssertEqual(w => Epochs(w), replayed));
                 // `replay_order` is not a duplicate of `replayed_from_cursor`: the SET can be
                 // right while the order is wrong, and a receiver that folds a later epoch
                 // first sees a gap it can never close.
-                expected.AssertKeyWith("replay_order", want => Assert.Equal(Epochs(want), replayed));
+                expected.AssertKeyWith("replay_order", want => want.AssertEqual(w => Epochs(w), replayed));
 
                 // The receiver half: at-least-once on the wire, exactly-once in effect.
                 var coordinator = new ResyncCoordinator(cursor);
@@ -192,7 +192,7 @@ public sealed class DurableOutboxConformanceTests
                     }
                 }
 
-                expected.AssertKeyWith("receiver_applies", want => Assert.Equal(Epochs(want), applied));
+                expected.AssertKeyWith("receiver_applies", want => want.AssertEqual(w => Epochs(w), applied.ToArray()));
                 expected.AssertKey("receiver_last_epoch_after", coordinator.LastEpoch);
 
                 var ackedThrough = scenario.GetProperty("ack_through").GetUInt64();
@@ -217,11 +217,11 @@ public sealed class DurableOutboxConformanceTests
                     restarted.RetainedEpochs.Any());
                 expected.AssertKeyWith(
                     "retained",
-                    want => Assert.Equal(Epochs(want), restarted.RetainedEpochs));
+                    want => want.AssertEqual(w => Epochs(w), restarted.RetainedEpochs));
                 var resent = restarted.ReplayFrom(0).Select(entry => entry.Epoch).ToArray();
                 expected.AssertKeyWith(
                     "resent_on_next_tick",
-                    want => Assert.Equal(Epochs(want), resent));
+                    want => want.AssertEqual(w => Epochs(w), resent));
                 // A retained frame is a DELAY, not a hole: the next tick replays it, so the
                 // receiver never sees an epoch it can no longer obtain.
                 expected.AssertKey("permanent_gap", resent.Length == 0);
@@ -268,40 +268,39 @@ public sealed class DurableOutboxConformanceTests
 
         expected.TryAssertKeyWith(
             "epochs",
-            epochs =>
-            {
-                var cursor = scenario.GetProperty("scan_after").GetUInt64();
-                Assert.Equal(
-                    Epochs(epochs),
-                    restarted.Store.ScanAfter(cursor).Select(entry => entry.Epoch));
-            });
+            epochs => epochs.Against(
+                restarted.Store
+                    .ScanAfter(scenario.GetProperty("scan_after").GetUInt64())
+                    .Select(entry => entry.Epoch)
+                    .ToArray(),
+                (expect, got) => Assert.Equal(Epochs(expect), got)));
 
         if (expected.TryAssertKeyWith(
                 "cursor",
-                cursorExpected => Assert.Equal(cursorExpected.GetUInt64(), restarted.AckedThrough)))
+                cursorExpected => cursorExpected.AssertEqual(w => w.GetUInt64(), restarted.AckedThrough)))
         {
             expected.AssertKeyWith(
                 "replay_from_zero",
-                want => Assert.Equal(
-                    Epochs(want),
+                want => want.AssertEqual(w =>
+                    Epochs(w),
                     restarted.ReplayFrom(0).Select(entry => entry.Epoch)));
         }
 
         expected.TryAssertKeyWith(
             "loaded_cursor",
-            loaded => Assert.Equal(loaded.GetUInt64(), restarted.AckedThrough));
+            loaded => loaded.AssertEqual(w => w.GetUInt64(), restarted.AckedThrough));
 
         // `retained` is asserted for EVERY scenario that carries it. Reading it only inside
         // the `cursor` branch above meant the restart scenario — the one whose whole point
         // is that the unacked suffix survives a reopen — never checked the suffix at all.
         expected.TryAssertKeyWith(
             "retained",
-            retained => Assert.Equal(Epochs(retained), restarted.RetainedEpochs));
+            retained => retained.AssertEqual(w => Epochs(w), restarted.RetainedEpochs));
 
         expected.TryAssertKeyWith(
             "replay",
-            replay => Assert.Equal(
-                Epochs(replay),
+            replay => replay.AssertEqual(w =>
+                Epochs(w),
                 restarted.ReplayFrom(0).Select(entry => entry.Epoch)));
 
         expected.Verify();

@@ -99,14 +99,14 @@ public sealed class RegistersConformanceTests
             // The CellCrdt projection clause, asserted against the RETURNED boolean.
             var sawChanged = expect.TryAssertKeyWith(
                 "changed",
-                want =>
+                want => want.Against(changed, (expect, got) =>
                 {
                     Assert.True(
-                        changed.HasValue,
+                        got.HasValue,
                         $"{where}: `changed` is asserted, but no operation in this scenario " +
                         "reported one — the runner never captured a Set/MergeFrom result.");
-                    Assert.Equal(want.GetBoolean(), changed!.Value);
-                });
+                    Assert.Equal(expect.GetBoolean(), got!.Value);
+                }));
             if (sawChanged) assertions++;
 
             expect.Verify();
@@ -208,8 +208,8 @@ public sealed class RegistersConformanceTests
                     values.AssertKeyWith(
                         replica,
                         // Compared as a SET: the corpus deliberately pins no iteration order.
-                        want => Assert.Equal(
-                            want.EnumerateArray()
+                        want => want.AssertEqual(
+                            w => w.EnumerateArray()
                                 .Select(item => item.GetString())
                                 .OrderBy(item => item, StringComparer.Ordinal)
                                 .ToArray(),

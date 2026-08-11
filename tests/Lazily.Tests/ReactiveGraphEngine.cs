@@ -248,7 +248,8 @@ public sealed class ReactiveGraphEngine
                         deps.AssertKeyWith(name, want =>
                         {
                             var got = _model.DependentCount(_nodes[name]);
-                            Check($"final.dependents_of.{name}", got, want.GetInt32());
+                            want.Against(got, (expect, actual) =>
+                                Check($"final.dependents_of.{name}", actual, expect.GetInt32()));
                             observation.Add($"dependents_of.{name}={got}");
                         });
                     }
@@ -261,7 +262,8 @@ public sealed class ReactiveGraphEngine
                         readable.AssertKeyWith(name, want =>
                         {
                             var alive = Readable(name);
-                            Check($"final.readable.{name}", alive, want.GetBoolean());
+                            want.Against(alive, (expect, actual) =>
+                                Check($"final.readable.{name}", actual, expect.GetBoolean()));
                             observation.Add($"readable.{name}={alive}");
                         });
                     }
@@ -274,7 +276,8 @@ public sealed class ReactiveGraphEngine
                         reads.AssertKeyWith(name, want =>
                         {
                             var r = Read(name);
-                            Check<long?>($"final.read.{name}", r.Ok ? r.Value : null, want.GetInt64());
+                            want.Against<long?>(r.Ok ? r.Value : null, (expect, actual) =>
+                                Check($"final.read.{name}", actual, expect.GetInt64()));
                             observation.Add($"read.{name}={(r.Ok ? r.Value : null)}");
                         });
                     }
@@ -290,19 +293,33 @@ public sealed class ReactiveGraphEngine
                     // `type` used to be read by nothing: the runner assumed `set_cell` and a
                     // fixture that changed the op would have been replayed as the old one.
                     pop.AssertKey("type", "set_cell");
+                    // INPUTS, not observations (#lzcsuncomparedvalues): these two name the cell
+                    // the publish writes and the value it writes, so no comparison against them is
+                    // possible here. What they imply IS asserted — every `after_publish.read`
+                    // below reads the graph this write produced.
+                    pop.ExcuseKey(
+                        "id",
+                        "input: names the cell after_publish writes; its effect is asserted as "
+                        + "after_publish.read.<id>");
+                    pop.ExcuseKey(
+                        "value",
+                        "input: the value after_publish writes; its effect is asserted as "
+                        + "after_publish.read.<id>");
                     var before = _model.RunLog.Count;
                     _model.SetCell(
-                        _nodes[pop.AssertKeyInto("id", v => v.GetString()!)],
-                        pop.AssertKeyInto("value", v => v.GetInt64()));
+                        _nodes[pop.GetProperty("id").GetString()!],
+                        pop.GetProperty("value").GetInt64());
                     _model.Settle();
                     var observed = _model.RunLog.Skip(before).ToList();
                     observation.Add($"after_publish.observed_by={string.Join(",", observed)}");
                     publish.TryAssertKeyWith(
                         "observed_by",
-                        wantObserved => Check(
-                            "after_publish.observed_by",
+                        wantObserved => wantObserved.Against(
                             string.Join(",", observed),
-                            string.Join(",", Strings(wantObserved))));
+                            (expect, actual) => Check(
+                                "after_publish.observed_by",
+                                actual,
+                                string.Join(",", Strings(expect)))));
                 }))
                 {
                     return;
@@ -316,7 +333,8 @@ public sealed class ReactiveGraphEngine
                         pReads.AssertKeyWith(name, want =>
                         {
                             var r = Read(name);
-                            Check<long?>($"after_publish.read.{name}", r.Ok ? r.Value : null, want.GetInt64());
+                            want.Against<long?>(r.Ok ? r.Value : null, (expect, actual) =>
+                                Check($"after_publish.read.{name}", actual, expect.GetInt64()));
                             observation.Add($"after_publish.read.{name}={(r.Ok ? r.Value : null)}");
                         });
                     }
@@ -329,7 +347,8 @@ public sealed class ReactiveGraphEngine
                         pDeps.AssertKeyWith(name, want =>
                         {
                             var got = _model.DependentCount(_nodes[name]);
-                            Check($"after_publish.dependents_of.{name}", got, want.GetInt32());
+                            want.Against(got, (expect, actual) =>
+                                Check($"after_publish.dependents_of.{name}", actual, expect.GetInt32()));
                             observation.Add($"after_publish.dependents_of.{name}={got}");
                         });
                     }
@@ -373,7 +392,8 @@ public sealed class ReactiveGraphEngine
                     // "computes" of an effect are its runs, already recorded in the run log.
                     if (got == 0 && _nodes.TryGetValue(name, out var n) && n.Kind == NodeKind.Effect)
                         got = _model.RunLog.Count(x => x == name);
-                    Check($"computes_of.{name}", got, want.GetInt32());
+                    want.Against(got, (expect, actual) =>
+                        Check($"computes_of.{name}", actual, expect.GetInt32()));
                 });
             }
         });
@@ -396,7 +416,8 @@ public sealed class ReactiveGraphEngine
                             {
                                 if (!_model.KnowsMerge(name))
                                     throw new InvalidOperationException($"{_fixture}: merges_of unknown cell {name}");
-                                Check($"merges_of.{name}", _model.MergesOf(name), want.GetInt32());
+                                want.Against(_model.MergesOf(name), (expect, actual) =>
+                                    Check($"merges_of.{name}", actual, expect.GetInt32()));
                             });
                         }
                     });
@@ -405,7 +426,8 @@ public sealed class ReactiveGraphEngine
                 case "drain_exhausted":
                     tracked.AssertKeyWith(
                         "drain_exhausted",
-                        want => Check("drain_exhausted", _model.DrainExhausted, want.GetBoolean()));
+                        want => want.Against(_model.DrainExhausted, (expect, actual) =>
+                            Check("drain_exhausted", actual, expect.GetBoolean())));
                     break;
 
                 case "dependents_of":
@@ -414,8 +436,9 @@ public sealed class ReactiveGraphEngine
                         foreach (var p in deps.EnumerateObject())
                         {
                             var name = p.Name;
-                            deps.AssertKeyWith(name, want => Check(
-                                $"dependents_of.{name}", _model.DependentCount(_nodes[name]), want.GetInt32()));
+                            deps.AssertKeyWith(name, want => want.Against(
+                                _model.DependentCount(_nodes[name]),
+                                (expect, actual) => Check($"dependents_of.{name}", actual, expect.GetInt32())));
                         }
                     });
                     break;
@@ -426,8 +449,9 @@ public sealed class ReactiveGraphEngine
                         foreach (var p in deps.EnumerateObject())
                         {
                             var name = p.Name;
-                            deps.AssertKeyWith(name, want => Check(
-                                $"dependencies_of.{name}", _model.DependencyCount(_nodes[name]), want.GetInt32()));
+                            deps.AssertKeyWith(name, want => want.Against(
+                                _model.DependencyCount(_nodes[name]),
+                                (expect, actual) => Check($"dependencies_of.{name}", actual, expect.GetInt32())));
                         }
                     });
                     break;
@@ -435,7 +459,8 @@ public sealed class ReactiveGraphEngine
                 case "error":
                     tracked.AssertKeyWith(
                         "error",
-                        want => Check("error", opError, want.ValueKind is not JsonValueKind.Null));
+                        want => want.Against(opError, (expect, actual) =>
+                            Check("error", actual, expect.ValueKind is not JsonValueKind.Null)));
                     break;
 
                 case "value":
@@ -466,7 +491,8 @@ public sealed class ReactiveGraphEngine
                                 var r = Read(target);
                                 got = r.Ok ? r.Value : null;
                             }
-                            Check<long?>("value", got, want.GetInt64());
+                            want.Against(got, (expect, actual) =>
+                                Check("value", actual, expect.GetInt64()));
                         });
                         break;
                     }
@@ -480,7 +506,8 @@ public sealed class ReactiveGraphEngine
                             reads.AssertKeyWith(name, want =>
                             {
                                 var r = Read(name);
-                                Check<long?>($"read.{name}", r.Ok ? r.Value : null, want.GetInt64());
+                                want.Against<long?>(r.Ok ? r.Value : null, (expect, actual) =>
+                                    Check($"read.{name}", actual, expect.GetInt64()));
                             });
                         }
                     });
@@ -494,31 +521,36 @@ public sealed class ReactiveGraphEngine
                             var name = p.Name;
                             readable.AssertKeyWith(
                                 name,
-                                want => Check($"readable.{name}", Readable(name), want.GetBoolean()));
+                                want => want.Against(Readable(name), (expect, actual) =>
+                                    Check($"readable.{name}", actual, expect.GetBoolean())));
                         }
                     });
                     break;
 
                 case "observed_by":
-                    tracked.AssertKeyWith("observed_by", want => Check(
-                        "observed_by", string.Join(",", observed), string.Join(",", Strings(want))));
+                    tracked.AssertKeyWith("observed_by", want => want.Against(
+                        string.Join(",", observed),
+                        (expect, actual) => Check("observed_by", actual, string.Join(",", Strings(expect)))));
                     break;
 
                 case "observed_count":
                     tracked.AssertKeyWith(
                         "observed_count",
-                        want => Check("observed_count", observed.Count, want.GetInt32()));
+                        want => want.Against(observed.Count, (expect, actual) =>
+                            Check("observed_count", actual, expect.GetInt32())));
                     break;
 
                 case "cleanup_order":
                     // Only effects run a cleanup callback, so the expected order is projected onto
                     // its effect entries. `cleanup_order` is cumulative, not per-step.
-                    tracked.AssertKeyWith("cleanup_order", value =>
-                    {
-                        var want = Strings(value)
-                            .Where(id => _stale.TryGetValue(id, out var h) && h.Kind == NodeKind.Effect);
-                        Check("cleanup_order", string.Join(",", _model.CleanupLog), string.Join(",", want));
-                    });
+                    tracked.AssertKeyWith("cleanup_order", value => value.Against(
+                        string.Join(",", _model.CleanupLog),
+                        (expect, actual) =>
+                        {
+                            var want = Strings(expect)
+                                .Where(id => _stale.TryGetValue(id, out var h) && h.Kind == NodeKind.Effect);
+                            Check("cleanup_order", actual, string.Join(",", want));
+                        }));
                     break;
 
                 case "scope_owned_count":
@@ -529,7 +561,8 @@ public sealed class ReactiveGraphEngine
                             var name = p.Name;
                             owned.AssertKeyWith(
                                 name,
-                                want => Check($"scope_owned_count.{name}", _scopes[name].Owned, want.GetInt32()));
+                                want => want.Against(_scopes[name].Owned, (expect, actual) =>
+                                    Check($"scope_owned_count.{name}", actual, expect.GetInt32())));
                         }
                     });
                     break;

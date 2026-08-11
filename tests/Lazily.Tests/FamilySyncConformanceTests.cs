@@ -111,15 +111,16 @@ public sealed class FamilySyncConformanceTests
                     var applied = ops.Count(target.Ingest);
                     expect.AssertKeyWith(
                         "reingest_applied",
-                        want => Check("reingest_applied", applied, want.GetInt32()));
+                        want => want.Against(applied, (expect, got) =>
+                            Check("reingest_applied", got, expect.GetInt32())));
                 }
 
                 expect.AssertKeyWith(
                     "target_keys",
-                    want => Check(
+                    want => want.Against(string.Join(",", target.Keys(ns)), (expect, got) => Check(
                         "target_keys",
-                        string.Join(",", target.Keys(ns)),
-                        string.Join(",", want.EnumerateArray().Select(x => x.GetString()!))));
+                        got,
+                        string.Join(",", expect.EnumerateArray().Select(x => x.GetString()!)))));
 
                 expect.AssertObjectKey(
                     "target_values",
@@ -128,26 +129,29 @@ public sealed class FamilySyncConformanceTests
                         foreach (var entry in wants.EnumerateObject())
                         {
                             var name = entry.Name;
-                            wants.AssertKeyWith(name, want => Check(
-                                $"target_values.{name}",
+                            wants.AssertKeyWith(name, want => want.Against<bool?>(
                                 target.TryValue(ns, name, out var v) ? v : null,
-                                want.GetBoolean()));
+                                (expect, got) => Check(
+                                    $"target_values.{name}",
+                                    got,
+                                    expect.GetBoolean())));
                         }
                     });
 
                 expect.AssertKeyWith(
                     "target_present_count",
-                    want => Check("target_present_count", target.PresentCount(ns), want.GetInt32()));
+                    want => want.Against(target.PresentCount(ns), (expect, got) =>
+                        Check("target_present_count", got, expect.GetInt32())));
                 expect.AssertKeyWith(
                     "target_count_true",
-                    want => Check("target_count_true", observed.Get(), want.GetInt32()));
+                    want => want.Against(observed.Get(), (expect, got) =>
+                        Check("target_count_true", got, expect.GetInt32())));
 
                 expect.TryAssertKeyWith(
                     "target_epoch_bumped",
-                    bumped => Check(
-                        "target_epoch_bumped",
+                    bumped => bumped.Against(
                         target.MembershipEpoch.Peek() > epochBefore,
-                        bumped.GetBoolean()));
+                        (expect, got) => Check("target_epoch_bumped", got, expect.GetBoolean())));
 
                 // The aggregate must be a real derived: it recomputed because membership changed,
                 // not because the assertion asked for it.

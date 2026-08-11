@@ -76,15 +76,19 @@ public sealed class StateProjectionConformanceTests
         snapshotAssertions.AssertKey("type_tags", snapshot.Nodes.Select(node => node.TypeTag));
         snapshotAssertions.AssertKeyWith(
             "all_type_tags_in_vocabulary",
-            want => Assert.Equal(
-                want.GetBoolean(),
+            want => want.AssertEqual(w =>
+                w.GetBoolean(),
                 snapshot.Nodes.All(node => node.TypeTag.StartsWith("agent_doc.", StringComparison.Ordinal))));
         snapshotAssertions.AssertKeyWith(
             "cycle_phase",
-            want => AssertPayloadField(snapshotOnly, 102, "phase", want.GetString()!));
+            want => want.Against(
+                snapshotOnly,
+                (expect, got) => AssertPayloadField(got, 102, "phase", expect.GetString()!)));
         snapshotAssertions.AssertKeyWith(
             "queue_head_phase",
-            want => AssertPayloadField(snapshotOnly, 103, "phase", want.GetString()!));
+            want => want.Against(
+                snapshotOnly,
+                (expect, got) => AssertPayloadField(got, 103, "phase", expect.GetString()!)));
         snapshotAssertions.Verify();
 
         var deltaAssertions = FixtureAssertions.Of(
@@ -99,16 +103,20 @@ public sealed class StateProjectionConformanceTests
             delta.Ops.OfType<DeltaOp.NodeAdd>().Select(op => op.TypeTag));
         deltaAssertions.AssertKeyWith(
             "all_type_tags_in_vocabulary",
-            want => Assert.Equal(
-                want.GetBoolean(),
+            want => want.AssertEqual(w =>
+                w.GetBoolean(),
                 delta.Ops.OfType<DeltaOp.NodeAdd>()
                     .All(op => op.TypeTag.StartsWith("agent_doc.", StringComparison.Ordinal))));
         deltaAssertions.AssertKeyWith(
             "cycle_phase_after",
-            want => AssertPayloadField(projection, 102, "phase", want.GetString()!));
+            want => want.Against(
+                projection,
+                (expect, got) => AssertPayloadField(got, 102, "phase", expect.GetString()!)));
         deltaAssertions.AssertKeyWith(
             "queue_head_phase_after",
-            want => AssertPayloadField(projection, 103, "phase", want.GetString()!));
+            want => want.Against(
+                projection,
+                (expect, got) => AssertPayloadField(got, 103, "phase", expect.GetString()!)));
         deltaAssertions.Verify();
     }
 

@@ -186,17 +186,19 @@ public sealed class CollectionsConformanceTests
 
             expected.AssertKeyWith(
                 "order",
-                want => check(
+                want => want.Against(string.Join(",", map.PresentKeys()), (expect, got) => check(
                     $"{where}:order",
-                    string.Join(",", map.PresentKeys()),
-                    string.Join(",", want.EnumerateArray().Select(x => x.GetString()!))));
+                    got,
+                    string.Join(",", expect.EnumerateArray().Select(x => x.GetString()!)))));
 
             expected.TryAssertKeyWith(
                 "membership",
-                membership => check(
-                    $"{where}:membership",
+                membership => membership.Against(
                     string.Join(",", map.PresentKeys().Order(StringComparer.Ordinal)),
-                    string.Join(",", membership.EnumerateArray().Select(x => x.GetString()!).Order(StringComparer.Ordinal))));
+                    (expect, got) => check(
+                        $"{where}:membership",
+                        got,
+                        string.Join(",", expect.EnumerateArray().Select(x => x.GetString()!).Order(StringComparer.Ordinal)))));
 
             // Object-valued keys descend (#lzsubblockkeyset): the child tracker owns the
             // unconsumed-key teardown, so a sub-field the corpus grows later reddens here
@@ -211,10 +213,12 @@ public sealed class CollectionsConformanceTests
                         var name = v.Name;
                         wantValues.AssertKeyWith(
                             name,
-                            want => check(
-                                $"{where}:value.{name}",
-                                map.TryObserve(name, out var got) ? got : null,
-                                want.GetInt32()));
+                            want => want.Against<int?>(
+                                map.TryObserve(name, out var observed) ? observed : null,
+                                (expect, got) => check(
+                                    $"{where}:value.{name}",
+                                    got,
+                                    expect.GetInt32())));
                     }
                 });
 
@@ -224,19 +228,22 @@ public sealed class CollectionsConformanceTests
                 {
                     invalidates.AssertKeyWith(
                         "membership",
-                        want => check(
+                        want => want.Against(recomputed.Membership, (expect, got) => check(
                             $"{where}:invalidates.membership",
-                            recomputed.Membership,
-                            want.GetBoolean()));
+                            got,
+                            expect.GetBoolean())));
                     invalidates.AssertKeyWith(
                         "order",
-                        want => check($"{where}:invalidates.order", recomputed.Order, want.GetBoolean()));
+                        want => want.Against(recomputed.Order, (expect, got) =>
+                            check($"{where}:invalidates.order", got, expect.GetBoolean())));
                     invalidates.AssertKeyWith(
                         "value",
-                        want => check(
-                            $"{where}:invalidates.value",
+                        want => want.Against(
                             string.Join(",", recomputed.Values.Order(StringComparer.Ordinal)),
-                            string.Join(",", want.EnumerateArray().Select(x => x.GetString()!).Order(StringComparer.Ordinal))));
+                            (expect, got) => check(
+                                $"{where}:invalidates.value",
+                                got,
+                                string.Join(",", expect.EnumerateArray().Select(x => x.GetString()!).Order(StringComparer.Ordinal)))));
                 });
 
             expected.TryAssertObjectKey(
@@ -252,7 +259,8 @@ public sealed class CollectionsConformanceTests
                             {
                                 var same = map.TryGetHandle(name, out var after)
                                     && ReferenceEquals(handleBefore, after);
-                                check($"{where}:handle_stable.{name}", same, want.GetBoolean());
+                                want.Against(same, (expect, got) =>
+                                    check($"{where}:handle_stable.{name}", got, expect.GetBoolean()));
                             });
                     }
                 });
@@ -288,17 +296,17 @@ public sealed class CollectionsConformanceTests
 
         expected.AssertKeyWith(
             "ops",
-            want => check(
+            want => want.Against(string.Join(";", ops.Select(Describe)), (expect, got) => check(
                 "ops",
-                string.Join(";", ops.Select(Describe)),
-                string.Join(";", want.EnumerateArray().Select(DescribeExpected))));
+                got,
+                string.Join(";", expect.EnumerateArray().Select(DescribeExpected)))));
 
         expected.AssertKeyWith(
             "result_order",
-            want => check(
+            want => want.Against(string.Join(",", map.PresentKeys()), (expect, got) => check(
                 "result_order",
-                string.Join(",", map.PresentKeys()),
-                string.Join(",", want.EnumerateArray().Select(x => x.GetString()!))));
+                got,
+                string.Join(",", expect.EnumerateArray().Select(x => x.GetString()!)))));
 
         // The LIS keys must not have been touched at all. Asserted on the reader counters, because
         // their VALUES are identical whether or not they were invalidated — a binding that re-minted
@@ -306,13 +314,13 @@ public sealed class CollectionsConformanceTests
         var recomputed = probes.Recomputed();
         expected.AssertKeyWith(
             "stable_keys_not_invalidated",
-            want =>
+            want => want.Against(recomputed.Values, (expect, got) =>
             {
-                foreach (var key in want.EnumerateArray().Select(x => x.GetString()!))
+                foreach (var key in expect.EnumerateArray().Select(x => x.GetString()!))
                 {
-                    check($"stable_keys_not_invalidated.{key}", recomputed.Values.Contains(key), false);
+                    check($"stable_keys_not_invalidated.{key}", got.Contains(key), false);
                 }
-            });
+            }));
     }
 
     private static string Describe<TKey, TValue>(DiffOp<TKey, TValue> op)

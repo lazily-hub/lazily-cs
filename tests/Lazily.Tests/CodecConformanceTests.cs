@@ -379,8 +379,8 @@ public sealed class CodecConformanceTests
         int index) =>
         expect.TryAssertKeyWith(
             key,
-            want => Assert.Equal(
-                want.EnumerateArray().Select(item => item.GetString()!).ToArray(),
+            want => want.AssertEqual(
+                w => w.EnumerateArray().Select(item => item.GetString()!).ToArray(),
                 SortedFieldNames(body.GetProperty(collection)[index])))
             ? 1
             : 0;

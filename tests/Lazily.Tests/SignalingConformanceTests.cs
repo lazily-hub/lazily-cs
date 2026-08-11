@@ -149,7 +149,7 @@ public sealed class SignalingConformanceTests
         // replay below.
         assertions.AssertKeyWith(
             "server_stamped_from",
-            want => Assert.True(want.GetBoolean() && from != 0));
+            want => want.Against(from, (w, got) => Assert.True(w.GetBoolean() && got != 0)));
     }
 
     [Fact]

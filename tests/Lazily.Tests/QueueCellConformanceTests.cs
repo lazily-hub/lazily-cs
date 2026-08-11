@@ -169,11 +169,11 @@ public sealed class QueueCellConformanceTests
                                 want =>
                                 {
                                     var wasInvalidated = !readers.StillValid(name);
-                                    Assert.True(
-                                        wasInvalidated == want.GetBoolean(),
+                                    want.Against(wasInvalidated, (expect, got) => Assert.True(
+                                        got == expect.GetBoolean(),
                                         $"{fixture} step {stepIndex}: invalidates.{name} — expected " +
-                                        $"{want.GetBoolean()}, got {wasInvalidated}. Reader kinds are " +
-                                        "independent: a push onto a non-empty queue must not touch head.");
+                                        $"{expect.GetBoolean()}, got {got}. Reader kinds are " +
+                                        "independent: a push onto a non-empty queue must not touch head."));
                                 });
                             invalidationChecks++;
                         }
@@ -185,23 +185,23 @@ public sealed class QueueCellConformanceTests
                     Assert.Equal(wantReturn.GetString(), returned);
                 }
 
-                expected.TryAssertKeyWith("len", want => Assert.Equal(want.GetInt32(), queue.Len()));
-                expected.TryAssertKeyWith("is_empty", want => Assert.Equal(want.GetBoolean(), queue.IsEmpty()));
-                expected.TryAssertKeyWith("is_full", want => Assert.Equal(want.GetBoolean(), queue.IsFull()));
-                expected.TryAssertKeyWith("closed", want => Assert.Equal(want.GetBoolean(), queue.IsClosed()));
+                expected.TryAssertKeyWith("len", want => want.AssertEqual(w => w.GetInt32(), queue.Len()));
+                expected.TryAssertKeyWith("is_empty", want => want.AssertEqual(w => w.GetBoolean(), queue.IsEmpty()));
+                expected.TryAssertKeyWith("is_full", want => want.AssertEqual(w => w.GetBoolean(), queue.IsFull()));
+                expected.TryAssertKeyWith("closed", want => want.AssertEqual(w => w.GetBoolean(), queue.IsClosed()));
                 expected.TryAssertKeyWith(
                     "head",
-                    want => Assert.Equal(
-                        want.ValueKind == JsonValueKind.Null ? null : want.GetString(),
+                    want => want.AssertEqual(
+                        w => w.ValueKind == JsonValueKind.Null ? null : w.GetString(),
                         queue.Head()));
 
                 // `elements` pins the whole FIFO body, which the scalar reads above cannot:
                 // `len` plus `head` is satisfied by a queue that reordered its tail.
                 expected.TryAssertKeyWith(
                     "elements",
-                    want => Assert.Equal(
-                        want.EnumerateArray().Select(value => value.GetString()),
-                        queue.Elements()));
+                    want => want.AssertEqual(
+                        w => w.EnumerateArray().Select(value => value.GetString()).ToArray(),
+                        queue.Elements().ToArray()));
 
                 expected.Verify();
                 i++;

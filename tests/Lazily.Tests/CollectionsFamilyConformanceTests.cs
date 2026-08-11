@@ -179,7 +179,7 @@ public sealed class CollectionsFamilyConformanceTests
                             wantValues.AssertKeyWith(name, want =>
                             {
                                 Assert.True(map.TryGetHandle(name, out var h), $"{where}: {name} absent");
-                                Assert.Equal(want.GetInt32(), ctx.Get(h));
+                                want.AssertEqual(w => w.GetInt32(), ctx.Get(h));
                             });
                         }
                     });
@@ -200,13 +200,13 @@ public sealed class CollectionsFamilyConformanceTests
                     invalidates =>
                     {
                         var survivors = gotOrder.ToHashSet();
-                        void CheckValueReaders(IReadOnlySet<string> dirty)
+                        void CheckValueReaders(IReadOnlySet<string> dirty, Dictionary<string, int> counts)
                         {
                             foreach (var (key, reader) in valueReaders)
                             {
                                 if (!survivors.Contains(key)) continue; // removed: nothing left to read
                                 ctx.Get(reader);
-                                var recomputed = valueCounts[key] != valueBase[key];
+                                var recomputed = counts[key] != valueBase[key];
                                 if (dirty.Contains(key))
                                 {
                                     Assert.True(recomputed, $"{where}: value reader for {key} should have been invalidated");
@@ -223,24 +223,25 @@ public sealed class CollectionsFamilyConformanceTests
 
                         if (!invalidates.TryAssertKeyWith(
                                 "value",
-                                dv => CheckValueReaders(
-                                    dv.EnumerateArray().Select(k => k.GetString()!).ToHashSet())))
+                                dv => dv.Against(valueCounts, (expect, counts) => CheckValueReaders(
+                                    expect.EnumerateArray().Select(k => k.GetString()!).ToHashSet(),
+                                    counts))))
                         {
-                            CheckValueReaders(new HashSet<string>());
+                            CheckValueReaders(new HashSet<string>(), valueCounts);
                         }
 
                         ctx.Get(membership);
                         ctx.Get(order);
                         if (!invalidates.TryAssertKeyWith(
                                 "membership",
-                                m => Assert.Equal(m.GetBoolean(), membershipCount != membershipBase)))
+                                m => m.AssertEqual(w => w.GetBoolean(), membershipCount != membershipBase)))
                         {
                             Assert.Equal(membershipCount, membershipBase);
                         }
 
                         if (!invalidates.TryAssertKeyWith(
                                 "order",
-                                o => Assert.Equal(o.GetBoolean(), orderCount != orderBase)))
+                                o => o.AssertEqual(w => w.GetBoolean(), orderCount != orderBase)))
                         {
                             Assert.Equal(orderCount, orderBase);
                         }
@@ -252,11 +253,12 @@ public sealed class CollectionsFamilyConformanceTests
                 // set is what says whether the key was ever absent.
                 expected.TryAssertKeyWith(
                     "membership",
-                    wantMembership => Assert.Equal(
-                        wantMembership.EnumerateArray()
+                    wantMembership => wantMembership.AssertEqual(
+                        w => w.EnumerateArray()
                             .Select(value => value.GetString()!)
-                            .Order(StringComparer.Ordinal),
-                        map.PresentKeys().Order(StringComparer.Ordinal)));
+                            .Order(StringComparer.Ordinal)
+                            .ToArray(),
+                        map.PresentKeys().Order(StringComparer.Ordinal).ToArray()));
 
                 // Handle stability: the law separating an atomic move from a
                 // remove + re-mint. A reorder keeps the entry's node.
@@ -273,15 +275,18 @@ public sealed class CollectionsFamilyConformanceTests
                             {
                                 var after = map.TryGetHandle(entryName, out var h) ? h : null;
                                 handlesBefore.TryGetValue(entryName, out var before);
-                                if (wantStable.GetBoolean())
+                                wantStable.Against(after, (expect, got) =>
                                 {
-                                    Assert.NotNull(before);
-                                    Assert.Same(before, after);
-                                }
-                                else
-                                {
-                                    Assert.NotSame(before, after);
-                                }
+                                    if (expect.GetBoolean())
+                                    {
+                                        Assert.NotNull(before);
+                                        Assert.Same(before, got);
+                                    }
+                                    else
+                                    {
+                                        Assert.NotSame(before, got);
+                                    }
+                                });
                             });
                         }
                     });

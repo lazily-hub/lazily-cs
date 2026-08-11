@@ -137,18 +137,24 @@ public sealed class NodeIdExactRangeConformanceTests
             // `outcome` is the corpus-wide statement of what a decoder may do. lazily-cs
             // reads it as a constraint on the fixture: both branches oblige it to decode,
             // because a ulong represents everything the wire type allows.
-            expect.AssertKeyWith("outcome", want =>
+            var message = Decode(scenario, expect);
+            accepted += 1;
+
+            // Compared against the run's own result, not against the fixture's vocabulary alone
+            // (#lzcsuncomparedvalues). Checking the declared token against `declaredOutcomes` is
+            // the fixture checking itself; what makes this an assertion about the BINDING is that
+            // lazily-cs decodes on both declared outcomes, so the run-produced operand is the
+            // decoded message this scenario yielded.
+            expect.AssertKeyWith("outcome", want => want.Against(message, (w, decoded) =>
             {
-                var outcome = want.GetString()!;
+                var outcome = w.GetString()!;
                 Assert.True(
                     declaredOutcomes.Contains(outcome, StringComparer.Ordinal),
                     $"{where}: outcome {outcome} is not one the fixture's own `outcomes` "
                     + $"vocabulary declares [{string.Join(", ", declaredOutcomes)}]");
+                Assert.NotNull(decoded);
                 observedOutcomes.Add(outcome);
-            });
-
-            var message = Decode(scenario, expect);
-            accepted += 1;
+            }));
             observedCodecs.Add(scenario.GetProperty("codec").GetString()!);
 
             var snapshot = Assert.IsType<SnapshotMessage>(message);
@@ -183,8 +189,8 @@ public sealed class NodeIdExactRangeConformanceTests
         meta.AssertKey("scenario_count", accepted);
         meta.AssertKeyWith(
             "codecs",
-            want => Assert.Equal(
-                want.EnumerateArray().Select(item => item.GetString())
+            want => want.AssertEqual(
+                w => w.EnumerateArray().Select(item => item.GetString())
                     .OrderBy(item => item, StringComparer.Ordinal).ToArray(),
                 observedCodecs.ToArray()));
 

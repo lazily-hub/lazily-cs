@@ -450,60 +450,62 @@ public sealed class IngressFamilyConformanceTests
                         // Every comparison carries `where`: an unlabelled "Expected 0, Actual 1"
                         // names neither the fixture, the step, nor the field, which makes a red
                         // gate useless as evidence.
-                        want.AssertKeyWith("lifecycle", v => Same(where, key, "lifecycle",
-                            ParseLifecycle(v.GetString()!), got.Lifecycle));
-                        want.AssertKeyWith("generation", v => Same(where, key, "generation",
-                            v.GetInt64(), got.Generation));
-                        want.AssertKeyWith("delivered_through", v => Same(where, key, "watermark",
-                            OptionalInt64(v), got.DeliveredThrough));
-                        want.AssertKeyWith("buffered", v => Same(where, key, "buffered",
-                            v.GetInt32(), got.Buffered));
-                        want.AssertKeyWith("consecutive_errors", v => Same(where, key, "consecutive_errors",
-                            v.GetInt32(), got.ConsecutiveErrors));
-                        want.AssertKeyWith("window", v => Same(where, key, "window",
-                            OptionalInt64(v),
-                            model.Value(key) is { HasValue: true } window ? window.Value : null));
-                        want.AssertKeyWith("readiness", v => Same(where, key, "readiness",
-                            ParseReadiness(v.GetString()!), model.Readiness(key)));
+                        want.AssertKeyWith("lifecycle", v => v.Against(got.Lifecycle, (w, g) =>
+                            Same(where, key, "lifecycle", ParseLifecycle(w.GetString()!), g)));
+                        want.AssertKeyWith("generation", v => v.Against(got.Generation, (w, g) =>
+                            Same(where, key, "generation", w.GetInt64(), g)));
+                        want.AssertKeyWith("delivered_through", v => v.Against(got.DeliveredThrough, (w, g) =>
+                            Same(where, key, "watermark", OptionalInt64(w), g)));
+                        want.AssertKeyWith("buffered", v => v.Against(got.Buffered, (w, g) =>
+                            Same(where, key, "buffered", w.GetInt32(), g)));
+                        want.AssertKeyWith("consecutive_errors", v => v.Against(got.ConsecutiveErrors, (w, g) =>
+                            Same(where, key, "consecutive_errors", w.GetInt32(), g)));
+                        want.AssertKeyWith("window", v => v.Against<long?>(
+                            model.Value(key) is { HasValue: true } window ? window.Value : null,
+                            (w, g) => Same(where, key, "window", OptionalInt64(w), g)));
+                        want.AssertKeyWith("readiness", v => v.Against(model.Readiness(key), (w, g) =>
+                            Same(where, key, "readiness", ParseReadiness(w.GetString()!), g)));
 
                         if (want.GetProperty("authority").ValueKind == JsonValueKind.Null)
                         {
-                            want.AssertKeyWith("authority", value =>
-                            {
-                                Assert.Equal(JsonValueKind.Null, value.ValueKind);
-                                Same<IngressAuthority?>(
-                                    where, key, "authority", null, model.Authority(key));
-                            });
+                            want.AssertKeyWith("authority", value => value.Against(
+                                model.Authority(key),
+                                (w, g) =>
+                                {
+                                    Assert.Equal(JsonValueKind.Null, w.ValueKind);
+                                    Same<IngressAuthority?>(where, key, "authority", null, g);
+                                }));
                         }
                         else
                         {
-                            want.AssertObjectKey("authority", wantAuthority => Same(
-                                where, key, "authority",
-                                new IngressAuthority(
-                                    wantAuthority.AssertKeyInto("generation", v => v.GetInt64()),
-                                    wantAuthority.AssertKeyInto("delivered_through", OptionalInt64),
-                                    wantAuthority.AssertKeyInto("stamped_at", v => v.GetInt64())),
-                                model.Authority(key)));
+                            want.AssertObjectKey("authority", wantAuthority => wantAuthority.CompareInto(
+                                into => new IngressAuthority(
+                                    into.AssertKeyInto("generation", v => v.GetInt64()),
+                                    into.AssertKeyInto("delivered_through", OptionalInt64),
+                                    into.AssertKeyInto("stamped_at", v => v.GetInt64())),
+                                model.Authority(key),
+                                (w, g) => Same(where, key, "authority", w, g)));
                         }
 
                         if (want.GetProperty("retry").ValueKind == JsonValueKind.Null)
                         {
-                            want.AssertKeyWith("retry", value =>
-                            {
-                                Assert.Equal(JsonValueKind.Null, value.ValueKind);
-                                Same<IngressRetry?>(
-                                    where, key, "retry", null, model.Retry(key));
-                            });
+                            want.AssertKeyWith("retry", value => value.Against(
+                                model.Retry(key),
+                                (w, g) =>
+                                {
+                                    Assert.Equal(JsonValueKind.Null, w.ValueKind);
+                                    Same<IngressRetry?>(where, key, "retry", null, g);
+                                }));
                         }
                         else
                         {
-                            want.AssertObjectKey("retry", wantRetry => Same(
-                                where, key, "retry",
-                                new IngressRetry(
-                                    wantRetry.AssertKeyInto("attempt", v => v.GetInt32()),
-                                    wantRetry.AssertKeyInto("backoff", v => v.GetInt64()),
-                                    wantRetry.AssertKeyInto("resume_from", v => v.GetInt64())),
-                                model.Retry(key)));
+                            want.AssertObjectKey("retry", wantRetry => wantRetry.CompareInto(
+                                into => new IngressRetry(
+                                    into.AssertKeyInto("attempt", v => v.GetInt32()),
+                                    into.AssertKeyInto("backoff", v => v.GetInt64()),
+                                    into.AssertKeyInto("resume_from", v => v.GetInt64())),
+                                model.Retry(key),
+                                (w, g) => Same(where, key, "retry", w, g)));
                         }
                     });
                 }
@@ -513,12 +515,12 @@ public sealed class IngressFamilyConformanceTests
             "receipts",
             receipts =>
             {
-                receipts.AssertKeyWith("accepted", v =>
-                    Same(where, "receipts", "accepted", v.GetInt32(), model.AcceptedLen()));
-                receipts.AssertKeyWith("dropped", v =>
-                    Same(where, "receipts", "dropped", v.GetInt32(), model.DroppedLen()));
-                receipts.AssertKeyWith("error", v =>
-                    Same(where, "receipts", "error", v.GetInt32(), model.ErrorsLen()));
+                receipts.AssertKeyWith("accepted", v => v.Against(model.AcceptedLen(), (w, g) =>
+                    Same(where, "receipts", "accepted", w.GetInt32(), g)));
+                receipts.AssertKeyWith("dropped", v => v.Against(model.DroppedLen(), (w, g) =>
+                    Same(where, "receipts", "dropped", w.GetInt32(), g)));
+                receipts.AssertKeyWith("error", v => v.Against(model.ErrorsLen(), (w, g) =>
+                    Same(where, "receipts", "error", w.GetInt32(), g)));
             });
     }
 
@@ -570,12 +572,12 @@ public sealed class IngressFamilyConformanceTests
                                 var at = slot;
                                 wantScope.AssertKeyWith(kinds[at], wantKind =>
                                 {
-                                    var want = wantKind.GetBoolean();
                                     var invalidated = wasValid[at] && !isValid[at];
-                                    Assert.True(
-                                        invalidated == want,
-                                        $"{where}: {key}.{kinds[at]} invalidation expected {want} " +
-                                        $"(was valid={wasValid[at]}, now valid={isValid[at]})");
+                                    wantKind.Against(invalidated, (expect, got) => Assert.True(
+                                        got == expect.GetBoolean(),
+                                        $"{where}: {key}.{kinds[at]} invalidation expected " +
+                                        $"{expect.GetBoolean()} " +
+                                        $"(was valid={wasValid[at]}, now valid={isValid[at]})"));
                                 });
                                 checks++;
                             }
@@ -590,12 +592,12 @@ public sealed class IngressFamilyConformanceTests
                         var at = slot;
                         wantReceipts.AssertKeyWith(channels[at], wantChannel =>
                         {
-                            var want = wantChannel.GetBoolean();
                             var invalidated = before.Receipts[at] && !after.Receipts[at];
-                            Assert.True(
-                                invalidated == want,
-                                $"{where}: receipts.{channels[at]} invalidation expected {want} " +
-                                $"(was valid={before.Receipts[at]}, now valid={after.Receipts[at]})");
+                            wantChannel.Against(invalidated, (expect, got) => Assert.True(
+                                got == expect.GetBoolean(),
+                                $"{where}: receipts.{channels[at]} invalidation expected " +
+                                $"{expect.GetBoolean()} " +
+                                $"(was valid={before.Receipts[at]}, now valid={after.Receipts[at]})"));
                         });
                         checks++;
                     }

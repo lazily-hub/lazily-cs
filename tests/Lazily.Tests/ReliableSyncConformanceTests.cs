@@ -155,7 +155,7 @@ public sealed class ReliableSyncConformanceTests
         var decision = coordinator.Ingest(delta);
         spanExpected.AssertKeyWith(
             "action",
-            want => Assert.Equal(Enum.Parse<ResyncAction>(want.GetString()!), decision.Action));
+            want => want.AssertEqual(w => Enum.Parse<ResyncAction>(w.GetString()!), decision.Action));
         spanExpected.AssertKey("applied", decision.Action == ResyncAction.Apply);
         var batched = new GraphProjector();
         batched.Apply(delta);
@@ -194,7 +194,7 @@ public sealed class ReliableSyncConformanceTests
             "reliable-sync/multi_epoch_delta.json scenario gap_rule_unchanged_under_span");
         gapExpected.AssertKeyWith(
             "action",
-            want => Assert.Equal(Enum.Parse<ResyncAction>(want.GetString()!), gapDecision.Action));
+            want => want.AssertEqual(w => Enum.Parse<ResyncAction>(w.GetString()!), gapDecision.Action));
         gapExpected.AssertKey("applied", gapDecision.Action == ResyncAction.Apply);
         gapExpected.AssertKey("request_from", gapDecision.FromEpoch);
         gapExpected.AssertKey("receiver_last_epoch_after", gap.LastEpoch);
@@ -242,9 +242,9 @@ public sealed class ReliableSyncConformanceTests
         Assert.Equal(addedTags.Count > 0, set.Present);
         addExpect.AssertKeyWith(
             "reason",
-            want => Assert.All(
-                addedTags,
-                tag => Assert.Contains(tag, want.GetString()!, StringComparison.Ordinal)));
+            want => want.Against(addedTags, (expect, tags) => Assert.All(
+                tags,
+                tag => Assert.Contains(tag, expect.GetString()!, StringComparison.Ordinal))));
         addExpect.Verify();
 
         var lwwScenario = scenarios[1];
@@ -264,15 +264,21 @@ public sealed class ReliableSyncConformanceTests
             write.GetProperty("value").GetBoolean());
         }
         lwwExpect.AssertKey("value", register.Value);
-        // `resolution` names the conflict rule. Assert the RULE, not the label: the value
-        // that survives must be the one carried by the highest-stamped write.
-        lwwExpect.AssertKeyWith("resolution", want => Assert.Equal("max_stamp", want.GetString()));
         var winner = writes
             .OrderByDescending(write => ParseStamp(write.GetProperty("stamp")).WallTime)
             .ThenByDescending(write => ParseStamp(write.GetProperty("stamp")).Logical)
             .ThenByDescending(write => ParseStamp(write.GetProperty("stamp")).Peer)
             .First();
-        Assert.Equal(winner.GetProperty("value").GetBoolean(), register.Value);
+        // `resolution` names the conflict rule. Assert the RULE, not the label, and assert it
+        // THROUGH this key (#lzcsuncomparedvalues): `Assert.Equal("max_stamp", want.GetString())`
+        // compared the fixture against a literal written here, so it passed against a register
+        // that resolved by arrival order, and the rule assertion that followed was booked against
+        // no key at all.
+        lwwExpect.AssertKeyWith("resolution", want => want.Against(register.Value, (expect, got) =>
+        {
+            Assert.Equal("max_stamp", expect.GetString());
+            Assert.Equal(winner.GetProperty("value").GetBoolean(), got);
+        }));
         // `order_independent`: LWW keeps the highest stamp whatever order it arrives in.
         var reversedRegister = new WireLwwRegister<bool>(
             ParseStamp(writes[^1].GetProperty("stamp")),
@@ -308,10 +314,10 @@ public sealed class ReliableSyncConformanceTests
             new WireStamp(1, 0, 0));
         }
         var liveBefore = registry.LiveDocuments().ToArray();
-        cascadeExpect.AssertKeyWith("live_docs_before", want => Assert.Equal(Strings(want), liveBefore));
+        cascadeExpect.AssertKeyWith("live_docs_before", want => want.AssertEqual(w => Strings(w), liveBefore));
         ApplyLiveness(registry, cascade.GetProperty("op"));
         var liveAfter = registry.LiveDocuments().ToArray();
-        cascadeExpect.AssertKeyWith("live_docs_after", want => Assert.Equal(Strings(want), liveAfter));
+        cascadeExpect.AssertKeyWith("live_docs_after", want => want.AssertEqual(w => Strings(w), liveAfter));
         // `cascade`: ONE process death dropped MORE THAN ONE document, and left every other
         // process's documents alone. Either half on its own is satisfied by an unrelated
         // single drop.
@@ -346,7 +352,7 @@ public sealed class ReliableSyncConformanceTests
             forward.LiveDocuments().SequenceEqual(backward.LiveDocuments(), StringComparer.Ordinal));
         convergeExpect.AssertKeyWith(
             "converged_live_docs",
-            want => Assert.Equal(Strings(want), forward.LiveDocuments()));
+            want => want.AssertEqual(w => Strings(w), forward.LiveDocuments()));
         // `per_doc_isolation`: the aggregate is per document, so one document's retry
         // convergence never rewrites another's.
         convergeExpect.AssertKey(
@@ -485,7 +491,7 @@ public sealed class ReliableSyncConformanceTests
             $"reliable-sync/coalesce scenario {ackScenario.GetProperty("name").GetString()}");
         ackExpect.AssertKeyWith(
             "retained_epochs_after",
-            want => Assert.Equal(Ulongs(want), ackOutbox.RetainedEpochs));
+            want => want.AssertEqual(w => Ulongs(w), ackOutbox.RetainedEpochs));
         // `retained_after_ack` is the DEPTH the ack leaves behind — the bound the scenario
         // exists to pin. The epoch list alone does not state that the bound was respected.
         ackExpect.AssertKey("retained_after_ack", ackOutbox.RetainedEpochs.Count);
@@ -887,8 +893,8 @@ replay.RootElement.GetProperty("wire").GetRawText(),
                 expected.AssertKeyWith(name, want =>
                 {
                     var node = ulong.Parse(name, System.Globalization.CultureInfo.InvariantCulture);
-                    Assert.Equal(
-                        want.EnumerateArray().Select(value => value.GetByte()).ToArray(),
+                    want.AssertEqual(
+                        w => w.EnumerateArray().Select(value => value.GetByte()).ToArray(),
                         _state[node]);
                 });
             }

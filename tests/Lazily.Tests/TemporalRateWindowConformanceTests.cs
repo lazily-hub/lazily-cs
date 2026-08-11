@@ -138,18 +138,18 @@ public sealed class TemporalRateWindowConformanceTests
                         expected.AssertKey("fired", cell.HasFired);
                         expected.AssertKeyWith(
                             "value",
-                            value =>
+                            value => value.Against(cell.Value, (expect, got) =>
                             {
-                                if (value.ValueKind == JsonValueKind.Null)
+                                if (expect.ValueKind == JsonValueKind.Null)
                                 {
-                                    Assert.False(cell.Value.HasValue);
+                                    Assert.False(got.HasValue);
                                 }
                                 else
                                 {
-                                    Assert.True(cell.Value.HasValue);
-                                    Assert.Equal("()", value.GetString());
+                                    Assert.True(got.HasValue);
+                                    Assert.Equal("()", expect.GetString());
                                 }
-                            });
+                            }));
                     };
                     break;
                 }
@@ -194,8 +194,8 @@ public sealed class TemporalRateWindowConformanceTests
                             // the nastiest shape. An unrecognised spelling of the expected phase
                             // did not skip the assertion — it silently asserted `Live` instead,
                             // so the fixture said one thing and the runner checked another.
-                            want => Assert.Equal(
-                                want.GetString() switch
+                            want => want.AssertEqual(
+                                w => w.GetString() switch
                                 {
                                     "Expired" => DeadlinePhase.Expired,
                                     "Live" => DeadlinePhase.Live,
@@ -226,8 +226,8 @@ public sealed class TemporalRateWindowConformanceTests
             assertState(expected);
             expected.TryAssertKeyWith(
                 "next_fire",
-                expectedNext => Assert.Equal(
-                    expectedNext.ValueKind == JsonValueKind.Null ? null : expectedNext.GetInt64(),
+                expectedNext => expectedNext.AssertEqual(
+                    w => w.ValueKind == JsonValueKind.Null ? null : w.GetInt64(),
                     nextFire()));
             expected.Verify();
             _ = probe.Get();
@@ -348,7 +348,9 @@ public sealed class TemporalRateWindowConformanceTests
             AssertOptionalString(step.GetProperty("returns"), returned);
             var expected = FixtureAssertions.Of(step, "expected", $"{fixture} step {index}");
             AssertInvalidation(fixture, index, expected, "output", probe);
-            expected.AssertKeyWith("output", want => AssertOptionalString(want, outputCell.Get()));
+            expected.AssertKeyWith("output", want => want.Against(
+                outputCell.Get(),
+                (expect, got) => AssertOptionalString(expect, got)));
             expected.Verify();
             _ = probe.Get();
             index++;
@@ -464,7 +466,9 @@ public sealed class TemporalRateWindowConformanceTests
             AssertOptionalInt(step.GetProperty("returns"), returned);
             var expected = FixtureAssertions.Of(step, "expected", $"{fixture} step {index}");
             AssertInvalidation(fixture, index, expected, "output", probe);
-            expected.AssertKeyWith("output", want => AssertOptionalInt(want, outputCell.Get()));
+            expected.AssertKeyWith("output", want => want.Against(
+                outputCell.Get(),
+                (expect, got) => AssertOptionalInt(expect, got)));
             expected.Verify();
             _ = probe.Get();
             index++;
@@ -514,9 +518,9 @@ public sealed class TemporalRateWindowConformanceTests
             "invalidates",
             want => want.AssertKeyWith(
                 name,
-                wantKind => Assert.True(
-                    actual == wantKind.GetBoolean(),
-                    $"{fixture} step {index}: invalidates.{name}")));
+                wantKind => wantKind.Against(actual, (expect, got) => Assert.True(
+                    got == expect.GetBoolean(),
+                    $"{fixture} step {index}: invalidates.{name}"))));
     }
 
     private static void AssertOptionalString(JsonElement expected, Optional<string> actual)

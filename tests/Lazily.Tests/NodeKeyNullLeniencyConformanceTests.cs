@@ -251,20 +251,20 @@ public sealed class NodeKeyNullLeniencyConformanceTests
         meta.AssertKey("scenario_count", replayed);
         meta.AssertKeyWith(
             "codecs",
-            want => Assert.Equal(
-                want.EnumerateArray().Select(item => item.GetString())
+            want => want.AssertEqual(w =>
+                w.EnumerateArray().Select(item => item.GetString())
                     .OrderBy(item => item, StringComparer.Ordinal).ToArray(),
                 observedCodecs.ToArray()));
         meta.AssertKeyWith(
             "fields",
-            want => Assert.Equal(
-                want.EnumerateArray().Select(item => item.GetString())
+            want => want.AssertEqual(w =>
+                w.EnumerateArray().Select(item => item.GetString())
                     .OrderBy(item => item, StringComparer.Ordinal).ToArray(),
                 observedFields.ToArray()));
         meta.AssertKeyWith(
             "key_forms",
-            want => Assert.Equal(
-                want.EnumerateArray().Select(item => item.GetString())
+            want => want.AssertEqual(w =>
+                w.EnumerateArray().Select(item => item.GetString())
                     .OrderBy(item => item, StringComparer.Ordinal).ToArray(),
                 observedKeyForms.ToArray()));
 

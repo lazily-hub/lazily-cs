@@ -86,9 +86,9 @@ public sealed class TopicCellConformanceTests
                                     var handle = before[name] ?? topicAtStep.ReaderHandle(name);
                                     Assert.NotNull(handle);
                                     var invalidated = !handle!.Peek(out _);
-                                    Assert.True(
-                                        invalidated == wantProbe.GetBoolean(),
-                                        $"{fixture} step {at}: invalidates.{name}");
+                                    wantProbe.Against(invalidated, (expect, got) => Assert.True(
+                                        got == expect.GetBoolean(),
+                                        $"{fixture} step {at}: invalidates.{name}"));
                                 });
                             invalidationChecks++;
                         }
@@ -192,7 +192,7 @@ public sealed class TopicCellConformanceTests
                         want.AssertKey("cursor", actual!.Cursor);
                         want.AssertKeyWith(
                             "durability",
-                            d => Assert.Equal(ParseDurability(d.GetString()!), actual.Durability));
+                            d => d.AssertEqual(w => ParseDurability(w.GetString()!), actual.Durability));
                         want.AssertKey("connected", actual.Connected);
                     });
                 }
@@ -205,9 +205,9 @@ public sealed class TopicCellConformanceTests
                 foreach (var read in reads.EnumerateObject())
                 {
                     var name = read.Name;
-                    reads.AssertKeyWith(name, want => Assert.Equal(
-                        want.EnumerateArray().Select(value => value.GetString()),
-                        topic.ReadStream(name)));
+                    reads.AssertKeyWith(name, want => want.AssertEqual(
+                        w => w.EnumerateArray().Select(value => value.GetString()).ToArray(),
+                        topic.ReadStream(name).ToArray()));
                 }
             });
 

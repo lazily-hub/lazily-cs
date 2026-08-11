@@ -638,11 +638,11 @@ public sealed class QueueFamilyConformanceTests
                         invalidates.AssertKeyWith(name, want =>
                         {
                             var wasInvalidated = !q.Probe(name).StillValid();
-                            Assert.True(
-                                wasInvalidated == want.GetBoolean(),
+                            want.Against(wasInvalidated, (expect, got) => Assert.True(
+                                got == expect.GetBoolean(),
                                 $"{flavor.Name} {fixture} step {at}: invalidates.{name} — expected " +
-                                $"{want.GetBoolean()}, got {wasInvalidated}. Reader kinds are " +
-                                "independent: a push onto a non-empty queue must not touch head.");
+                                $"{expect.GetBoolean()}, got {got}. Reader kinds are " +
+                                "independent: a push onto a non-empty queue must not touch head."));
                         });
                         checks++;
                     }
@@ -654,23 +654,23 @@ public sealed class QueueFamilyConformanceTests
                 Assert.Equal(wantReturn.GetString(), returned);
             }
 
-            expected.TryAssertKeyWith("len", want => Assert.Equal(want.GetInt32(), q.Len()));
-            expected.TryAssertKeyWith("is_empty", want => Assert.Equal(want.GetBoolean(), q.IsEmpty()));
-            expected.TryAssertKeyWith("is_full", want => Assert.Equal(want.GetBoolean(), q.IsFull()));
-            expected.TryAssertKeyWith("closed", want => Assert.Equal(want.GetBoolean(), q.IsClosed()));
+            expected.TryAssertKeyWith("len", want => want.AssertEqual(w => w.GetInt32(), q.Len()));
+            expected.TryAssertKeyWith("is_empty", want => want.AssertEqual(w => w.GetBoolean(), q.IsEmpty()));
+            expected.TryAssertKeyWith("is_full", want => want.AssertEqual(w => w.GetBoolean(), q.IsFull()));
+            expected.TryAssertKeyWith("closed", want => want.AssertEqual(w => w.GetBoolean(), q.IsClosed()));
             expected.TryAssertKeyWith(
                 "head",
-                want => Assert.Equal(
-                    want.ValueKind == JsonValueKind.Null ? null : want.GetString(),
+                want => want.AssertEqual(
+                    w => w.ValueKind == JsonValueKind.Null ? null : w.GetString(),
                     q.Head()));
 
             // `elements` pins the whole FIFO body, which the scalar reads above cannot:
             // `len` plus `head` is satisfied by a queue that reordered its tail.
             expected.TryAssertKeyWith(
                 "elements",
-                want => Assert.Equal(
-                    want.EnumerateArray().Select(value => value.GetString()),
-                    q.Elements()));
+                want => want.AssertEqual(
+                    w => w.EnumerateArray().Select(value => value.GetString()).ToArray(),
+                    q.Elements().ToArray()));
 
             expected.Verify();
             index++;
@@ -754,11 +754,11 @@ public sealed class QueueFamilyConformanceTests
                                 handle is not null,
                                 $"{flavor.Name} {fixture} step {at}: no reader for '{name}'");
                             var invalidated = !handle!.StillValid();
-                            Assert.True(
-                                invalidated == wantProbe.GetBoolean(),
+                            wantProbe.Against(invalidated, (expect, got) => Assert.True(
+                                got == expect.GetBoolean(),
                                 $"{flavor.Name} {fixture} step {at}: invalidates.{name} — expected " +
-                                $"{wantProbe.GetBoolean()}, got {invalidated}. Cursors are independent: " +
-                                "advancing one subscriber must not wake another.");
+                                $"{expect.GetBoolean()}, got {got}. Cursors are independent: " +
+                                "advancing one subscriber must not wake another."));
                         });
                         checks++;
                     }
@@ -777,8 +777,8 @@ public sealed class QueueFamilyConformanceTests
                     foreach (var read in reads.EnumerateObject())
                     {
                         var name = read.Name;
-                        reads.AssertKeyWith(name, want => Assert.Equal(
-                            want.EnumerateArray().Select(e => e.GetString()!).ToArray(),
+                        reads.AssertKeyWith(name, want => want.AssertEqual(
+                            w => w.EnumerateArray().Select(e => e.GetString()!).ToArray(),
                             topic.ReadStream(name)));
                     }
                 });
@@ -862,10 +862,10 @@ public sealed class QueueFamilyConformanceTests
                         want.AssertKeyWith(name, wantProbe =>
                         {
                             var invalidated = !queue.Probe(name).StillValid();
-                            Assert.True(
-                                invalidated == wantProbe.GetBoolean(),
+                            wantProbe.Against(invalidated, (expect, got) => Assert.True(
+                                got == expect.GetBoolean(),
                                 $"{flavor.Name} {fixture} step {at}: invalidates.{name} — expected " +
-                                $"{wantProbe.GetBoolean()}, got {invalidated}");
+                                $"{expect.GetBoolean()}, got {got}"));
                         });
                         checks++;
                     }
@@ -874,13 +874,13 @@ public sealed class QueueFamilyConformanceTests
             AssertReturns(flavor, fixture, index, step, returned);
             expected.AssertKeyWith(
                 "pending",
-                want => AssertPending(flavor, fixture, at, queue, want));
+                want => want.Against(queue, (w, q) => AssertPending(flavor, fixture, at, q, w)));
             expected.AssertKeyWith(
                 "in_flight",
-                want => AssertInFlight(flavor, fixture, at, queue, want));
+                want => want.Against(queue, (w, q) => AssertInFlight(flavor, fixture, at, q, w)));
             expected.AssertKeyWith(
                 "dead_letters",
-                want => AssertDeadLetters(flavor, fixture, at, queue, want));
+                want => want.Against(queue, (w, q) => AssertDeadLetters(flavor, fixture, at, q, w)));
 
             expected.AssertObjectKey(
                 "reads",
@@ -1085,7 +1085,7 @@ public sealed class QueueFamilyConformanceTests
                 want.AssertKey("cursor", state!.Cursor);
                 want.AssertKeyWith(
                     "durability",
-                    d => Assert.Equal(ReadDurability(d.GetString()!), state.Durability));
+                    d => d.AssertEqual(w => ReadDurability(w.GetString()!), state.Durability));
                 want.AssertKey("connected", state.Connected);
             });
         }

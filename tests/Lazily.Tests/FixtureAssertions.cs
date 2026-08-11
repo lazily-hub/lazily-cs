@@ -1,3 +1,4 @@
+using System.Runtime.CompilerServices;
 using System.Text.Json;
 
 namespace Lazily.Tests;
@@ -46,8 +47,9 @@ namespace Lazily.Tests;
 /// then compares against a hardcoded literal so that editing the fixture changes
 /// nothing. All three mark the key read and all three prove nothing. So a key becomes
 /// SATISFIED only by going through <see cref="AssertKey(string, bool)"/> and its
-/// siblings, or <see cref="AssertKeyWith"/>, both of which hand the fixture's OWN value
-/// to the comparison — or by <see cref="ExcuseKey"/>, which demands a written reason.
+/// siblings, or by a callback that reaches <see cref="FixtureValue.Against"/> — all of
+/// which hand the fixture's OWN value to the comparison — or by <see cref="ExcuseKey"/>,
+/// which demands a written reason.
 /// </para>
 /// <para>
 /// <see cref="ExcuseKey"/> is two-directional exactly as the coverage allowlist is:
@@ -56,7 +58,7 @@ namespace Lazily.Tests;
 /// with nothing here to compare against.
 /// </para>
 /// <para>
-/// WHAT THIS STILL DOES NOT PROVE (<c>#lzunboundblockguard</c>). Reaching
+/// ASSERTED IS NOT COMPARED (<c>#lzcsuncomparedvalues</c>). Reaching
 /// <see cref="AssertKeyWith"/> proves the callback RECEIVED the fixture's value, never that
 /// it COMPARED it against anything the run produced. <c>CausalReceiptConformanceTests</c>
 /// held the live example until 1df7e7e: <c>AssertKeyWith("nonterminal_outcomes", want =>
@@ -65,23 +67,37 @@ namespace Lazily.Tests;
 /// touched the projection. <c>Assert.All</c> over an empty sequence is vacuously true, so
 /// <c>[]</c> passed, dropping an element passed, and reordering passed — and the key was
 /// still marked SATISFIED, which means every rung below was green over an assertion that
-/// could not fail. The tracker cannot see inside a closure, so nothing here catches it.
+/// could not fail.
 /// </para>
 /// <para>
-/// Two mechanisms were considered and both are recorded rather than half-built. (1) A
-/// RECORDING WRAPPER handed to the callback in place of the raw <see cref="JsonElement"/>
-/// would catch a callback that ignores its argument, but NOT this one — it read the fixture
-/// value at every element. Making it catch this one means the wrapper has to be the only
-/// route to a comparison, which is ~186 call sites and does not distinguish a run-produced
-/// operand from a literal. (2) DIFFERENTIAL RE-EXECUTION — run the callback a second time
-/// against a type-preserving perturbation and require it to fail — needs no call-site edits
-/// and does catch this one (dropping an array element leaves the vacuous <c>Assert.All</c>
-/// green). It was spiked here and rejected on evidence: the runners in this repo RECORD
-/// divergences into a ledger instead of throwing (<c>Check(...)</c>), so a perturbed re-run
-/// signals nothing and instead appends phantom divergences — 8 tests broke that way and 288
-/// keys reported "insensitive", most of them artifacts of that style rather than findings.
-/// Closing this direction means giving the divergence-recording runners a comparison seam
-/// the tracker owns, which is a rewrite of the runner style and not a guard.
+/// The fix is a comparison SEAM the tracker owns. A callback now receives a
+/// <see cref="FixtureValue"/>, and the only route to booking the key COMPARED is
+/// <see cref="FixtureValue.Against"/> (or the <c>AssertEqual</c> / <c>Compare</c> conveniences
+/// over it), which takes the run-produced operand and the comparison and supplies the
+/// FIXTURE'S OWN VALUE itself. So the expected side of every booked comparison came from the
+/// block rather than from the call site, a callback that compares nothing books nothing, and
+/// <see cref="Verify"/> fails it. The run-produced operand is refused when the call site wrote
+/// a compile-time literal there, which is the same defect one level in.
+/// </para>
+/// <para>
+/// Two other mechanisms were spiked first and both are recorded rather than half-built.
+/// (1) A RECORDING WRAPPER that books the key when the callback READS its argument catches a
+/// callback that ignores the fixture, but NOT this one — the vacuous callback read every
+/// element. Recording reads answers "did it look", and the question is "did the value reach a
+/// comparison". (2) DIFFERENTIAL RE-EXECUTION — run the callback again against a
+/// type-preserving perturbation and require it to fail — needs no call-site edits and does
+/// catch this one, but it cannot work here: the runners RECORD divergences into a ledger
+/// instead of throwing (<c>Check(...)</c>), so a perturbed re-run signals nothing and instead
+/// appends phantom divergences into the ledger the test then compares against its declared
+/// set. Measured on the spike: 8 tests broken by the double execution and 288 keys falsely
+/// reported "insensitive". <see cref="FixtureValue.Compare"/> is what lets those runners keep
+/// recording while the comparison becomes visible.
+/// </para>
+/// <para>
+/// The exemption ledger is <see cref="UncomparedCallSites"/>, keyed by <c>File.cs::Member</c>
+/// and two-directional: an uncompared key whose call site is undeclared fails, and a declared
+/// call site that does compare fails as stale. No conformance runner is in it —
+/// <c>ComparisonSeamGuardTests</c> exercises both directions so the lookup is never dead.
 /// </para>
 /// <para>
 /// A key the CORPUS declares to be an English paragraph (<c>assertions.prose</c>,
@@ -118,6 +134,27 @@ public sealed class FixtureAssertions
     private readonly ProseLedger? _ledger;
     private readonly HashSet<string> _read = new(StringComparer.Ordinal);
     private readonly HashSet<string> _asserted = new(StringComparer.Ordinal);
+
+    /// <summary>
+    /// Keys whose fixture value actually reached a COMPARISON the tracker owns
+    /// (<c>#lzcsuncomparedvalues</c>).
+    /// </summary>
+    /// <remarks>
+    /// Distinct from <see cref="_asserted"/>, and the distinction is the whole point. A key is
+    /// ASSERTED when a callback that received its value returned; it is COMPARED only when that
+    /// value reached <see cref="FixtureValue.Against"/> — the seam that supplies the fixture's own
+    /// value to the comparison rather than trusting the callback to have used it. The two sets are
+    /// equal for every entry point below whose comparison the tracker WRITES (`AssertKey`,
+    /// `AssertKeyDeep`, `AssertKeySet`, `Deep`); they diverge exactly at the callback forms, which
+    /// is where the vacuous `nonterminal_outcomes` lived.
+    /// </remarks>
+    private readonly HashSet<string> _compared = new(StringComparer.Ordinal);
+
+    /// <summary>The <c>File.cs::Member</c> that wrote each callback-form key's check.</summary>
+    private readonly Dictionary<string, string> _sites = new(StringComparer.Ordinal);
+
+    /// <summary>Keys whose value was PROJECTED by <see cref="AssertKeyInto"/>.</summary>
+    private readonly HashSet<string> _projected = new(StringComparer.Ordinal);
     private readonly Dictionary<string, string> _excused = new(StringComparer.Ordinal);
     private readonly Dictionary<string, string[]> _discharged = new(StringComparer.Ordinal);
 
@@ -228,6 +265,7 @@ public sealed class FixtureAssertions
             tracker._read.Add(property.Name);
             tracker.MarkAsserted(property.Name);
             tracker._descended.Add(property.Name);
+            tracker._compared.Add(property.Name);
         }
 
         tracker.Verify();
@@ -287,13 +325,84 @@ public sealed class FixtureAssertions
     /// The general form, for comparisons that are not equality — a tolerance, a set
     /// containment, a shape check, or an equality the caller must decode itself.
     /// </remarks>
-    public void AssertKeyWith(string name, Action<JsonElement> check)
+    public void AssertKeyWith(
+        string name,
+        Action<FixtureValue> check,
+        [CallerFilePath] string? file = null,
+        [CallerMemberName] string? member = null)
     {
         _read.Add(name);
         var value = _block.GetProperty(name);
-        Guarded(name, () => check(value));
+        Invoke(name, value, check, file, member);
         MarkAsserted(name);
     }
+
+    /// <summary>
+    /// Run a callback over <paramref name="name"/>'s value with a live comparison seam, and
+    /// remember which call site wrote it.
+    /// </summary>
+    /// <remarks>
+    /// The call site is recorded rather than derived because the exemption ledger is keyed by it:
+    /// <see cref="Verify"/> has to be able to say WHICH callback never compared anything, and
+    /// <c>_where</c> names the fixture, not the source.
+    /// </remarks>
+    private void Invoke(
+        string name,
+        JsonElement value,
+        Action<FixtureValue> check,
+        string? file,
+        string? member)
+    {
+        ArgumentNullException.ThrowIfNull(check);
+        var site = CallSiteOf(file, member);
+        _sites[name] = site;
+        var seam = new ComparisonSeam(() => _compared.Add(name), site, name, _where);
+        Guarded(name, () => check(new FixtureValue(value, seam)));
+    }
+
+    private static string CallSiteOf(string? file, string? member) =>
+        $"{Path.GetFileName(file) ?? "?"}::{member ?? "?"}";
+
+    /// <summary>
+    /// Run a comparison THIS class wrote over <paramref name="name"/>'s value, and book the key
+    /// compared.
+    /// </summary>
+    /// <remarks>
+    /// The typed <see cref="AssertKey(string, bool)"/> family and the structural forms below need
+    /// no seam: the tracker supplies both the fixture's value and the comparison, so "the fixture's
+    /// own value reached a comparison" is not a claim about a closure it cannot see. Routing them
+    /// through the public callback form instead would book every one of them against
+    /// <c>FixtureAssertions.cs</c> as the call site, which is the wrong file to hold an exemption.
+    /// </remarks>
+    private void AssertKeyOwned(
+        string name,
+        Action<JsonElement> compare,
+        string? file = null,
+        string? member = null)
+    {
+        _read.Add(name);
+        var value = _block.GetProperty(name);
+        Guarded(name, () => compare(value));
+        Book(name, file, member);
+        MarkAsserted(name);
+    }
+
+    /// <summary>
+    /// Book <paramref name="name"/> COMPARED through the seam, so the stale-exemption direction
+    /// fires here exactly as it does for a callback (<c>#lzcsuncomparedvalues</c>).
+    /// </summary>
+    /// <remarks>
+    /// Routing the tracker-owned comparisons through the same seam is what stops
+    /// <see cref="UncomparedCallSites"/> from having a blind spot: an entry naming a member whose
+    /// keys all go through <see cref="AssertKey(string, bool)"/> would otherwise sit there forever,
+    /// exempting nothing and reported by nothing.
+    /// </remarks>
+    private void Book(string name, string? file, string? member) =>
+        new ComparisonSeam(
+            () => _compared.Add(name),
+            CallSiteOf(file, member),
+            name,
+            _where).Compared();
 
     /// <summary>
     /// Mark <paramref name="name"/> asserted and return <paramref name="project"/> applied to the
@@ -305,23 +414,84 @@ public sealed class FixtureAssertions
     /// still reaches the comparison, which is the requirement; what this does not do is compare
     /// on its own, so it belongs only where the composite assertion immediately follows.
     /// </remarks>
-    public T AssertKeyInto<T>(string name, Func<JsonElement, T> project)
+    public T AssertKeyInto<T>(
+        string name,
+        Func<JsonElement, T> project,
+        [CallerFilePath] string? file = null,
+        [CallerMemberName] string? member = null)
     {
+        ArgumentNullException.ThrowIfNull(project);
         _read.Add(name);
         var value = _block.GetProperty(name);
+        _sites[name] = CallSiteOf(file, member);
+        _projected.Add(name);
         var projected = project(value);
         MarkAsserted(name);
         return projected;
     }
 
     /// <summary>
+    /// Build a COMPOSITE out of several of this block's keys and compare it against
+    /// <paramref name="actual"/> — the record the run really produced — booking exactly the keys
+    /// <paramref name="build"/> projected.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// The composite form of the comparison seam (<c>#lzcsuncomparedvalues</c>). An
+    /// <see cref="AssertKeyInto"/> on its own books a key ASSERTED without any comparison having
+    /// happened: the projection may be an input the runner feeds to an op, or a field of a record
+    /// nobody ends up comparing. Sequencing the build here is what turns "these keys reached the
+    /// comparison" into something observed rather than assumed — only keys projected DURING
+    /// <paramref name="build"/> are booked, so a field dropped from the composite stops being
+    /// booked without anyone editing this call.
+    /// </para>
+    /// <para>
+    /// What it still does not prove is that <paramref name="build"/> used each projection in the
+    /// record it returns. That gap is why the plain <see cref="AssertKeyInto"/> path books no
+    /// comparison at all and has to be declared in <see cref="UncomparedCallSites"/>.
+    /// </para>
+    /// </remarks>
+    public void CompareInto<TWant, TActual>(
+        Func<FixtureAssertions, TWant> build,
+        TActual actual,
+        Action<TWant, TActual> compare,
+        [CallerArgumentExpression(nameof(actual))] string? actualExpression = null,
+        [CallerFilePath] string? file = null,
+        [CallerMemberName] string? member = null)
+    {
+        ArgumentNullException.ThrowIfNull(build);
+        ArgumentNullException.ThrowIfNull(compare);
+        var site = CallSiteOf(file, member);
+        var before = new HashSet<string>(_projected, StringComparer.Ordinal);
+        var want = build(this);
+        var used = _projected.Where(name => !before.Contains(name)).ToArray();
+        if (used.Length == 0)
+            throw new Xunit.Sdk.XunitException(
+                $"{_where}: CompareInto projected no key of this block — a composite assembled "
+                + "from nothing is compared against nothing");
+        foreach (var name in used)
+        {
+            var seam = new ComparisonSeam(() => _compared.Add(name), site, name, _where);
+            seam.RejectLiteralOperand(actualExpression);
+        }
+
+        compare(want, actual);
+        foreach (var name in used)
+            new ComparisonSeam(() => _compared.Add(name), site, name, _where).Compared();
+    }
+
+    /// <summary>
     /// <see cref="AssertKeyWith"/> for a key the fixture may omit; returns whether it ran.
     /// </summary>
-    public bool TryAssertKeyWith(string name, Action<JsonElement> check)
+    public bool TryAssertKeyWith(
+        string name,
+        Action<FixtureValue> check,
+        [CallerFilePath] string? file = null,
+        [CallerMemberName] string? member = null)
     {
         _read.Add(name);
         if (!_block.TryGetProperty(name, out var value)) return false;
-        Guarded(name, () => check(value));
+        Invoke(name, value, check, file, member);
         MarkAsserted(name);
         return true;
     }
@@ -351,21 +521,34 @@ public sealed class FixtureAssertions
     /// runs the same unread / read-but-not-asserted / stale-excuse rungs the parent does, so
     /// a sub-field the corpus grows later fails without anyone having edited this call site.
     /// </remarks>
-    public void AssertObjectKey(string name, Action<FixtureAssertions> check) =>
-        Descend(name, _block.GetProperty(name), check);
+    public void AssertObjectKey(
+        string name,
+        Action<FixtureAssertions> check,
+        [CallerFilePath] string? file = null,
+        [CallerMemberName] string? member = null) =>
+        Descend(name, _block.GetProperty(name), check, file, member);
 
     /// <summary>
     /// <see cref="AssertObjectKey"/> for a key the fixture may omit; returns whether it ran.
     /// </summary>
-    public bool TryAssertObjectKey(string name, Action<FixtureAssertions> check)
+    public bool TryAssertObjectKey(
+        string name,
+        Action<FixtureAssertions> check,
+        [CallerFilePath] string? file = null,
+        [CallerMemberName] string? member = null)
     {
         _read.Add(name);
         if (!_block.TryGetProperty(name, out var value)) return false;
-        Descend(name, value, check);
+        Descend(name, value, check, file, member);
         return true;
     }
 
-    private void Descend(string name, JsonElement value, Action<FixtureAssertions> check)
+    private void Descend(
+        string name,
+        JsonElement value,
+        Action<FixtureAssertions> check,
+        string? file = null,
+        string? member = null)
     {
         _read.Add(name);
         if (value.ValueKind != JsonValueKind.Object)
@@ -374,6 +557,9 @@ public sealed class FixtureAssertions
                 + "descending is for an object; use AssertKey/AssertKeyWith");
         MarkAsserted(name);
         _descended.Add(name);
+        // The obligation moved DOWN: the child runs the comparison rung over every sub-field, so
+        // the parent key is discharged by the child's Verify(), not by this call returning.
+        Book(name, file, member);
         var child = new FixtureAssertions(value, $"{_where}.{name}", _ledger, recordBind: false);
         Guarded(name, () =>
         {
@@ -406,25 +592,39 @@ public sealed class FixtureAssertions
     /// is that "this really did compare everything" is a claim the guard checks, not one the
     /// call site asserts.
     /// </remarks>
-    public void AssertKeyDeep(string name, System.Text.Json.Nodes.JsonNode? actual) =>
-        DeepCompare(name, _block.GetProperty(name), actual);
+    public void AssertKeyDeep(
+        string name,
+        System.Text.Json.Nodes.JsonNode? actual,
+        [CallerFilePath] string? file = null,
+        [CallerMemberName] string? member = null) =>
+        DeepCompare(name, _block.GetProperty(name), actual, file, member);
 
     /// <summary>
     /// <see cref="AssertKeyDeep"/> for a key the fixture may omit; returns whether it ran.
     /// </summary>
-    public bool TryAssertKeyDeep(string name, Func<System.Text.Json.Nodes.JsonNode?> actual)
+    public bool TryAssertKeyDeep(
+        string name,
+        Func<System.Text.Json.Nodes.JsonNode?> actual,
+        [CallerFilePath] string? file = null,
+        [CallerMemberName] string? member = null)
     {
         _read.Add(name);
         if (!_block.TryGetProperty(name, out var value)) return false;
-        DeepCompare(name, value, actual());
+        DeepCompare(name, value, actual(), file, member);
         return true;
     }
 
-    private void DeepCompare(string name, JsonElement value, System.Text.Json.Nodes.JsonNode? actual)
+    private void DeepCompare(
+        string name,
+        JsonElement value,
+        System.Text.Json.Nodes.JsonNode? actual,
+        string? file = null,
+        string? member = null)
     {
         _read.Add(name);
         MarkAsserted(name);
         _descended.Add(name);
+        Book(name, file, member);
         Guarded(name, () => Xunit.Assert.True(
             System.Text.Json.Nodes.JsonNode.DeepEquals(
                 System.Text.Json.Nodes.JsonNode.Parse(value.GetRawText()),
@@ -432,7 +632,11 @@ public sealed class FixtureAssertions
             $"{_where}: `{name}` — fixture and runner disagree structurally"));
     }
 
-    public void AssertKeySet(string name, IEnumerable<string> actual)
+    public void AssertKeySet(
+        string name,
+        IEnumerable<string> actual,
+        [CallerFilePath] string? file = null,
+        [CallerMemberName] string? member = null)
     {
         _read.Add(name);
         var value = _block.GetProperty(name);
@@ -442,6 +646,7 @@ public sealed class FixtureAssertions
                 + "the key set of a non-object is not a thing this can compare");
         MarkAsserted(name);
         _descended.Add(name);
+        Book(name, file, member);
         var want = value.EnumerateObject()
             .Select(property => property.Name)
             .OrderBy(key => key, StringComparer.Ordinal)
@@ -453,64 +658,115 @@ public sealed class FixtureAssertions
     }
 
     /// <summary>Assert <paramref name="name"/>'s boolean value equals <paramref name="actual"/>.</summary>
-    public void AssertKey(string name, bool actual) =>
-        AssertKeyWith(name, want => Xunit.Assert.Equal(want.GetBoolean(), actual));
+    public void AssertKey(
+        string name,
+        bool actual,
+        [CallerFilePath] string? file = null,
+        [CallerMemberName] string? member = null) =>
+        AssertKeyOwned(name, want => Xunit.Assert.Equal(want.GetBoolean(), actual), file, member);
 
     /// <summary>Assert <paramref name="name"/>'s integer value equals <paramref name="actual"/>.</summary>
-    public void AssertKey(string name, int actual) =>
-        AssertKeyWith(name, want => Xunit.Assert.Equal(want.GetInt32(), actual));
+    public void AssertKey(
+        string name,
+        int actual,
+        [CallerFilePath] string? file = null,
+        [CallerMemberName] string? member = null) =>
+        AssertKeyOwned(name, want => Xunit.Assert.Equal(want.GetInt32(), actual), file, member);
 
     /// <inheritdoc cref="AssertKey(string, int)"/>
-    public void AssertKey(string name, long actual) =>
-        AssertKeyWith(name, want => Xunit.Assert.Equal(want.GetInt64(), actual));
+    public void AssertKey(
+        string name,
+        long actual,
+        [CallerFilePath] string? file = null,
+        [CallerMemberName] string? member = null) =>
+        AssertKeyOwned(name, want => Xunit.Assert.Equal(want.GetInt64(), actual), file, member);
 
     /// <inheritdoc cref="AssertKey(string, int)"/>
-    public void AssertKey(string name, ulong actual) =>
-        AssertKeyWith(name, want => Xunit.Assert.Equal(want.GetUInt64(), actual));
+    public void AssertKey(
+        string name,
+        ulong actual,
+        [CallerFilePath] string? file = null,
+        [CallerMemberName] string? member = null) =>
+        AssertKeyOwned(name, want => Xunit.Assert.Equal(want.GetUInt64(), actual), file, member);
 
     /// <summary>Assert <paramref name="name"/>'s numeric value equals <paramref name="actual"/> within <paramref name="tolerance"/>.</summary>
-    public void AssertKey(string name, double actual, double tolerance) =>
-        AssertKeyWith(
+    public void AssertKey(
+        string name,
+        double actual,
+        double tolerance,
+        [CallerFilePath] string? file = null,
+        [CallerMemberName] string? member = null) =>
+        AssertKeyOwned(
             name,
             want => Xunit.Assert.True(
                 Math.Abs(want.GetDouble() - actual) <= tolerance,
-                $"expected {want.GetDouble()} ± {tolerance}, got {actual}"));
+                $"expected {want.GetDouble()} ± {tolerance}, got {actual}"),
+            file,
+            member);
 
     /// <summary>Assert <paramref name="name"/>'s string value equals <paramref name="actual"/>.</summary>
-    public void AssertKey(string name, string? actual) =>
-        AssertKeyWith(name, want => Xunit.Assert.Equal(want.GetString(), actual));
+    public void AssertKey(
+        string name,
+        string? actual,
+        [CallerFilePath] string? file = null,
+        [CallerMemberName] string? member = null) =>
+        AssertKeyOwned(name, want => Xunit.Assert.Equal(want.GetString(), actual), file, member);
 
     /// <summary>Assert <paramref name="name"/>'s array of strings equals <paramref name="actual"/>.</summary>
-    public void AssertKey(string name, IEnumerable<string?> actual) =>
-        AssertKeyWith(
+    public void AssertKey(
+        string name,
+        IEnumerable<string?> actual,
+        [CallerFilePath] string? file = null,
+        [CallerMemberName] string? member = null) =>
+        AssertKeyOwned(
             name,
             want => Xunit.Assert.Equal(
                 want.EnumerateArray().Select(item => item.GetString()).ToArray(),
-                actual.ToArray()));
+                actual.ToArray()),
+            file,
+            member);
 
     /// <summary>Assert <paramref name="name"/>'s array of integers equals <paramref name="actual"/>.</summary>
-    public void AssertKey(string name, IEnumerable<long> actual) =>
-        AssertKeyWith(
+    public void AssertKey(
+        string name,
+        IEnumerable<long> actual,
+        [CallerFilePath] string? file = null,
+        [CallerMemberName] string? member = null) =>
+        AssertKeyOwned(
             name,
             want => Xunit.Assert.Equal(
                 want.EnumerateArray().Select(item => item.GetInt64()).ToArray(),
-                actual.ToArray()));
+                actual.ToArray()),
+            file,
+            member);
 
     /// <inheritdoc cref="AssertKey(string, IEnumerable{long})"/>
-    public void AssertKey(string name, IEnumerable<int> actual) =>
-        AssertKeyWith(
+    public void AssertKey(
+        string name,
+        IEnumerable<int> actual,
+        [CallerFilePath] string? file = null,
+        [CallerMemberName] string? member = null) =>
+        AssertKeyOwned(
             name,
             want => Xunit.Assert.Equal(
                 want.EnumerateArray().Select(item => item.GetInt32()).ToArray(),
-                actual.ToArray()));
+                actual.ToArray()),
+            file,
+            member);
 
     /// <summary>Assert <paramref name="name"/>'s array of bytes equals <paramref name="actual"/>.</summary>
-    public void AssertKey(string name, IEnumerable<byte> actual) =>
-        AssertKeyWith(
+    public void AssertKey(
+        string name,
+        IEnumerable<byte> actual,
+        [CallerFilePath] string? file = null,
+        [CallerMemberName] string? member = null) =>
+        AssertKeyOwned(
             name,
             want => Xunit.Assert.Equal(
                 want.EnumerateArray().Select(item => item.GetByte()).ToArray(),
-                actual.ToArray()));
+                actual.ToArray()),
+            file,
+            member);
 
     /// <summary>
     /// Declare that <paramref name="name"/> cannot be asserted here, and say why.
@@ -639,6 +895,31 @@ public sealed class FixtureAssertions
                 + "never compared the fixture's own value against anything, so editing the "
                 + "fixture changes nothing; route it through AssertKey/AssertKeyWith, or "
                 + "declare an ExcuseKey with a reason");
+
+        // #lzcsuncomparedvalues. A key the runner ASSERTED whose value never reached a comparison
+        // the tracker owns. Every rung above is satisfied — it is read, asserted, not excused —
+        // by a callback that returned. `nonterminal_outcomes` is the live example: it read every
+        // element of the fixture's array, asserted a property of the ReceiptOutcome ENUM, and
+        // touched the projection with nothing. This is the rung that separates "the callback
+        // returned" from "the fixture's own value was compared against what the run produced".
+        var uncompared = present
+            .Where(name => _asserted.Contains(name)
+                && !_compared.Contains(name)
+                && !_excused.ContainsKey(name)
+                && !_discharged.ContainsKey(name)
+                && !UncomparedCallSites.Declared.ContainsKey(SiteOf(name)))
+            .OrderBy(name => name, StringComparer.Ordinal)
+            .ToArray();
+        if (uncompared.Length > 0)
+            throw new Xunit.Sdk.XunitException(
+                $"{_where}: assertion key(s) "
+                + $"[{string.Join(", ", uncompared.Select(name => $"{name} ({SiteOf(name)})"))}] "
+                + "were asserted by a callback that never compared the fixture's own value "
+                + "against anything the run produced — a callback that returns is not a "
+                + "comparison, and one over an empty sequence returns whatever it was given. "
+                + "Route the comparison through the value's own seam (`want.Against(got, ...)`, "
+                + "`want.AssertEqual(decode, got)`, `want.Compare(decode, got)`), or declare the "
+                + "call site in UncomparedCallSites with a reason");
 
         // #lzsubblockkeyset. An OBJECT value that was asserted without its key set being
         // checked is the null form one level down: the five sub-fields a call site named are
@@ -769,9 +1050,14 @@ public sealed class FixtureAssertions
 
         _read.Add(ProseDeclaration);
         MarkAsserted(ProseDeclaration);
+        _compared.Add(ProseDeclaration);
         _ledger?.BlockVerified(_where, proseNames);
         return declared;
     }
+
+    /// <summary>The call site that wrote <paramref name="name"/>'s check, for the ledger key.</summary>
+    private string SiteOf(string name) =>
+        _sites.TryGetValue(name, out var site) ? site : "?::?";
 
     private void MarkAsserted(string name)
     {

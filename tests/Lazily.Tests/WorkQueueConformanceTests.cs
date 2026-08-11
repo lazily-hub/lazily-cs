@@ -110,9 +110,9 @@ public sealed class WorkQueueConformanceTests
                                 wantProbe =>
                                 {
                                     var invalidated = !readers.StillValid(name);
-                                    Assert.True(
-                                        invalidated == wantProbe.GetBoolean(),
-                                        $"{fixture} step {at}: invalidates.{name}");
+                                    wantProbe.Against(invalidated, (expect, got) => Assert.True(
+                                        got == expect.GetBoolean(),
+                                        $"{fixture} step {at}: invalidates.{name}"));
                                 });
                             invalidationChecks++;
                         }
@@ -167,37 +167,37 @@ public sealed class WorkQueueConformanceTests
     {
         expected.AssertKeyWith(
             "pending",
-            want =>
+            want => want.Against(queue.Pending(), (expect, got) =>
             {
-                var pending = want.EnumerateArray().ToArray();
-                Assert.Equal(pending.Length, queue.Pending().Count);
+                var pending = expect.EnumerateArray().ToArray();
+                Assert.Equal(pending.Length, got.Count);
                 for (var i = 0; i < pending.Length; i++)
                 {
-                    Assert.Equal(pending[i].GetProperty("item_id").GetInt64(), queue.Pending()[i].ItemId);
-                    Assert.Equal(pending[i].GetProperty("value").GetString(), queue.Pending()[i].Value);
-                    Assert.Equal(pending[i].GetProperty("attempts").GetInt32(), queue.Pending()[i].Attempts);
+                    Assert.Equal(pending[i].GetProperty("item_id").GetInt64(), got[i].ItemId);
+                    Assert.Equal(pending[i].GetProperty("value").GetString(), got[i].Value);
+                    Assert.Equal(pending[i].GetProperty("attempts").GetInt32(), got[i].Attempts);
                 }
-            });
+            }));
 
         expected.AssertKeyWith(
             "in_flight",
-            want =>
+            want => want.Against(queue.InFlight(), (expect, got) =>
             {
-                var inFlight = want.EnumerateArray().ToArray();
-                Assert.Equal(inFlight.Length, queue.InFlight().Count);
+                var inFlight = expect.EnumerateArray().ToArray();
+                Assert.Equal(inFlight.Length, got.Count);
                 for (var i = 0; i < inFlight.Length; i++)
-                    AssertDelivery(inFlight[i], queue.InFlight()[i], $"in_flight[{i}]");
-            });
+                    AssertDelivery(inFlight[i], got[i], $"in_flight[{i}]");
+            }));
 
         expected.AssertKeyWith(
             "dead_letters",
-            want =>
+            want => want.Against(queue.DeadLetters(), (expect, got) =>
             {
-                var deadLetters = want.EnumerateArray().ToArray();
-                Assert.Equal(deadLetters.Length, queue.DeadLetters().Count);
+                var deadLetters = expect.EnumerateArray().ToArray();
+                Assert.Equal(deadLetters.Length, got.Count);
                 for (var i = 0; i < deadLetters.Length; i++)
                 {
-                    var actual = queue.DeadLetters()[i];
+                    var actual = got[i];
                     Assert.Equal(deadLetters[i].GetProperty("item_id").GetInt64(), actual.ItemId);
                     Assert.Equal(deadLetters[i].GetProperty("value").GetString(), actual.Value);
                     Assert.Equal(deadLetters[i].GetProperty("attempts").GetInt32(), actual.Attempts);
@@ -205,7 +205,7 @@ public sealed class WorkQueueConformanceTests
                         deadLetters[i].GetProperty("reason").GetString(),
                         actual.Reason.ToString().ToLowerInvariant());
                 }
-            });
+            }));
     }
 
     private static void AssertDelivery(

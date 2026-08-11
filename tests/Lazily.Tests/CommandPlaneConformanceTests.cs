@@ -145,15 +145,24 @@ public sealed class CommandPlaneConformanceTests
                 "rpc",
                 rpc =>
                 {
-                    var commandId = rpc.AssertKeyInto("command_id", v => v.GetString()!);
-                    var unresolved = rpc.AssertKeyInto(
-                        "unresolved_after_frame_indices",
-                        v => v.EnumerateArray().Select(item => item.GetInt32()).Contains(atFrame));
-                    if (unresolved)
-                    {
-                        Assert.False(projection.TryGetTerminal(commandId, out _));
-                        assertions++;
-                    }
+                    // Both keys reach ONE comparison against the projection this frame produced
+                    // (#lzcsuncomparedvalues): the id says which command to look up and the index
+                    // list says whether this frame is one where it must still be unresolved.
+                    // Projecting them without CompareInto would book them asserted while the
+                    // lookup below could be deleted unnoticed.
+                    rpc.CompareInto(
+                        into => (
+                            commandId: into.AssertKeyInto("command_id", v => v.GetString()!),
+                            unresolved: into.AssertKeyInto(
+                                "unresolved_after_frame_indices",
+                                v => v.EnumerateArray().Select(item => item.GetInt32()).Contains(atFrame))),
+                        projection,
+                        (want, got) =>
+                        {
+                            if (!want.unresolved) return;
+                            Assert.False(got.TryGetTerminal(want.commandId, out _));
+                            assertions++;
+                        });
 
                     // The two keys below belong to the same block and are asserted by the
                     // terminal-resolution pass; naming them here would compare the fixture to
@@ -182,9 +191,9 @@ public sealed class CommandPlaneConformanceTests
             "ignored_frame_indices",
             ignoredFrames =>
             {
-                Assert.Equal(
-                    ignoredFrames.EnumerateArray().Select(item => item.GetInt32()).ToArray(),
-                    ignored);
+                ignoredFrames.AssertEqual(
+                    w => w.EnumerateArray().Select(item => item.GetInt32()).ToArray(),
+                    ignored.ToArray());
                 assertions++;
             });
 
@@ -192,7 +201,7 @@ public sealed class CommandPlaneConformanceTests
             "terminal_after_frame_index",
             terminal =>
             {
-                Assert.Equal(terminal.GetInt32(), terminalAfter);
+                terminal.AssertEqual(w => w.GetInt32(), terminalAfter);
                 assertions++;
             });
 
@@ -220,7 +229,7 @@ public sealed class CommandPlaneConformanceTests
             "conflict",
             want =>
             {
-                Assert.Equal(want.GetBoolean(), sawConflict);
+                want.AssertEqual(w => w.GetBoolean(), sawConflict);
                 assertions++;
             });
 

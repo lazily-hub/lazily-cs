@@ -99,17 +99,19 @@ public sealed class StateChartConformanceTests
                 var where = $"#{stepIndex}";
                 expected.AssertKeyWith(
                     "accepted",
-                    want => Check($"{where}:accepted", accepted, want.GetBoolean()));
+                    want => want.Against(accepted, (expect, got) =>
+                        Check($"{where}:accepted", got, expect.GetBoolean())));
                 expected.AssertKeyWith(
                     "active",
-                    want => Check($"{where}:active", ActiveOf(chart), ExpectedActive(want)));
+                    want => want.Against(ActiveOf(chart), (expect, got) =>
+                        Check($"{where}:active", got, ExpectedActive(expect))));
 
                 expected.TryAssertKeyWith(
                     "actions",
-                    want => Check(
+                    want => want.Against(string.Join(",", chart.LastActions), (expect, got) => Check(
                         $"{where}:actions",
-                        string.Join(",", chart.LastActions),
-                        string.Join(",", want.EnumerateArray().Select(x => x.GetString()!))));
+                        got,
+                        string.Join(",", expect.EnumerateArray().Select(x => x.GetString()!)))));
 
                 expected.TryAssertObjectKey("matches", matches =>
                 {
@@ -117,10 +119,10 @@ public sealed class StateChartConformanceTests
                     {
                         matches.AssertKeyWith(
                             state,
-                            want => Check(
+                            want => want.Against(chart.Matches(state), (expect, got) => Check(
                                 $"{where}:matches.{state}",
-                                chart.Matches(state),
-                                want.GetBoolean()));
+                                got,
+                                expect.GetBoolean())));
                     }
                 });
 

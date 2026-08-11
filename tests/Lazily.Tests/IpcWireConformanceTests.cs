@@ -54,19 +54,19 @@ public sealed class IpcWireConformanceTests
         assertions.AssertKey("root_count", message.Roots.Count);
         assertions.TryAssertKeyWith(
             "first_node_type_tag",
-            want => Assert.Equal(want.GetString(), message.Nodes[0].TypeTag));
+            want => want.AssertEqual(w => w.GetString(), message.Nodes[0].TypeTag));
         assertions.TryAssertKeyWith(
             "first_node_state_kind",
-            want => Assert.Equal(want.GetString(), StateKind(message.Nodes[0].State)));
+            want => want.AssertEqual(w => w.GetString(), StateKind(message.Nodes[0].State)));
         assertions.TryAssertKeyWith(
             "has_opaque_node",
-            want => Assert.Equal(
-                want.GetBoolean(),
+            want => want.AssertEqual(w =>
+                w.GetBoolean(),
                 message.Nodes.Any(node => node.State is NodeState.Opaque)));
         assertions.TryAssertKeyWith(
             "opaque_node_id",
-            want => Assert.Equal(
-                want.GetUInt64(),
+            want => want.AssertEqual(w =>
+                w.GetUInt64(),
                 message.Nodes.Single(node => node.State is NodeState.Opaque).Node));
         // The three blob keys are one claim about one descriptor, so they are resolved
         // from the SAME node rather than from three independent lookups: a fixture whose
@@ -75,13 +75,13 @@ public sealed class IpcWireConformanceTests
         {
             assertions.TryAssertKeyWith(
                 "blob_offset",
-                want => Assert.Equal(want.GetUInt64(), shared.Blob.Offset));
+                want => want.AssertEqual(w => w.GetUInt64(), shared.Blob.Offset));
             assertions.TryAssertKeyWith(
                 "blob_len",
-                want => Assert.Equal(want.GetUInt64(), shared.Blob.Length));
+                want => want.AssertEqual(w => w.GetUInt64(), shared.Blob.Length));
             assertions.TryAssertKeyWith(
                 "blob_epoch",
-                want => Assert.Equal(want.GetUInt64(), shared.Blob.Epoch));
+                want => want.AssertEqual(w => w.GetUInt64(), shared.Blob.Epoch));
         }
 
         assertions.Verify();
@@ -124,27 +124,27 @@ public sealed class IpcWireConformanceTests
         var assertions = FixtureAssertions.Of(root, "assertions", fixture);
         assertions.AssertKey("base_epoch", message.BaseEpoch);
         assertions.AssertKey("epoch", message.Epoch);
-        assertions.TryAssertKeyWith("op_count", want => Assert.Equal(want.GetInt32(), message.Ops.Count));
+        assertions.TryAssertKeyWith("op_count", want => want.AssertEqual(w => w.GetInt32(), message.Ops.Count));
         assertions.TryAssertKeyWith(
             "is_sequential",
-            want => Assert.Equal(want.GetBoolean(), message.Epoch == message.BaseEpoch + 1));
+            want => want.AssertEqual(w => w.GetBoolean(), message.Epoch == message.BaseEpoch + 1));
         assertions.TryAssertKeyWith(
             "resync_after_epoch_10",
-            want => Assert.Equal(want.GetBoolean(), message.BaseEpoch > 10));
+            want => want.AssertEqual(w => w.GetBoolean(), message.BaseEpoch > 10));
         assertions.TryAssertKeyWith(
             "has_all_op_variants",
-            want => Assert.Equal(
-                want.GetBoolean(),
+            want => want.AssertEqual(w =>
+                w.GetBoolean(),
                 message.Ops.Select(op => op.GetType().Name).Distinct().Count() == message.Ops.Count));
         assertions.TryAssertKeyWith(
             "first_op_kind",
-            want => Assert.Equal(want.GetString(), message.Ops[0].GetType().Name));
+            want => want.AssertEqual(w => w.GetString(), message.Ops[0].GetType().Name));
         assertions.TryAssertKeyWith(
             "first_op_payload_kind",
-            want => Assert.Equal(want.GetString(), PayloadKind(message.Ops[0])));
+            want => want.AssertEqual(w => w.GetString(), PayloadKind(message.Ops[0])));
         assertions.TryAssertKeyWith(
             "first_op_payload_backend",
-            want => Assert.Equal(want.GetString(), PayloadBackend(message.Ops[0])));
+            want => want.AssertEqual(w => w.GetString(), PayloadBackend(message.Ops[0])));
         assertions.Verify();
     }
 
@@ -200,20 +200,22 @@ public sealed class IpcWireConformanceTests
                 $"distributed/crdt_sync_frames.json {label}");
             assertions.TryAssertKeyWith(
                 "frontier_len",
-                want => Assert.Equal(want.GetInt32(), message.Frontier?.Count ?? 0));
+                want => want.AssertEqual(w => w.GetInt32(), message.Frontier?.Count ?? 0));
             assertions.AssertKey("op_count", message.Ops.Count);
             assertions.TryAssertKeyWith(
                 "frontier_omitted",
                 // An omitted frontier decodes as absent, not as an empty list: the two are
                 // the same to a runner that only counts, which is why the count above
                 // cannot carry this claim.
-                want => Assert.Equal(want.GetBoolean(), message.Frontier is null or { Count: 0 }));
+                want => want.AssertEqual(
+                    w => w.GetBoolean(),
+                    message.Frontier is null or { Count: 0 }));
             assertions.TryAssertKeyWith(
                 "has_keyed_op",
-                want => Assert.Equal(want.GetBoolean(), message.Ops.Any(op => op.Key is not null)));
+                want => want.AssertEqual(w => w.GetBoolean(), message.Ops.Any(op => op.Key is not null)));
             assertions.TryAssertKeyWith(
                 "has_keyless_op",
-                want => Assert.Equal(want.GetBoolean(), message.Ops.Any(op => op.Key is null)));
+                want => want.AssertEqual(w => w.GetBoolean(), message.Ops.Any(op => op.Key is null)));
             assertions.Verify();
         }
     }

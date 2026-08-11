@@ -94,8 +94,8 @@ public sealed class ClusterConformanceTests
                     foreach (var state in want.EnumerateObject())
                     {
                         var name = state.Name;
-                        want.AssertKeyWith(name, wantState => Assert.Equal(
-                            Enum.Parse<PeerState>(wantState.GetString()!),
+                        want.AssertKeyWith(name, wantState => wantState.AssertEqual(
+                            w => Enum.Parse<PeerState>(w.GetString()!),
                             cell.State(long.Parse(name, System.Globalization.CultureInfo.InvariantCulture))));
                     }
                 });
@@ -236,7 +236,9 @@ public sealed class ClusterConformanceTests
             }
             var expected = FixtureAssertions.Of(step, "expected", $"{fixture} step {index}");
             AssertInvalidation(expected, "holder", probe);
-            expected.AssertKeyWith("holder", want => AssertNullableLong(want, cell.Holder(now)));
+            expected.AssertKeyWith("holder", want => want.Against(
+                cell.Holder(now),
+                (expect, got) => AssertNullableLong(expect, got)));
             expected.AssertKey("held", cell.IsHeld(now));
             expected.AssertKey("fence", cell.Fence);
             _ = probe.Get();
@@ -271,10 +273,12 @@ public sealed class ClusterConformanceTests
             AssertInvalidation(expected, "current_leader", probe);
             expected.AssertKeyWith(
                 "current_leader",
-                want => AssertNullableLong(want, cell.CurrentLeader(now)));
+                want => want.Against(
+                    cell.CurrentLeader(now),
+                    (expect, got) => AssertNullableLong(expect, got)));
             expected.AssertKeyWith(
                 "role",
-                want => Assert.Equal(Enum.Parse<LeaderRole>(want.GetString()!), cell.Role(now)));
+                want => want.AssertEqual(w => Enum.Parse<LeaderRole>(w.GetString()!), cell.Role(now)));
             _ = probe.Get();
             expected.Verify();
             index++;
@@ -423,7 +427,9 @@ public sealed class ClusterConformanceTests
             }
             var expected = FixtureAssertions.Of(step, "expected", $"{fixture} step {index}");
             AssertInvalidation(expected, "value", probe);
-            expected.AssertKeyWith("value", want => AssertOptionalString(want, cell.Value));
+            expected.AssertKeyWith("value", want => want.Against(
+                cell.Value,
+                (expect, got) => AssertOptionalString(expect, got)));
             _ = probe.Get();
             expected.Verify();
             index++;
@@ -545,7 +551,7 @@ public sealed class ClusterConformanceTests
             AssertInvalidation(expected, "state", probe);
             expected.AssertKeyWith(
                 "state",
-                want => Assert.Equal(Enum.Parse<BreakerState>(want.GetString()!), cell.State));
+                want => want.AssertEqual(w => Enum.Parse<BreakerState>(w.GetString()!), cell.State));
             _ = probe.Get();
             expected.Verify();
             index++;
@@ -667,7 +673,7 @@ public sealed class ClusterConformanceTests
             AssertInvalidation(expected, "health", probe);
             expected.AssertKeyWith(
                 "health",
-                want => Assert.Equal(Enum.Parse<HealthState>(want.GetString()!), cell.Health));
+                want => want.AssertEqual(w => Enum.Parse<HealthState>(w.GetString()!), cell.Health));
             _ = probe.Get();
             expected.Verify();
             index++;
@@ -871,7 +877,7 @@ public sealed class ClusterConformanceTests
             {
                 var key = long.Parse(name, System.Globalization.CultureInfo.InvariantCulture);
                 Assert.True(actual.TryGetValue(key, out var value));
-                Assert.Equal(want.GetString(), value);
+                want.AssertEqual(w => w.GetString(), value);
             });
         }
     }
@@ -888,7 +894,7 @@ public sealed class ClusterConformanceTests
             expected.AssertKeyWith(name, want =>
             {
                 Assert.True(actual.TryGetValue(name, out var value));
-                Assert.Equal(want.GetString(), value);
+                want.AssertEqual(w => w.GetString(), value);
             });
         }
     }
