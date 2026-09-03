@@ -13,7 +13,7 @@ cross-binding network suite. It advertises `distributed_crdt` with the JSON
 codec, routes semantic operations through `CrdtPlaneRuntime` and `IpcWire`, and
 leaves transport links unadvertised until executable channel adapters exist.
 
-> **Status: active and spec-conformant.** The binding replays all 124 canonical fixtures.
+> **Status: active and spec-conformant.** The binding replays all 125 canonical fixtures.
 > Feature-specific peers remain staged until that execution flavor exists; the generated matrix
 > below is the honest, single-source record of what can join each peer group.
 
@@ -54,6 +54,21 @@ using var log = ctx.Effect(c =>
 
 celsius.Set(25.0); // the effect reruns; fahrenheit recomputes on demand
 ```
+
+### Latest-durable projection egress
+
+`LatestDurableProjectionCore<TKey, TValue>` retains only the latest unclaimed
+value per key while fencing every claimed sink attempt by connection generation
+and epoch. `UpsertDesired`, `Claim`, `AckApplied`, `FailRetryable`, and
+`Reconnect` implement the lazily-spec state machine: failures requeue work,
+newer pending values supersede older ones, the durable frontier never moves
+backward, and stale receipts cannot clear newer desire.
+
+`LatestDurableProjection`, `ThreadSafeLatestDurableProjection`, and
+`AsyncLatestDurableProjection` add reactive entry and generation views for the
+three native context families. Sink side effects stay outside the graph; run the
+state-machine mutations and the actual write on the same per-key serialization
+lane.
 
 ## The model
 

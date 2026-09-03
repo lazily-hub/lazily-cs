@@ -7,7 +7,7 @@
     <TreatWarningsAsErrors>true</TreatWarningsAsErrors>
     <GenerateDocumentationFile>true</GenerateDocumentationFile>
     <PackageId>Lazily.R3</PackageId>
-    <Version>0.4.0</Version>
+    <Version>0.5.0</Version>
     <Authors>lazily-hub</Authors>
     <Description>Optional R3 adapters for Lazily state graphs.</Description>
     <PackageLicenseExpression>MIT</PackageLicenseExpression>
