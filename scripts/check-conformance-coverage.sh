@@ -476,13 +476,6 @@ fi
 # Fixtures deliberately not covered by this binding yet. Every entry is a
 # reviewed finding, never a silent skip.
 KNOWN_UNCOVERED=(
-  # Replay-equivalence proof (`lazily-spec/docs/replay-equivalence.md`) is an
-  # optional (MAY) coverage row and lazily-py is the reference implementation;
-  # this binding has no harness yet, so it opens none of the three. Building one
-  # is what removes these entries — they are not permanent carve-outs.
-  "replay/canonical_encoding_equality.json"
-  "replay/divergence_localization.json"
-  "replay/fingerprint_log_binding.json"
   # Reactive egress is currently Rust-only; C# has no egress replay runner.
   "egress/egress_generation_fence.json"
   "egress/egress_inflight_window.json"
@@ -501,7 +494,7 @@ KNOWN_UNCOVERED=(
 # reports "coverage OK: 2/2" and exits 0, which is the vacuous green #lzvacuousrun
 # named after this binding printed "0/0" on three rungs in a row.
 #
-# EXACT: 145 is what a green CI run on the current corpus actually opens, with
+# EXACT: 151 is what a green CI run on the current corpus actually opens, with
 # no margin. NEVER lower this to make the gate green: a drop means a replay was
 # removed, renamed, or short-circuited, and that is the finding, not the floor.
 #
@@ -512,11 +505,11 @@ KNOWN_UNCOVERED=(
 # reality, so the gap only ever widens. It had reached 141 against an actual
 # 145: four fixtures could stop being opened while the gate kept printing OK.
 #
-# Re-pinned for lazily-spec 39df4b3, which added `apply_update_advances_counter`
-# and `out_of_order_delivery_buffers` to lossless-tree; both are replayed here
-# (`conformance coverage OK: 147/152`), matching a local green `make check`.
-# Verified exact: 148 fails this floor.
-MIN_FIXTURES="${MIN_FIXTURES:-147}"
+# Re-pinned for lazily-spec f89d865, which carries the three replay-equivalence
+# fixtures this binding now replays through `ReplayConformanceTests`
+# (`conformance coverage OK: 151/156`), matching a local green `make check`.
+# Verified exact: 152 fails this floor.
+MIN_FIXTURES="${MIN_FIXTURES:-151}"
 
 # Scenarios deliberately not replayed, one per line as
 #   corpus/fixture.json|scenario-id|reason
@@ -545,7 +538,7 @@ KNOWN_UNREPLAYED_SCENARIOS=(
 # at 138/138 and then prints "0/0 scenarios across 0 opened fixtures" and exits 0.
 # That was reproducible on this script before this constant existed.
 #
-# EXACT: 165 is what a green CI run on the current corpus actually replays,
+# EXACT: 169 is what a green CI run on the current corpus actually replays,
 # with no margin. A fixture growing scenarios while the floor stays put is how
 # a binding replays the old half of a hardened fixture and reports the same
 # green as before, so the floor moves WITH the corpus — all the way, not part
@@ -563,10 +556,11 @@ KNOWN_UNREPLAYED_SCENARIOS=(
 # NEVER lower this to make the gate green: a drop means scenarios stopped being
 # reached, and that is the finding, not the floor.
 #
-# Re-pinned for lazily-spec 39df4b3: the two new lossless-tree fixtures carry one
-# scenario each (`scenario replay coverage OK: 167/167`), matching a local green
-# `make check`. Verified exact: 168 fails this floor.
-MIN_SCENARIOS="${MIN_SCENARIOS:-167}"
+# Re-pinned for lazily-spec f89d865 (`scenario replay coverage OK: 169/169`),
+# matching a local green `make check`. The three replay fixtures carry `steps`
+# rather than `scenarios`, so the move here is corpus growth elsewhere rather
+# than the new runner. Verified exact: 170 fails this floor.
+MIN_SCENARIOS="${MIN_SCENARIOS:-169}"
 
 MANIFEST="${LAZILY_CONFORMANCE_MANIFEST:-build/conformance-fixtures-loaded.txt}"
 if [ ! -s "$MANIFEST" ]; then
@@ -850,19 +844,20 @@ if unknown:
 # Positive-evidence floor (#lzvacuousrun): zero declared blocks means zero
 # unbound blocks, which reports OK having compared nothing.
 #
-# EXACT: 692 is the number of block SITES a green local run on the current corpus
+# EXACT: 740 is the number of block SITES a green local run on the current corpus
 # inventories, with no margin. Set this to the number the guard REPORTS after
 # adding replays; do not add "the N I just added" to the old value and do not
 # leave headroom for churn (#lzscenariofloordrift). It had reached 25 against an
 # actual 33, so eight blocks could stop being inventoried while this printed OK.
-# Re-pinned from 690 for lazily-spec 39df4b3, whose two new lossless-tree
-# fixtures are now replayed here.
+# Re-pinned from 692 for lazily-spec f89d865: the three replay-equivalence
+# fixtures are now OPENED here, and every per-step `expected` block they carry is
+# bound by `ReplayConformanceTests`.
 #
 # It counts SITES, not distinct digests: two sites carrying identical bytes are
 # one digest, so a digest count silently absorbs a deleted fixture whose blocks
-# happen to be spelled like another's. Verified exact: 693 fails this floor.
+# happen to be spelled like another's. Verified exact: 741 fails this floor.
 min_blocks = read_int(
-    os.environ.get("MIN_BLOCKS", "692"),
+    os.environ.get("MIN_BLOCKS", "740"),
     "MIN_BLOCKS",
     ("       Pass the count this guard REPORTS, or unset it to take the default.",),
 )
