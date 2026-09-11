@@ -476,6 +476,13 @@ fi
 # Fixtures deliberately not covered by this binding yet. Every entry is a
 # reviewed finding, never a silent skip.
 KNOWN_UNCOVERED=(
+  # Replay-equivalence proof (`lazily-spec/docs/replay-equivalence.md`) is an
+  # optional (MAY) coverage row and lazily-py is the reference implementation;
+  # this binding has no harness yet, so it opens none of the three. Building one
+  # is what removes these entries — they are not permanent carve-outs.
+  "replay/canonical_encoding_equality.json"
+  "replay/divergence_localization.json"
+  "replay/fingerprint_log_binding.json"
   # Reactive egress is currently Rust-only; C# has no egress replay runner.
   "egress/egress_generation_fence.json"
   "egress/egress_inflight_window.json"
