@@ -738,13 +738,14 @@ KNOWN_UNBOUND_BLOCKS=(
 )
 
 BLOCK_GUARD_PY="$(cat <<'PY'
+import json
 import os
 import sys
 
-manifest_path = sys.argv[1]
+manifest_path, spec_dir = sys.argv[1], sys.argv[2]
 
 excuses = {}
-for raw in sys.argv[2:]:
+for raw in sys.argv[3:]:
     raw = raw.strip()
     if not raw:
         continue
@@ -841,34 +842,120 @@ if unknown:
     )
     sys.exit(1)
 
-# Positive-evidence floor (#lzvacuousrun): zero declared blocks means zero
-# unbound blocks, which reports OK having compared nothing.
+# ---- The expected site count is DERIVED, and it is not a floor (#lzblockfloorpin)
 #
-# EXACT: 743 is the number of block SITES a green local run on the current corpus
-# inventories, with no margin. Set this to the number the guard REPORTS after
-# adding replays; do not add "the N I just added" to the old value and do not
-# leave headroom for churn (#lzscenariofloordrift). It had reached 25 against an
-# actual 33, so eight blocks could stop being inventoried while this printed OK.
-# Re-pinned from 740 for lazily-spec 4010d99 (#lzreplayframing), which grew
-# `replay/canonical_encoding_equality.json` from 11 steps to 14: the three new
-# member-framing rows each carry an `expected` block, and all three are bound by
-# `ReplayConformanceTests`. The earlier re-pin from 692 was lazily-spec f89d865,
-# when the three replay-equivalence fixtures first started being OPENED here.
+# This used to be a hand-typed `MIN_BLOCKS` constant compared with `>=`. Its own
+# re-pin history is the argument against it: 692 -> 740 -> 743, each move a human
+# reading the number the guard printed and copying it back into the source, and the
+# last one ("lazily-spec 4010d99 grew `replay/canonical_encoding_equality.json` from
+# 11 steps to 14") landed only because somebody happened to be looking. A constant
+# that must be re-typed whenever the corpus moves is a constant that is WRONG for
+# the whole interval between the corpus moving and someone noticing — and a `>=`
+# comparison makes that interval invisible, because corpus GROWTH never trips it.
+# Every drift this rung is supposed to report arrives as growth first.
 #
-# It counts SITES, not distinct digests: two sites carrying identical bytes are
-# one digest, so a digest count silently absorbs a deleted fixture whose blocks
-# happen to be spelled like another's. Verified exact: 744 fails this floor.
-min_blocks = read_int(
-    os.environ.get("MIN_BLOCKS", "743"),
-    "MIN_BLOCKS",
-    ("       Pass the count this guard REPORTS, or unset it to take the default.",),
-)
-if len(declared_sites) < min_blocks:
+# So the expectation is computed here instead, from two things this repo can be held
+# to: (a) the canonical corpus DIRECTORY LISTING under $SPEC_DIR, and (b) this
+# binding's own committed ledger, `KNOWN_UNCOVERED`, which is the same subtraction
+# `MIN_FIXTURES` is checked against one rung up. Corpus listing minus ledger is the
+# opened set; the walk below inventories that set's assertion blocks the way
+# `SpecCorpus.DeclareWalk` inventories them at load time, and the two counts must be
+# EQUAL.
+#
+# Deliberately NOT derived from the manifest, and not from what the run read. A
+# manifest-derived expectation moves WITH the actual count, so a loader that detaches
+# takes the expectation to 0 alongside it and this rung reports "0 == 0, OK" over a
+# run that opened nothing — #lzvacuousrun exactly, wearing a derivation instead of a
+# constant. The whole point of the number is that it comes from somewhere the run
+# cannot influence.
+#
+# The walk mirrors the loader's rule and must keep mirroring it: block names
+# {assertions, expect, expected}; OBJECT-valued blocks only (an array-valued `expect`
+# declares no site here, which is why cs derives 743 where lazily-js derives 747 over
+# the same opened set); descent STOPS at a declared block, because what lives inside
+# one is a key, not a block; and it counts SITES (fixture|where pairs), not distinct
+# digests — two sites carrying identical bytes share one digest, so a digest count
+# silently absorbs a deleted fixture whose blocks happen to be spelled like another's.
+ASSERTION_BLOCK_NAMES = ("assertions", "expect", "expected")
+
+
+def walk_sites(fixture_id, node, path, sites):
+    """The python twin of `SpecCorpus.DeclareWalk` — see the paragraph above."""
+    if isinstance(node, dict):
+        for name, value in node.items():
+            child = name if not path else path + "." + name
+            if isinstance(value, dict) and name in ASSERTION_BLOCK_NAMES:
+                sites.add(f"{fixture_id}|{child}")
+                continue
+            walk_sites(fixture_id, value, child, sites)
+    elif isinstance(node, list):
+        for index, item in enumerate(node):
+            walk_sites(fixture_id, item, f"{path}[{index}]", sites)
+
+
+corpus_fixtures = []
+for walk_root, _walk_dirs, walk_names in os.walk(spec_dir):
+    for walk_name in walk_names:
+        if walk_name.endswith(".json"):
+            corpus_fixtures.append(
+                os.path.relpath(os.path.join(walk_root, walk_name), spec_dir).replace(os.sep, "/")
+            )
+corpus_fixtures.sort()
+
+# The ledger arrives as a newline-joined scalar rather than as argv, so the excuse
+# argv above keeps its shape, and so this script adds no second top-level bash array
+# for lazily-spec's `check-corpus-floors.mjs` to have to classify.
+uncovered_ledger = {
+    entry.strip()
+    for entry in os.environ.get("KNOWN_UNCOVERED_LEDGER", "").splitlines()
+    if entry.strip()
+}
+
+expected_sites = set()
+walked = 0
+for fixture_id in corpus_fixtures:
+    if fixture_id in uncovered_ledger:
+        continue
+    try:
+        with open(os.path.join(spec_dir, fixture_id), encoding="utf-8") as handle:
+            document = json.load(handle)
+    except (OSError, ValueError) as error:
+        print(
+            f"ERROR: could not read canonical fixture '{fixture_id}' out of {spec_dir}: {error}\n"
+            "       The expected block count is derived from these bytes, so an unreadable\n"
+            "       fixture is missing EVIDENCE, not evidence of absence. Fix the checkout.",
+            file=sys.stderr,
+        )
+        sys.exit(1)
+    walk_sites(fixture_id, document, "", expected_sites)
+    walked += 1
+
+# Positive-evidence floor (#lzvacuousrun): an empty opened set derives zero expected
+# sites, and zero == zero would report OK having compared nothing.
+if walked == 0 or not expected_sites:
     print(
-        f"ERROR: only {len(declared_sites)} assertion block SITES were inventoried, expected "
-        f">= {min_blocks}.\n"
-        "       The loader-side walk detached, or fixtures stopped being read.\n"
-        "       Do not lower MIN_BLOCKS to fix this.",
+        f"ERROR: the corpus at {spec_dir} minus KNOWN_UNCOVERED derived {walked} opened "
+        f"fixture(s) carrying {len(expected_sites)} assertion block site(s).\n"
+        "       An empty derivation makes this rung vacuously green: zero expected sites\n"
+        "       are trivially matched by a run that inventoried nothing (#lzvacuousrun).\n"
+        "       The checkout is wrong, or LAZILY_SPEC_CONFORMANCE_DIR points elsewhere.",
+        file=sys.stderr,
+    )
+    sys.exit(1)
+
+expected_blocks = len(expected_sites)
+if len(declared_sites) != expected_blocks:
+    direction = "FEWER than" if len(declared_sites) < expected_blocks else "MORE than"
+    print(
+        f"ERROR: the run inventoried {len(declared_sites)} assertion block SITES; the canonical\n"
+        f"       corpus at {spec_dir} minus KNOWN_UNCOVERED derives {expected_blocks} over "
+        f"{walked} opened\n"
+        f"       fixtures. The run has {direction} the corpus declares.\n"
+        "       This is an EQUALITY, not a floor: either the corpus moved under this\n"
+        "       checkout (re-pull the lazily-spec sibling so both sides read the same\n"
+        "       bytes), or the loader-side walk in SpecCorpus.DeclareWalk detached from\n"
+        "       the rule spelled out above and stopped declaring sites it should.\n"
+        "       There is no number to re-pin here — fix whichever side moved.",
         file=sys.stderr,
     )
     sys.exit(1)
@@ -876,13 +963,15 @@ if len(declared_sites) < min_blocks:
 print(
     f"assertion-block bind OK: {len(bound_sites)}/{len(declared_sites)} assertion block sites "
     f"carried by opened fixtures were BOUND to a tracker ({len(excuses)} declared unbindable; "
-    f"floor {min_blocks}; content-keyed, so a runner's block NAME cannot satisfy it)"
+    f"derived {expected_blocks} from {walked} opened fixtures, asserted EQUAL; content-keyed, "
+    f"so a runner's block NAME cannot satisfy it)"
 )
 PY
 )"
 
+KNOWN_UNCOVERED_LEDGER="$(printf '%s\n' ${KNOWN_UNCOVERED[@]+"${KNOWN_UNCOVERED[@]}"})" \
 python3 -c "$PY_DIAG
-$BLOCK_GUARD_PY" "$MANIFEST" \
+$BLOCK_GUARD_PY" "$MANIFEST" "$SPEC_DIR" \
   ${KNOWN_UNBOUND_BLOCKS[@]+"${KNOWN_UNBOUND_BLOCKS[@]}"}
 
 # -- Per-scenario replay accounting (#lzscenariocoverage) ---------------------

@@ -51,9 +51,16 @@ reported green while testing nothing.
   from "nothing was examined", so the magnitude is asserted explicitly before anything prints OK
   (`#lzvacuousrun`). Rung 1 fails on a corpus listing zero fixtures and on `covered <
   MIN_FIXTURES` (145); rung 4 fails on zero scenarios across the opened fixtures and on
-  `replayed < MIN_SCENARIOS` (165); the assertion-block rung carries `MIN_BLOCKS` (33) on the
-  same terms. Each floor is the EXACT count a completed CI run reports against the published
-  corpus. This paragraph used to describe the scenario floor as "calibrated below the observed",
+  `replayed < MIN_SCENARIOS` (165). The assertion-block rung no longer carries a typed floor at
+  all: it DERIVES its expected count from the canonical corpus listing minus `KNOWN_UNCOVERED`
+  and asserts EQUALITY against what the run inventoried (743 sites over 151 opened fixtures at
+  lazily-spec `67aa54a`), so corpus GROWTH reddens it exactly as a shrink does — the direction a
+  `>=` floor can never see, and the direction every one of its three re-pins (692 -> 740 -> 743)
+  actually arrived in (`#lzblockfloorpin`). Derive an expectation wherever the population is
+  computable from the corpus plus a committed ledger, and prefer that to any exact floor; never
+  derive one from the MANIFEST, which moves with the run and would take the expectation to zero
+  alongside a detached loader. Where a floor remains, it is the EXACT count a completed CI run
+  reports against the published corpus. This paragraph used to describe the scenario floor as "calibrated below the observed",
   and that advice was the bug: a floor deliberately set under reality has stopped guarding,
   because the drop it exists to catch fits inside its own margin. It let 17 scenarios of slack
   accumulate here before the family-wide repin (`#lzscenariofloordrift`). Set a floor to the
