@@ -102,6 +102,66 @@ public sealed class ReplayTests
     }
 
     [Fact]
+    public void CanonicalFramingIsTagThenDecimalLengthThenColonThenBody()
+    {
+        // The layout the pair-based test below is constructed AGAINST. Pinned separately from it
+        // so that the collision assertions fail on their own merits rather than behind this one:
+        // a length-dropping encoder breaks both, and the pair test is the one whose failure names
+        // the property.
+        Assert.Equal("s2:bc", Text(ReplayEncoding.Bytes("bc")));
+        Assert.Equal("i2:12", Text(ReplayEncoding.Bytes(12L)));
+        Assert.Equal("l9:s1:as2:bc", Text(ReplayEncoding.Bytes(new object?[] { "a", "bc" })));
+        Assert.Equal(
+            "m8:s1:as1:b",
+            Text(ReplayEncoding.Bytes(new Dictionary<string, object?> { ["a"] = "b" })));
+    }
+
+    [Fact]
+    public void MemberLengthIsPinnedByPairsThatCollideWithoutIt()
+    {
+        // The obligation the shared corpus CANNOT carry (#lzreplayframing, obligation 3 of
+        // lazily-spec/docs/replay-equivalence.md). The corpus's reference pair `["a","sbc"]` vs
+        // `["as","bc"]` assumes a layout whose member prefix is the bare tag byte `s`. This
+        // binding's string tag IS `s`, but its frame is `<tag><decimal length>:<body>` — the
+        // separator `:` survives when the length is removed, so under THIS binding's
+        // length-dropped bytes the corpus pair still differs:
+        //     ["a","sbc"] -> "l:" "s:a"  "s:sbc" = "l:s:as:sbc"
+        //     ["as","bc"] -> "l:" "s:as" "s:bc"  = "l:s:ass:bc"
+        // The pair that actually collides here has to spell the WHOLE surviving prefix, `s:`, so
+        // the member boundary lands one byte further along and the two concatenations coincide:
+        //     ["a","s:bc"] -> "l:" "s:a"   "s:s:bc" = "l:s:as:s:bc"
+        //     ["as:","bc"] -> "l:" "s:as:" "s:bc"   = "l:s:as:s:bc"
+        // Remove the length from `Frame` and these two digests become equal; that mutation is the
+        // one this repo previously watched survive the corpus pair and wrongly ruled benign.
+        Assert.NotEqual(
+            ReplayEncoding.Digest(new object?[] { "a", "s:bc" }),
+            ReplayEncoding.Digest(new object?[] { "as:", "bc" }));
+
+        // The mapping analogue: a key is framed apart from its value, so moving the surviving
+        // prefix across the key/value boundary must not produce the same entry bytes.
+        //     {"a":"s:b"} -> "s:a"   "s:s:b" = "s:as:s:b"
+        //     {"as:":"b"} -> "s:as:" "s:b"   = "s:as:s:b"
+        Assert.NotEqual(
+            ReplayEncoding.Digest(new Dictionary<string, object?> { ["a"] = "s:b" }),
+            ReplayEncoding.Digest(new Dictionary<string, object?> { ["as:"] = "b" }));
+
+        // The layout-INDEPENDENT row, kept here as well as in the corpus: a nested container's
+        // boundary has no tag to hide behind, so it collides under an unframed concatenation
+        // whatever the tags and separators are.
+        //     [["a"],"b"] -> "l:" "l:" "s:a"       "s:b" = "l:l:s:as:b"
+        //     [["a","b"]] -> "l:" "l:" "s:a" "s:b"       = "l:l:s:as:b"
+        Assert.NotEqual(
+            ReplayEncoding.Digest(new object?[] { new object?[] { "a" }, "b" }),
+            ReplayEncoding.Digest(new object?[] { new object?[] { "a", "b" } }));
+
+        // And the corpus's original equality-class row, which states a real requirement even
+        // though it does not pin the length.
+        Assert.NotEqual(
+            ReplayEncoding.Digest(new object?[] { "a", "bc" }),
+            ReplayEncoding.Digest(new object?[] { "ab", "c" }));
+    }
+
+    [Fact]
     public void AnObservationWithNoCanonicalEncodingFailsLoudly()
     {
         var harness = new ReplayHarness(() => new Opaque());
@@ -109,6 +169,8 @@ public sealed class ReplayTests
         Assert.Throws<ReplayEncodingException>(
             () => harness.Record(ReplayLog.FromRecords([("add", 1L)])));
     }
+
+    private static string Text(byte[] bytes) => System.Text.Encoding.UTF8.GetString(bytes);
 
     private sealed class Counter(Func<long>? impureTick = null) : IReplayGraph
     {

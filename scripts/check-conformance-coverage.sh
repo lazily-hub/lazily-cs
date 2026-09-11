@@ -844,20 +844,22 @@ if unknown:
 # Positive-evidence floor (#lzvacuousrun): zero declared blocks means zero
 # unbound blocks, which reports OK having compared nothing.
 #
-# EXACT: 740 is the number of block SITES a green local run on the current corpus
+# EXACT: 743 is the number of block SITES a green local run on the current corpus
 # inventories, with no margin. Set this to the number the guard REPORTS after
 # adding replays; do not add "the N I just added" to the old value and do not
 # leave headroom for churn (#lzscenariofloordrift). It had reached 25 against an
 # actual 33, so eight blocks could stop being inventoried while this printed OK.
-# Re-pinned from 692 for lazily-spec f89d865: the three replay-equivalence
-# fixtures are now OPENED here, and every per-step `expected` block they carry is
-# bound by `ReplayConformanceTests`.
+# Re-pinned from 740 for lazily-spec 4010d99 (#lzreplayframing), which grew
+# `replay/canonical_encoding_equality.json` from 11 steps to 14: the three new
+# member-framing rows each carry an `expected` block, and all three are bound by
+# `ReplayConformanceTests`. The earlier re-pin from 692 was lazily-spec f89d865,
+# when the three replay-equivalence fixtures first started being OPENED here.
 #
 # It counts SITES, not distinct digests: two sites carrying identical bytes are
 # one digest, so a digest count silently absorbs a deleted fixture whose blocks
-# happen to be spelled like another's. Verified exact: 741 fails this floor.
+# happen to be spelled like another's. Verified exact: 744 fails this floor.
 min_blocks = read_int(
-    os.environ.get("MIN_BLOCKS", "740"),
+    os.environ.get("MIN_BLOCKS", "743"),
     "MIN_BLOCKS",
     ("       Pass the count this guard REPORTS, or unset it to take the default.",),
 )

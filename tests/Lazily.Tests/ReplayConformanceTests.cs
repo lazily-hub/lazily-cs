@@ -41,7 +41,7 @@ public sealed class ReplayConformanceTests
 
         var values = root.GetProperty("config").GetProperty("values");
         var steps = root.GetProperty("steps");
-        Assert.Equal(11, steps.GetArrayLength());
+        Assert.Equal(14, steps.GetArrayLength());
 
         // Both outcomes must really occur. A runner that only ever observed `false` would satisfy
         // every inequality claim in this fixture with a thoroughly broken encoding.
