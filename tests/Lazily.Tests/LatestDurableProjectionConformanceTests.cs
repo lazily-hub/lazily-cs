@@ -17,9 +17,11 @@ public sealed class LatestDurableProjectionConformanceTests
         Assert.Equal("LatestDurableProjection", root.GetProperty("kind").GetString());
         Assert.Equal("LatestDurableProjectionCore", root.GetProperty("model").GetString());
 
+        var loaded = 0;
         var steps = 0;
         foreach (var scenario in SpecCorpus.Scenarios(root, Corpus, Fixture).All())
         {
+            loaded += CorpusSteps.Declared(scenario);
             var core = new LatestDurableProjectionCore<string, string>(
                 scenario.GetProperty("generation").GetInt64());
             foreach (var step in scenario.GetProperty("steps").EnumerateArray())
@@ -38,7 +40,10 @@ public sealed class LatestDurableProjectionConformanceTests
             }
         }
 
-        Assert.Equal(22, steps);
+        // No step-count constant: see CorpusSteps (#lzcorpusfloorguard). A `>= N` floor here
+        // swallowed new corpus rows unexecuted in eight sibling bindings; executed-vs-loaded
+        // is exact and cannot drift. Shrinks are caught in lazily-spec's corpus-counts.json.
+        CorpusSteps.AssertAllExecuted($"{Corpus}/{Fixture}", loaded, steps);
     }
 
     [Fact]

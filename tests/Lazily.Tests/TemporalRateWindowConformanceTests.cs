@@ -36,45 +36,60 @@ public sealed class TemporalRateWindowConformanceTests
     public void ReplaysCanonicalTemporalCorpus()
     {
         AssertCorpusPresent("temporal", TemporalFixtures);
+        var loaded = 0;
         var steps = 0;
         foreach (var fixture in TemporalFixtures)
         {
             using var document = SpecCorpus.Load("temporal", fixture);
+            loaded += CorpusSteps.Declared(document.RootElement);
             steps += ReplayTemporal(fixture, document.RootElement);
         }
 
         Assert.Equal(4, TemporalFixtures.Length);
-        Assert.True(steps >= 16, $"expected at least 16 temporal steps, got {steps}");
+        // No step-count constant: see CorpusSteps (#lzcorpusfloorguard). A `>= N` floor here
+        // swallowed new corpus rows unexecuted in eight sibling bindings; executed-vs-loaded
+        // is exact and cannot drift. Shrinks are caught in lazily-spec's corpus-counts.json.
+        CorpusSteps.AssertAllExecuted("temporal", loaded, steps);
     }
 
     [Fact]
     public void ReplaysCanonicalRateShapeCorpus()
     {
         AssertCorpusPresent("rateshape", RateShapeFixtures);
+        var loaded = 0;
         var steps = 0;
         foreach (var fixture in RateShapeFixtures)
         {
             using var document = SpecCorpus.Load("rateshape", fixture);
+            loaded += CorpusSteps.Declared(document.RootElement);
             steps += ReplayRateShape(fixture, document.RootElement);
         }
 
         Assert.Equal(6, RateShapeFixtures.Length);
-        Assert.True(steps >= 31, $"expected at least 31 rate-shape steps, got {steps}");
+        // No step-count constant: see CorpusSteps (#lzcorpusfloorguard). A `>= N` floor here
+        // swallowed new corpus rows unexecuted in eight sibling bindings; executed-vs-loaded
+        // is exact and cannot drift. Shrinks are caught in lazily-spec's corpus-counts.json.
+        CorpusSteps.AssertAllExecuted("rateshape", loaded, steps);
     }
 
     [Fact]
     public void ReplaysCanonicalWindowingCorpus()
     {
         AssertCorpusPresent("windowing", WindowingFixtures);
+        var loaded = 0;
         var steps = 0;
         foreach (var fixture in WindowingFixtures)
         {
             using var document = SpecCorpus.Load("windowing", fixture);
+            loaded += CorpusSteps.Declared(document.RootElement);
             steps += ReplayWindow(fixture, document.RootElement);
         }
 
         Assert.Equal(4, WindowingFixtures.Length);
-        Assert.True(steps >= 22, $"expected at least 22 windowing steps, got {steps}");
+        // No step-count constant: see CorpusSteps (#lzcorpusfloorguard). A `>= N` floor here
+        // swallowed new corpus rows unexecuted in eight sibling bindings; executed-vs-loaded
+        // is exact and cannot drift. Shrinks are caught in lazily-spec's corpus-counts.json.
+        CorpusSteps.AssertAllExecuted("windowing", loaded, steps);
     }
 
     [Fact]

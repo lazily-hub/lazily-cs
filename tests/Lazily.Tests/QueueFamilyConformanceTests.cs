@@ -64,9 +64,6 @@ public sealed class QueueFamilyConformanceTests
     ];
 
     // Pinned, so a fixture losing steps upstream cannot silently shrink the gate.
-    private const int ExpectedQueueSteps = 31;
-    private const int ExpectedTopicSteps = 29;
-    private const int ExpectedWorkQueueSteps = 18;
 
     // Every reader kind the corpus declares, per flavor. Exact, not a floor: a fixture that
     // stopped declaring a matrix would otherwise shrink the gate silently.
@@ -933,23 +930,38 @@ public sealed class QueueFamilyConformanceTests
             checks += c;
         }
 
-        // Exact counts, not floors: a runner that silently replayed less would otherwise pass.
-        Assert.Equal(ExpectedQueueSteps, queueSteps);
-        Assert.Equal(ExpectedTopicSteps, topicSteps);
-        Assert.Equal(ExpectedWorkQueueSteps, workSteps);
+        // Exact, and with no constant to re-pin: every step LOADED off disk was EXECUTED.
+        // `ExpectedQueueSteps = 31` / `29` / `18` used to stand here. They were equalities, which
+        // is the right instinct — this repo's equality is the only thing in ten repositories that
+        // noticed when lazily-spec grew a replay fixture 11 -> 14 steps — but an equality against a
+        // hand-maintained constant is the same drift clock with a shorter fuse. A corpus that
+        // SHRINKS is caught upstream instead, by lazily-spec's `corpus-counts.json` and
+        // `scripts/check-corpus-floors.mjs` (#lzcorpusfloorguard).
+        CorpusSteps.AssertAllExecuted(
+            $"{Corpus}/queue ({flavorName})", CountSteps(QueueFixtures), queueSteps);
+        CorpusSteps.AssertAllExecuted(
+            $"{Corpus}/topic ({flavorName})", CountSteps(TopicFixtures), topicSteps);
+        CorpusSteps.AssertAllExecuted(
+            $"{Corpus}/work-queue ({flavorName})", CountSteps(WorkQueueFixtures), workSteps);
         Assert.True(
             checks == ExpectedInvalidationChecks,
             $"{flavorName}: {checks} invalidation assertions, expected {ExpectedInvalidationChecks} — " +
             "the per-reader-kind matrix is what makes this corpus discriminating");
     }
 
+    /// <summary>
+    /// Positive evidence that the corpus resolved and carries steps — deliberately without the
+    /// pinned totals that used to be asserted here (#lzcorpusfloorguard). "How many steps this
+    /// corpus should hold" is now pinned at the one place a step can be deleted: lazily-spec's
+    /// `corpus-counts.json`, enforced by its `scripts/check-corpus-floors.mjs`.
+    /// </summary>
     [Fact]
-    public void TheCorpusHoldsThePinnedNumberOfSteps()
+    public void TheCorpusResolvesAndCarriesSteps()
     {
         AssertCorpusPresent();
-        Assert.Equal(ExpectedQueueSteps, CountSteps(QueueFixtures));
-        Assert.Equal(ExpectedTopicSteps, CountSteps(TopicFixtures));
-        Assert.Equal(ExpectedWorkQueueSteps, CountSteps(WorkQueueFixtures));
+        Assert.True(CountSteps(QueueFixtures) > 0, "queue fixtures declare no steps");
+        Assert.True(CountSteps(TopicFixtures) > 0, "topic fixtures declare no steps");
+        Assert.True(CountSteps(WorkQueueFixtures) > 0, "work-queue fixtures declare no steps");
     }
 
     [Theory]

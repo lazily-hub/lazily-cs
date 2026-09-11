@@ -24,11 +24,11 @@ public sealed class ReplayConformanceTests
 
     [Fact]
     public void CanonicalFingerprintIsBoundToItsLog() =>
-        DriveHarnessFixture("fingerprint_log_binding.json", expectedSteps: 8);
+        DriveHarnessFixture("fingerprint_log_binding.json");
 
     [Fact]
     public void CanonicalDivergenceIsLocalizedToItsFirstCheckpoint() =>
-        DriveHarnessFixture("divergence_localization.json", expectedSteps: 7);
+        DriveHarnessFixture("divergence_localization.json");
 
     [Fact]
     public void CanonicalEncodingAgreesOnTheEqualityClasses()
@@ -41,7 +41,9 @@ public sealed class ReplayConformanceTests
 
         var values = root.GetProperty("config").GetProperty("values");
         var steps = root.GetProperty("steps");
-        Assert.Equal(14, steps.GetArrayLength());
+        // No step-count constant here, deliberately: see CorpusSteps. This repo's
+        // `Assert.Equal(11, steps.GetArrayLength())` is what caught the last corpus move
+        // (#lzcorpusfloorguard); executed-vs-loaded below replaces it without a number.
 
         // Both outcomes must really occur. A runner that only ever observed `false` would satisfy
         // every inequality claim in this fixture with a thoroughly broken encoding.
@@ -92,11 +94,11 @@ public sealed class ReplayConformanceTests
             replayed++;
         }
 
-        Assert.Equal(steps.GetArrayLength(), replayed);
+        CorpusSteps.AssertAllExecuted($"{Corpus}/{Fixture}", steps.GetArrayLength(), replayed);
         Assert.Equal([false, true], outcomes.Order());
     }
 
-    private static void DriveHarnessFixture(string fixture, int expectedSteps)
+    private static void DriveHarnessFixture(string fixture)
     {
         using var document = SpecCorpus.Load(Corpus, fixture);
         var root = document.RootElement;
@@ -110,7 +112,9 @@ public sealed class ReplayConformanceTests
         var fingerprints = new Dictionary<string, ReplayFingerprint>(StringComparer.Ordinal);
 
         var steps = root.GetProperty("steps");
-        Assert.Equal(expectedSteps, steps.GetArrayLength());
+        // No step-count constant here, deliberately: see CorpusSteps. This repo's
+        // `Assert.Equal(11, steps.GetArrayLength())` is what caught the last corpus move
+        // (#lzcorpusfloorguard); executed-vs-loaded below replaces it without a number.
         var replayed = 0;
 
         foreach (var step in steps.EnumerateArray())
@@ -186,7 +190,7 @@ public sealed class ReplayConformanceTests
             replayed++;
         }
 
-        Assert.Equal(steps.GetArrayLength(), replayed);
+        CorpusSteps.AssertAllExecuted($"{Corpus}/{fixture}", steps.GetArrayLength(), replayed);
     }
 
     private static void VerifyStep(

@@ -93,10 +93,14 @@ public sealed class IngressFamilyConformanceTests
             SpecCorpus.FixtureNames(Corpus));
         Assert.Equal(8, Fixtures.Length + 1);
 
+        // Positive evidence that the corpus resolved and carries work, with no NUMBER to
+        // re-pin. The `>= 30` that stood here was a corpus-size floor, and a floor is exactly
+        // what let three new rows land unexecuted in eight sibling bindings (#lzcorpusfloorguard).
+        // How many steps the corpus SHOULD carry is pinned upstream now, in lazily-spec's
+        // `corpus-counts.json` / `scripts/check-corpus-floors.mjs`; that every one of them is
+        // EXECUTED is `AssertFlavorReplays` below, which compares executed against loaded exactly.
         var total = ExpectedStepTotal();
-        Assert.True(
-            total >= 30,
-            $"the ingress corpus replays only {total} steps; that is not the named schedule set");
+        Assert.True(total > 0, "the ingress corpus resolved but declares no steps at all");
     }
 
     /// <summary>Replays the whole corpus against the single-threaded flavor.</summary>
@@ -127,7 +131,7 @@ public sealed class IngressFamilyConformanceTests
         // A positive count is the only thing that proves this binary opened the fixtures. The
         // absence guard proves only that they exist on disk.
         Assert.True(steps > 0, $"{flavor}: replayed zero steps");
-        Assert.Equal(expected, steps);
+        CorpusSteps.AssertAllExecuted($"{Corpus} ({flavor})", expected, steps);
 
         // Seven reader kinds per step, in both directions, is the contract this corpus exists to
         // pin; a runner that stopped probing would still report the right step count.

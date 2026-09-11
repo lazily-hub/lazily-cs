@@ -86,6 +86,7 @@ public sealed class QueueCellConformanceTests
             $"lazily-spec conformance corpus not found at {SpecCorpus.SiblingRelativePath}; " +
             "clone lazily-spec as a sibling. A skip here would report green while testing nothing.");
 
+        var loaded = 0;
         var steps = 0;
         var invalidationChecks = 0;
 
@@ -94,6 +95,7 @@ public sealed class QueueCellConformanceTests
             using var doc = SpecCorpus.Load(Corpus, fixture);
             var root = doc.RootElement;
             Assert.Equal("QueueCell", root.GetProperty("model").GetString());
+            loaded += CorpusSteps.Declared(root);
 
             var initial = root.GetProperty("initial");
             int? capacity = initial.TryGetProperty("capacity", out var cap) && cap.ValueKind == JsonValueKind.Number
@@ -211,7 +213,10 @@ public sealed class QueueCellConformanceTests
 
         // Positive proof, not an absence guard: a runner that silently replayed nothing would
         // otherwise pass.
-        Assert.True(steps >= 25, $"replayed only {steps} steps across {Fixtures.Length} fixtures");
+        // No step-count constant: see CorpusSteps (#lzcorpusfloorguard). A `>= N` floor here
+        // swallowed new corpus rows unexecuted in eight sibling bindings; executed-vs-loaded
+        // is exact and cannot drift. Shrinks are caught in lazily-spec's corpus-counts.json.
+        CorpusSteps.AssertAllExecuted($"{Corpus}/queue", loaded, steps);
         Assert.True(invalidationChecks >= 85,
             $"only {invalidationChecks} invalidation assertions — the matrix is what makes this " +
             "corpus discriminating");

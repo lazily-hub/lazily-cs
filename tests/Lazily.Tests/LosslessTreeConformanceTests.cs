@@ -33,6 +33,7 @@ public sealed class LosslessTreeConformanceTests
 
         var fixtureCount = 0;
         var scenarioCount = 0;
+        var loadedSteps = 0;
         var stepCount = 0;
         var assertionCount = 0;
         foreach (var fixture in ExpectedFixtures)
@@ -43,6 +44,7 @@ public sealed class LosslessTreeConformanceTests
             {
                 scenarioCount++;
                 var world = SeedWorld(scenario);
+                loadedSteps += CorpusSteps.Declared(scenario);
                 if (scenario.TryGetProperty("steps", out var steps)
                     && steps.ValueKind == JsonValueKind.Array)
                 {
@@ -64,7 +66,10 @@ public sealed class LosslessTreeConformanceTests
 
         Assert.Equal(11, fixtureCount);
         Assert.Equal(16, scenarioCount);
-        Assert.True(stepCount >= 57, $"lossless-tree runner replayed only {stepCount} steps");
+        // No step-count constant: see CorpusSteps (#lzcorpusfloorguard). A `>= N` floor here
+        // swallowed new corpus rows unexecuted in eight sibling bindings; executed-vs-loaded
+        // is exact and cannot drift. Shrinks are caught in lazily-spec's corpus-counts.json.
+        CorpusSteps.AssertAllExecuted(Corpus, loadedSteps, stepCount);
         Assert.True(
             assertionCount >= 45,
             $"lossless-tree runner made only {assertionCount} assertions");

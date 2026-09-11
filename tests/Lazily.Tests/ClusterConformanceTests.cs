@@ -59,8 +59,9 @@ public sealed class ClusterConformanceTests
         var probe = context.Computed(ops => cell.PeerSetCell.Get(ops).Count);
         _ = probe.Get();
 
+        var declared = root.GetProperty("steps");
         var steps = 0;
-        foreach (var step in root.GetProperty("steps").EnumerateArray())
+        foreach (var step in declared.EnumerateArray())
         {
             var operation = step.GetProperty("op");
             var now = operation.GetProperty("now").GetInt64();
@@ -103,19 +104,22 @@ public sealed class ClusterConformanceTests
             expected.Verify();
             steps++;
         }
-        Assert.Equal(9, steps);
+        // No hard-coded 9 here: see CorpusSteps (#lzcorpusfloorguard).
+        CorpusSteps.AssertAllExecuted("membership", declared.GetArrayLength(), steps);
     }
 
     [Fact]
     public void ReplaysCanonicalCoordinationCorpus()
     {
         AssertCorpusPresent("coordination", CoordinationFixtures);
+        var loaded = 0;
         var steps = 0;
         foreach (var fixture in CoordinationFixtures)
         {
             using var document = SpecCorpus.Load("coordination", fixture);
             var root = document.RootElement;
             Assert.Equal("Coordination", root.GetProperty("kind").GetString());
+            loaded += root.GetProperty("steps").GetArrayLength();
             steps += root.GetProperty("model").GetString() switch
             {
                 "LeaseCell" => ReplayLease(root, fixture),
@@ -126,19 +130,22 @@ public sealed class ClusterConformanceTests
                 _ => throw new InvalidOperationException($"{fixture}: unknown coordination model"),
             };
         }
-        Assert.Equal(29, steps);
+        // No hard-coded total here: see CorpusSteps (#lzcorpusfloorguard).
+        CorpusSteps.AssertAllExecuted("coordination", loaded, steps);
     }
 
     [Fact]
     public void ReplaysCanonicalPresenceCorpus()
     {
         AssertCorpusPresent("presence", PresenceFixtures);
+        var loaded = 0;
         var steps = 0;
         foreach (var fixture in PresenceFixtures)
         {
             using var document = SpecCorpus.Load("presence", fixture);
             var root = document.RootElement;
             Assert.Equal("Presence", root.GetProperty("kind").GetString());
+            loaded += root.GetProperty("steps").GetArrayLength();
             steps += root.GetProperty("model").GetString() switch
             {
                 "EphemeralCell" => ReplayEphemeral(root, fixture),
@@ -147,19 +154,22 @@ public sealed class ClusterConformanceTests
                 _ => throw new InvalidOperationException($"{fixture}: unknown presence model"),
             };
         }
-        Assert.Equal(16, steps);
+        // No hard-coded total here: see CorpusSteps (#lzcorpusfloorguard).
+        CorpusSteps.AssertAllExecuted("presence", loaded, steps);
     }
 
     [Fact]
     public void ReplaysCanonicalResilienceCorpus()
     {
         AssertCorpusPresent("resilience", ResilienceFixtures);
+        var loaded = 0;
         var steps = 0;
         foreach (var fixture in ResilienceFixtures)
         {
             using var document = SpecCorpus.Load("resilience", fixture);
             var root = document.RootElement;
             Assert.Equal("Resilience", root.GetProperty("kind").GetString());
+            loaded += root.GetProperty("steps").GetArrayLength();
             steps += root.GetProperty("model").GetString() switch
             {
                 "CircuitBreakerCell" => ReplayCircuitBreaker(root, fixture),
@@ -169,19 +179,22 @@ public sealed class ClusterConformanceTests
                 _ => throw new InvalidOperationException($"{fixture}: unknown resilience model"),
             };
         }
-        Assert.Equal(21, steps);
+        // No hard-coded total here: see CorpusSteps (#lzcorpusfloorguard).
+        CorpusSteps.AssertAllExecuted("resilience", loaded, steps);
     }
 
     [Fact]
     public void ReplaysCanonicalServiceCorpus()
     {
         AssertCorpusPresent("service", ServiceFixtures);
+        var loaded = 0;
         var steps = 0;
         foreach (var fixture in ServiceFixtures)
         {
             using var document = SpecCorpus.Load("service", fixture);
             var root = document.RootElement;
             Assert.Equal("Service", root.GetProperty("kind").GetString());
+            loaded += root.GetProperty("steps").GetArrayLength();
             steps += root.GetProperty("model").GetString() switch
             {
                 "HealthCell" => ReplayHealth(root, fixture),
@@ -191,7 +204,8 @@ public sealed class ClusterConformanceTests
                 _ => throw new InvalidOperationException($"{fixture}: unknown service model"),
             };
         }
-        Assert.Equal(20, steps);
+        // No hard-coded total here: see CorpusSteps (#lzcorpusfloorguard).
+        CorpusSteps.AssertAllExecuted("service", loaded, steps);
     }
 
     private static int ReplayLease(JsonElement root, string fixture)

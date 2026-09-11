@@ -55,6 +55,7 @@ public sealed class WorkQueueConformanceTests
             SpecCorpus.Root is not null,
             $"lazily-spec conformance corpus not found at {SpecCorpus.SiblingRelativePath}");
 
+        var loaded = 0;
         var steps = 0;
         var invalidationChecks = 0;
         foreach (var fixture in Fixtures)
@@ -62,6 +63,7 @@ public sealed class WorkQueueConformanceTests
             using var doc = SpecCorpus.Load("collections", fixture);
             var root = doc.RootElement;
             Assert.Equal("WorkQueueCell", root.GetProperty("model").GetString());
+            loaded += CorpusSteps.Declared(root);
             var initial = root.GetProperty("initial");
             var ctx = new Context();
             var queue = new WorkQueueCell<string>(
@@ -135,7 +137,10 @@ public sealed class WorkQueueConformanceTests
         }
 
         Assert.Equal(2, Fixtures.Length);
-        Assert.True(steps >= 18, $"expected at least 18 steps, got {steps}");
+        // No step-count constant: see CorpusSteps (#lzcorpusfloorguard). A `>= N` floor here
+        // swallowed new corpus rows unexecuted in eight sibling bindings; executed-vs-loaded
+        // is exact and cannot drift. Shrinks are caught in lazily-spec's corpus-counts.json.
+        CorpusSteps.AssertAllExecuted("collections/work-queue", loaded, steps);
         Assert.True(
             invalidationChecks >= 72,
             $"expected at least 72 invalidation checks, got {invalidationChecks}");

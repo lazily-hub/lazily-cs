@@ -17,16 +17,19 @@ public sealed class CrdtConformanceTests
         RequireFixture(Collections, "textcrdt_delta_sync.json");
 
         var scenarios = 0;
+        var loadedSteps = 0;
         var steps = 0;
         var assertions = 0;
         ReplayTextFixture(
             "textcrdt_convergence.json",
             ref scenarios,
+            ref loadedSteps,
             ref steps,
             ref assertions);
         ReplayTextFixture(
             "textcrdt_delta_sync.json",
             ref scenarios,
+            ref loadedSteps,
             ref steps,
             ref assertions);
 
@@ -37,7 +40,10 @@ public sealed class CrdtConformanceTests
         // being replayed reddens here rather than hiding under slack calibrated for
         // an older scenario count.
         Assert.Equal(11, scenarios);
-        Assert.True(steps >= 48, $"text CRDT runner replayed only {steps} steps");
+        // No step-count constant: see CorpusSteps (#lzcorpusfloorguard). A `>= N` floor here
+        // swallowed new corpus rows unexecuted in eight sibling bindings; executed-vs-loaded
+        // is exact and cannot drift. Shrinks are caught in lazily-spec's corpus-counts.json.
+        CorpusSteps.AssertAllExecuted($"{Collections}/textcrdt", loadedSteps, steps);
         Assert.True(assertions >= 33, $"text CRDT runner made only {assertions} assertions");
     }
 
@@ -48,11 +54,13 @@ public sealed class CrdtConformanceTests
         RequireFixture(Collections, fixture);
         using var document = SpecCorpus.Load(Collections, fixture);
         var scenarios = SpecCorpus.Scenarios(document.RootElement, Collections, fixture);
+        var loadedSteps = 0;
         var stepCount = 0;
         var assertions = 0;
 
         foreach (var scenario in scenarios.All())
         {
+            loadedSteps += CorpusSteps.Declared(scenario);
             var replicas = SeedSequence(scenario);
             foreach (var step in scenario.GetProperty("steps").EnumerateArray())
             {
@@ -73,7 +81,10 @@ public sealed class CrdtConformanceTests
         // The step/assertion floors are the exact observed totals, so a scenario that
         // stops being replayed reddens here rather than hiding behind the census.
         Assert.Equal(8, scenarios.Count);
-        Assert.True(stepCount >= 42, $"SeqCrdt runner replayed only {stepCount} steps");
+        // No step-count constant: see CorpusSteps (#lzcorpusfloorguard). A `>= N` floor here
+        // swallowed new corpus rows unexecuted in eight sibling bindings; executed-vs-loaded
+        // is exact and cannot drift. Shrinks are caught in lazily-spec's corpus-counts.json.
+        CorpusSteps.AssertAllExecuted($"{Collections}/{fixture}", loadedSteps, stepCount);
         Assert.True(assertions >= 22, $"SeqCrdt runner made only {assertions} assertions");
     }
 
@@ -147,6 +158,7 @@ public sealed class CrdtConformanceTests
     private static void ReplayTextFixture(
         string fixture,
         ref int scenarioCount,
+        ref int loadedSteps,
         ref int stepCount,
         ref int assertionCount)
     {
@@ -154,6 +166,7 @@ public sealed class CrdtConformanceTests
         foreach (var scenario in SpecCorpus.Scenarios(document.RootElement, Collections, fixture).All())
         {
             scenarioCount++;
+            loadedSteps += CorpusSteps.Declared(scenario);
             var replicas = SeedText(scenario);
             foreach (var step in scenario.GetProperty("steps").EnumerateArray())
             {
