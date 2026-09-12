@@ -64,11 +64,24 @@ reported green while testing nothing.
   against the run, failing in BOTH directions, and is still satisfied by any CONSISTENT pair —
   a commit that detaches N binds and writes the N matching entries passes it, while the derived
   site and digest counts do not move because a detached site is still DECLARED. So that ledger
-  sits under a POLICY as well: `MAX_LEDGERED_BLOCKS` (0, env-overridable) caps how much may be
-  excused instead of counting what is, so it never needs re-pinning except deliberately and
-  upward, and the ledger may only SHRINK (`#lzledgerceiling`). Never pin a count that MIRRORS a
-  ledger or the bound population — equal sets have equal counts, so the number carries nothing
-  the equality does not and adds an edit site that drifts, which is `MIN_BLOCKS` in a new costume. Where a floor remains, it is the EXACT count a completed CI run
+  sits under a POLICY as well: `EXPECTED_LEDGERED_BLOCKS` (0, env-overridable) is its SIZE
+  compared against a COMMITTED CONSTANT rather than against the run, and that independence is
+  the whole value — under the attack both sides of the set equality move together, a constant
+  does not (`#lzledgerceiling`). The distinction has a SECOND HALF, and it is the correction
+  `#lzledgerratchet` landed: POLICY WITH SLACK DECAYS INTO MEASUREMENT'S FAILURE MODE. A `<=`
+  ceiling refuses the attack only while its slack is zero. Migrate one site and the ledger
+  shrinks; nothing forces the constant down, because shrinking is the good direction and a
+  ceiling permits it silently; slack becomes one, and the same detach-and-excuse commit passes
+  again — converging, one migration at a time, on exactly the stale never-firing floor the
+  derivation above replaced. So the operator is an EXACT equality, failing in both directions:
+  growth means an excuse was added, shrink means sites were migrated and the pin was not
+  lowered in the same commit, and a person must see both. The defect was never that a number
+  EXISTS, it was a number with SLACK — a number that FAILS when stale is a ratchet, not drift.
+  Raising it is legitimate for a genuinely unbindable block, deliberately and visibly in the
+  same diff, with a reason. Never pin a count the RUN can compute — equal sets have equal
+  counts, so a count mirroring the bound population carries nothing the set equality does not
+  and adds an edit site that drifts; pin only against a hand-committed ledger, the one axis no
+  run moves. Where a floor remains, it is the EXACT count a completed CI run
   reports against the published corpus. This paragraph used to describe the scenario floor as "calibrated below the observed",
   and that advice was the bug: a floor deliberately set under reality has stopped guarding,
   because the drop it exists to catch fits inside its own margin. It let 17 scenarios of slack
