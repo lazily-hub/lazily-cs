@@ -623,8 +623,19 @@ KNOWN_UNREPLAYED_SCENARIOS=(
 MIN_SCENARIOS="${MIN_SCENARIOS:-169}"
 
 MANIFEST="${LAZILY_CONFORMANCE_MANIFEST:-build/conformance-fixtures-loaded.txt}"
-if [ ! -s "$MANIFEST" ]; then
-  echo "FAIL: no conformance manifest at $MANIFEST." >&2
+# PRESENCE, not size (#lzstampsatisfiesnonempty).
+#
+# This was `[ ! -s "$MANIFEST" ]`, and `-s` stopped meaning what it was written to
+# mean the moment the recorder began stamping the file with a run id: a manifest
+# holding ONE provenance line and no records is non-empty, so the byte test passed
+# over evidence of nothing. The size dimension moved to the records rung below,
+# which runs after the stamp is recognised and can therefore subtract it. What is
+# left here is the part `-s` was also doing and that still needs doing first: the
+# file has to EXIST and be readable before any rung can awk or grep it, and its
+# absence means the suite ran with no recorder attached rather than that the suite
+# read nothing.
+if [ ! -f "$MANIFEST" ] || [ ! -r "$MANIFEST" ]; then
+  echo "FAIL: no readable conformance manifest at $MANIFEST." >&2
   echo "      Run the suite with LAZILY_CONFORMANCE_MANIFEST set so the recorder" >&2
   echo "      attaches. An absent manifest is missing evidence, not evidence of" >&2
   echo "      absence." >&2
@@ -730,6 +741,45 @@ else
     echo "      rewrites this file under this invocation's id (#lzstalemanifest)." >&2
     exit 1
   fi
+fi
+
+# ---- RUNG: a stamp is provenance, not evidence (#lzstampsatisfiesnonempty) ---
+#
+# The run-id protocol directly above made this file non-empty ON ITS OWN, and in
+# doing so it silently weakened every pre-existing "the recorder wrote something"
+# check over it. The `-s` test at the top of this section was one; a stamped
+# manifest with no records satisfied it, and a detached recorder under a perfectly
+# correct id — or a test host that flushed its stamp and no lines — produced a file
+# that is present, non-empty, and this run's, carrying no evidence whatsoever.
+#
+# So count RECORDS, below the stamp, which is the only dimension that distinguishes
+# a run that read the corpus from one that did not. Blank lines are not records
+# either: nothing the recorder writes is blank, so a blank line is an artefact of
+# the file rather than a claim about the run.
+#
+# Placed OUTSIDE the freshness branch above, deliberately.
+# LAZILY_CONFORMANCE_STALE_EVIDENCE_OK turns the run-id rung off so a mutation probe
+# can read an OLD run's evidence on purpose; it must not also be able to turn off
+# "there IS evidence here". Reading an earlier run's records is what that opt-out
+# licenses, reading no records at all is not, and under the opt-out an unstamped
+# manifest is not even recognisable as empty-but-stamped.
+#
+# The rungs below would refuse a record-less manifest too, and it is worth being
+# precise about why that is not enough: they refuse it as a CORPUS finding — 151
+# "canonical fixture was NOT opened" lines, then a 0-versus-761 site equality — so
+# the message points at the runners and the corpus checkout, which is where nothing
+# is wrong. This names the file and the single fault.
+MANIFEST_RECORDS="$(grep -cv -e "^$RUN_ID_MARKER" -e '^[[:space:]]*$' "$MANIFEST" || true)"
+if [ "$MANIFEST_RECORDS" -eq 0 ]; then
+  echo "FAIL: $MANIFEST carries no records — only provenance." >&2
+  echo "      Every line in it is a \`$RUN_ID_MARKER\` stamp or blank, so the recorder" >&2
+  echo "      attached and wrote its provenance while reading NOTHING from the corpus." >&2
+  echo "      A stamp makes this file non-empty, which is why presence and byte size are" >&2
+  echo "      no longer evidence that the suite read anything (#lzstampsatisfiesnonempty)." >&2
+  echo "      Usual cause: the guard ran without its test step, or the corpus was absent" >&2
+  echo "      inside the test host while LAZILY_SPEC_CONFORMANCE_DIR pointed elsewhere." >&2
+  echo "      Run the gate as \`make check\`." >&2
+  exit 1
 fi
 
 # Stamp lines are provenance, not records: dropped here so no rung below can count
@@ -1049,7 +1099,9 @@ if len(excuses) != EXPECTED_LEDGERED_BLOCKS:
     sys.exit(1)
 
 # The manifest is EVIDENCE, and evidence that cannot be decoded is not evidence
-# of absence. The bash leg proved it non-empty; bytes the recorder interleaved or
+# of absence. The bash leg proved it present and carrying records below its stamp
+# (#lzstampsatisfiesnonempty — "non-empty" stopped being the useful claim once the
+# stamp itself made it so); bytes the recorder interleaved or
 # truncated at process exit — the exact failure the fixture self-check below
 # reasons about — would otherwise surface here as a UnicodeDecodeError traceback
 # instead of a sentence naming the file (#lzcorpusabsencehandling).

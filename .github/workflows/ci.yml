@@ -59,6 +59,16 @@ jobs:
       #     once here and carried to the test steps that WRITE the evidence and to the
       #     guard step that READS it, which is what `GITHUB_ENV` is for.
       #
+      # There is deliberately NO "manifest written" assertion here, and none may be
+      # added as a byte or existence test (#lzstampsatisfiesnonempty). The stamp makes
+      # this file non-empty by itself, so `test -s`, `test -f` and `wc -c` are all
+      # satisfied by a recorder that attached and read nothing — that is exactly the
+      # check lazily-cpp had to replace. What this job asserts instead is RECORDS, from
+      # the outside, in the coverage-guard step below: positive covered-fixture and
+      # replayed-scenario counts matched out of the guard's own verdict lines. The
+      # guard itself counts the records below the stamp and refuses a stamp-only file
+      # by name, so a step here would be a second check over the same property.
+      #
       # LAZILY_CONFORMANCE_STRICT turns the coverage script's "corpus absent, skip"
       # branch into a failure. Here the corpus IS supposed to be present, so a skip
       # would be the vacuous green this whole ladder exists to reject.
