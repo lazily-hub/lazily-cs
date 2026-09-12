@@ -397,6 +397,33 @@ EXPECTED_GATE_STEPS=(
 # reviewable changes that each name the target: the CI step body, the
 # EXPECTED_GATE_STEPS deletion, and the addition here.
 #
+# The LOADED form of the same commit, measured against the version before this
+# array existed: the three edits above PLUS the recipe repointed at another
+# command. Exit 0, `check-ci-reach: OK` printed for the CI step to grep, and
+# `make -n check | grep -c check-ffi` -> 0. The gate ran nowhere, local or CI.
+#
+# TWO PROPERTIES, NOT ONE, and each falsified on this repo rather than reasoned:
+#
+#   (1) SET-EQUAL IN BOTH DIRECTIONS. The array is data; the equality is the check.
+#       Removing the observed-but-not-pinned half alone returns the two-part edit to
+#       exit 0 with the healthy verdict. Removing the pinned-but-not-observed half
+#       alone returns a second real state to exit 0 -- `package-check` excused AND
+#       its `make package-check` step deleted, where the entry here then asserts
+#       nothing and no other rung notices. Both halves are load-bearing.
+#
+#   (2) MUTUALLY EXCLUSIVE WITH `EXPECTED_GATE_STEPS`, so every gate-carrying
+#       non-excused member is in exactly one array and neither can absorb what the
+#       other drops. Disjointness is refused up front; totality is asserted against
+#       a population accumulated BEFORE the branch that classifies it, so it is a
+#       statement and not a property of that branch. Falsified both ways by breaking
+#       the classification: a member recorded in neither mode, and one recorded in
+#       both, each exits 1.
+#
+# py reaches the same protection by pinning the gate-step DOMAIN set-equal to
+# {gate-carrying} - {excused} - {make-invoked}. That is this, with the subtraction
+# in place of the second array; the partition assertion below is what makes the two
+# spellings equivalent here.
+#
 # NOT excused members, and not no-gate members. An excuse removes the reach
 # requirement altogether and a no-gate recipe has nothing to reach, so neither is
 # classified into a mode; `EXPECTED_NO_GATE_TARGETS` and ci-reach.conf own those.
@@ -1230,6 +1257,7 @@ stepmiss=""
 stepmiss_count=0
 makeobserved=""
 anchorobserved=""
+gated=""
 makereached_count=0
 
 while IFS= read -r target; do
@@ -1329,6 +1357,12 @@ while IFS= read -r target; do
 	# The OBSERVED mode is recorded here and compared to EXPECTED_MAKE_INVOKED_TARGETS
 	# by set equality at the bottom. Both observed sets are accumulated
 	# unconditionally, so neither population is the other's complement.
+	# The population both pins partition. Accumulated BEFORE the branch, so the
+	# claim "every gate-carrying non-excused member is in exactly one of the two
+	# arrays" is checked against a set built independently of the branch that
+	# classifies it, rather than being a property of that branch.
+	gated="$gated$target"$'\n'
+
 	if [ "$invoked_via_make" -eq 1 ]; then
 		makeobserved="$makeobserved$target"$'\n'
 		makereached_count=$((makereached_count + 1))
@@ -1389,9 +1423,58 @@ step_pin_sorted="$(printf '%s\n' ${EXPECTED_GATE_STEPS[@]+"${EXPECTED_GATE_STEPS
 step_pin_only="$(LC_ALL=C comm -23 <(printf '%s\n' "$step_pin_sorted") <(printf '%s\n' "$anchor_obs_sorted") | LC_ALL=C comm -23 - <(printf '%s\n' "$mode_changed"))"
 step_obs_only="$(LC_ALL=C comm -13 <(printf '%s\n' "$step_pin_sorted") <(printf '%s\n' "$anchor_obs_sorted") | LC_ALL=C comm -23 - <(printf '%s\n' "$mode_changed"))"
 
-if [ -z "$mode_changed" ] && [ -z "$step_pin_only" ] && [ -z "$step_obs_only" ] && [ "$stepmiss_count" -eq 0 ]; then
-	printf 'gate step pin satisfied: %s gate(s) reached inside their pinned CI step, %s invoked through `%s <target>` (both populations pinned as sets)\n' \
-		"$step_ok" "$makereached_count" "$MAKE_BIN"
+# ---- D. the two modes PARTITION the gated population, asserted not assumed ----
+#
+# The two set equalities above say WHICH members are in each array. What makes
+# "exactly one of the two" a statement rather than a consequence of the if/else
+# that classified them is this: the union of the observed modes must equal the
+# gate-carrying non-excused population, which is accumulated before that branch,
+# and the two must not intersect. With both equalities green this is implied, so it
+# can only fire when the classification itself is wrong — which is exactly the
+# reading no set pin can give you. This is equivalent to pinning the gate-step
+# DOMAIN as {gate-carrying} − {excused} − {make-invoked}, spelled as two pins plus
+# a partition instead of one pin plus a subtraction.
+gated_sorted="$(printf '%s' "$gated" | sed '/^[[:space:]]*$/d' | LC_ALL=C sort -u)"
+mode_union="$(printf '%s%s' "$makeobserved" "$anchorobserved" | sed '/^[[:space:]]*$/d' | LC_ALL=C sort -u)"
+mode_overlap="$(LC_ALL=C comm -12 <(printf '%s\n' "$mode_obs_sorted") <(printf '%s\n' "$anchor_obs_sorted") | sed '/^[[:space:]]*$/d')"
+partition_gap="$(LC_ALL=C comm -3 <(printf '%s\n' "$gated_sorted") <(printf '%s\n' "$mode_union") | sed '/^[[:space:]]*$/d')"
+partition_bad=0
+if [ -n "$mode_overlap" ] || [ -n "$partition_gap" ]; then
+	partition_bad=1
+	echo >&2
+	echo "check-ci-reach: the two reach MODES do not partition the gate-carrying," >&2
+	echo "      non-excused closure members. Every such member must be in exactly one of" >&2
+	echo "      EXPECTED_MAKE_INVOKED_TARGETS or EXPECTED_GATE_STEPS, and the set pins above" >&2
+	echo "      only fix WHICH members are in each — not that the two cover the population" >&2
+	echo "      without overlapping. If one mode can absorb what the other drops, the" >&2
+	echo "      cancellation those pins closed reappears in a new place." >&2
+	if [ -n "$mode_overlap" ]; then
+		echo >&2
+		echo "  CLASSIFIED IN BOTH MODES:" >&2
+		while IFS= read -r t; do
+			[ -n "$t" ] || continue
+			echo "    - $t" >&2
+		done <<<"$mode_overlap"
+	fi
+	if [ -n "$partition_gap" ]; then
+		echo >&2
+		echo "  CARRIES A GATE AND IS NOT EXCUSED, but landed in NEITHER mode (or in a mode" >&2
+		echo "  without carrying a gate):" >&2
+		while IFS= read -r t; do
+			[ -n "$t" ] || continue
+			echo "    - $t" >&2
+		done <<<"$partition_gap"
+	fi
+	echo >&2
+	echo "This is a defect in this script's own classification, not a repo state — fix" >&2
+	echo "the mode branch in the main loop (#reversereachdirection)." >&2
+	status=1
+fi
+
+if [ "$partition_bad" -eq 0 ] && [ -z "$mode_changed" ] && [ -z "$step_pin_only" ] && [ -z "$step_obs_only" ] && [ "$stepmiss_count" -eq 0 ]; then
+	printf 'gate step pin satisfied: %s in their pinned CI step + %s invoked through `%s <target>` = %s gate(s), each population pinned as a SET in both directions\n' \
+		"$step_ok" "$makereached_count" "$MAKE_BIN" \
+		"$(printf '%s\n' "$gated_sorted" | awk 'NF { n++ } END { print n + 0 }')"
 fi
 
 # ---- C. The no-gate bucket, pinned by set equality --------------------------
