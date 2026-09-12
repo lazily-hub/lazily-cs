@@ -446,6 +446,25 @@ if __name__ == "__main__":
 PY
 )"
 
+# All three python legs need the interpreter, and this is the FIRST of them, so
+# the check belongs HERE (#lzgrepcpipefail). It used to sit above the scenario leg
+# ~1000 lines down, where it could never fire: the assignment below is a `$(...)`
+# from a pipeline under `set -euo pipefail`, so a missing interpreter made the
+# substitution exit 127 and killed the script AT THAT LINE. Measured: exit 127
+# with `line 450: python3: command not found` as the only output — bash's words,
+# not this script's, naming neither the guard nor what to do, and the sentence
+# written for exactly this fault was unreachable below it.
+#
+# It is NOT a `|| true` case. A missing interpreter is missing EVIDENCE, so this
+# still fails; what changes is that the failure says whose it is.
+command -v python3 >/dev/null 2>&1 || {
+  echo "FAIL: python3 is required to read the corpus, the manifest, and the" >&2
+  echo "      scenario ids out of it. Every rung below is a python leg or reads" >&2
+  echo "      one's verdict, so without it nothing here can be verified, and" >&2
+  echo "      passing in that state is missing evidence, not evidence of absence." >&2
+  exit 1
+}
+
 corpus_root_report="$(collect_sources | python3 -c "$PY_DIAG
 $CORPUS_ROOT_PY" "$CORPUS_ROOT_ALLOW")"
 scanned="$(sed -n 's/^EXAMINED //p' <<< "$corpus_root_report")"
@@ -1469,12 +1488,9 @@ $BLOCK_GUARD_PY" "$MANIFEST" "$SPEC_DIR" \
 # a POSITION silently rebinds to a different scenario when the corpus array is
 # reordered, so an unidentified scenario is an error here rather than an invented
 # id.
-command -v python3 >/dev/null 2>&1 || {
-  echo "FAIL: python3 is required to read scenario ids out of the corpus." >&2
-  echo "      Without it the scenario ledger cannot be verified, and passing in" >&2
-  echo "      that state is missing evidence, not evidence of absence." >&2
-  exit 1
-}
+# The python3-presence check for this leg is the one hoisted above the FIRST
+# python leg (the corpus-root scanner). A second copy here would be unreachable:
+# two legs have already run the interpreter by the time control arrives.
 
 # The excuse list is passed as ARGV, not on stdin. `python3 - <<EOF` reads the
 # PROGRAM from stdin, so a pipe into it is swallowed by the heredoc and every
