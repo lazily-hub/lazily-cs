@@ -879,18 +879,79 @@ if unknown:
 ASSERTION_BLOCK_NAMES = ("assertions", "expect", "expected")
 
 
-def walk_sites(fixture_id, node, path, sites):
-    """The python twin of `SpecCorpus.DeclareWalk` — see the paragraph above."""
+def walk_sites(fixture_id, node, path, sites, blocks=None):
+    """The python twin of `SpecCorpus.DeclareWalk` — see the paragraph above.
+
+    `blocks`, when given, collects the block VALUES alongside their sites so the
+    digest dimension can be derived from the same walk (#lzblocksitepin). One
+    walk, two counts: a digest expectation derived by a second traversal could
+    disagree with the site one and neither would be wrong about its own rule.
+    """
     if isinstance(node, dict):
         for name, value in node.items():
             child = name if not path else path + "." + name
             if isinstance(value, dict) and name in ASSERTION_BLOCK_NAMES:
                 sites.add(f"{fixture_id}|{child}")
+                if blocks is not None:
+                    blocks.append(value)
                 continue
-            walk_sites(fixture_id, value, child, sites)
+            walk_sites(fixture_id, value, child, sites, blocks)
     elif isinstance(node, list):
         for index, item in enumerate(node):
-            walk_sites(fixture_id, item, f"{path}[{index}]", sites)
+            walk_sites(fixture_id, item, f"{path}[{index}]", sites, blocks)
+
+
+# `SpecCorpus.BlockDigest` from tests/Lazily.Tests/SpecCorpus.cs, rule for rule:
+# FNV-1a over a type-tagged walk, object properties in document order, numbers
+# folded by their RAW LEXICAL FORM (`JsonElement.GetRawText()`) rather than by
+# any parsed value, and anything that is neither object, array, string, number
+# nor boolean folded as `z`. A twin that normalised numbers would split one block
+# into two and report the whole corpus unbound.
+FNV_OFFSET = 0xCBF29CE484222325
+FNV_PRIME = 0x100000001B3
+MASK = (1 << 64) - 1
+
+
+class RawNumber:
+    """A JSON number kept as the exact token the file carries."""
+
+    __slots__ = ("raw",)
+
+    def __init__(self, raw):
+        self.raw = raw
+
+
+def feed(hash_value, text):
+    for byte in text.encode("utf-8"):
+        hash_value ^= byte
+        hash_value = (hash_value * FNV_PRIME) & MASK
+    return hash_value
+
+
+def hash_value(hash_state, value):
+    if isinstance(value, dict):
+        hash_state = feed(hash_state, "{")
+        for name, item in value.items():
+            hash_state = hash_value(feed(feed(hash_state, name), "="), item)
+        return feed(hash_state, "}")
+    if isinstance(value, list):
+        hash_state = feed(hash_state, "[")
+        for item in value:
+            hash_state = hash_value(hash_state, item)
+        return feed(hash_state, "]")
+    if isinstance(value, str):
+        return feed(feed(hash_state, "s"), value)
+    if isinstance(value, RawNumber):
+        return feed(feed(hash_state, "n"), value.raw)
+    if value is True:
+        return feed(hash_state, "b1")
+    if value is False:
+        return feed(hash_state, "b0")
+    return feed(hash_state, "z")
+
+
+def block_digest(block):
+    return f"{hash_value(FNV_OFFSET, block):016x}"
 
 
 corpus_fixtures = []
@@ -912,13 +973,16 @@ uncovered_ledger = {
 }
 
 expected_sites = set()
+expected_blocks_walked = []
 walked = 0
 for fixture_id in corpus_fixtures:
     if fixture_id in uncovered_ledger:
         continue
     try:
         with open(os.path.join(spec_dir, fixture_id), encoding="utf-8") as handle:
-            document = json.load(handle)
+            # `parse_int` / `parse_float` keep the RAW token, because that is what
+            # `BlockDigest` folds.
+            document = json.load(handle, parse_int=RawNumber, parse_float=RawNumber)
     except (OSError, ValueError) as error:
         print(
             f"ERROR: could not read canonical fixture '{fixture_id}' out of {spec_dir}: {error}\n"
@@ -927,12 +991,14 @@ for fixture_id in corpus_fixtures:
             file=sys.stderr,
         )
         sys.exit(1)
-    walk_sites(fixture_id, document, "", expected_sites)
+    walk_sites(fixture_id, document, "", expected_sites, expected_blocks_walked)
     walked += 1
+
+expected_digests = {block_digest(block) for block in expected_blocks_walked}
 
 # Positive-evidence floor (#lzvacuousrun): an empty opened set derives zero expected
 # sites, and zero == zero would report OK having compared nothing.
-if walked == 0 or not expected_sites:
+if walked == 0 or not expected_sites or not expected_digests:
     print(
         f"ERROR: the corpus at {spec_dir} minus KNOWN_UNCOVERED derived {walked} opened "
         f"fixture(s) carrying {len(expected_sites)} assertion block site(s).\n"
@@ -960,11 +1026,35 @@ if len(declared_sites) != expected_blocks:
     )
     sys.exit(1)
 
+# The OTHER dimension (#lzblocksitepin). Sites and distinct digests are each
+# blind to what the other sees, in opposite directions. A site count absorbs a
+# CONTENT edit: rewriting one block so it is spelled exactly like another's
+# leaves 743 sites and takes the digest set from 634 to 633, and the corpus has
+# genuinely lost a distinct claim. A digest count absorbs a DELETION of a block
+# whose bytes recur elsewhere. Both derived from the one walk above, both
+# asserted EQUAL.
+if len(declared) != len(expected_digests):
+    direction = "FEWER than" if len(declared) < len(expected_digests) else "MORE than"
+    print(
+        f"ERROR: the run inventoried {len(declared)} DISTINCT assertion-block digests; the\n"
+        f"       canonical corpus at {spec_dir} minus KNOWN_UNCOVERED derives "
+        f"{len(expected_digests)}\n"
+        f"       over {walked} opened fixtures. The run has {direction} the corpus declares.\n"
+        "       The SITE count above can agree while this does not: two sites spelled\n"
+        "       identically share one digest, so a content edit that collapses two\n"
+        "       distinct claims into one leaves the site count untouched.\n"
+        "       Either the corpus moved under this checkout, or SpecCorpus.BlockDigest\n"
+        "       and its twin in this script stopped agreeing — fix whichever moved.",
+        file=sys.stderr,
+    )
+    sys.exit(1)
+
 print(
     f"assertion-block bind OK: {len(bound_sites)}/{len(declared_sites)} assertion block sites "
     f"carried by opened fixtures were BOUND to a tracker ({len(excuses)} declared unbindable; "
-    f"derived {expected_blocks} from {walked} opened fixtures, asserted EQUAL; content-keyed, "
-    f"so a runner's block NAME cannot satisfy it)"
+    f"derived {expected_blocks} sites AND {len(expected_digests)} distinct digests from {walked} "
+    f"opened fixtures, both asserted EQUAL; content-keyed, so a runner's block NAME cannot "
+    f"satisfy it)"
 )
 PY
 )"
