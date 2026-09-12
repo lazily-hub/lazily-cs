@@ -813,20 +813,35 @@ for raw in sys.argv[3:]:
 # is not a non-negative integer is an unreadable pin, and a pin that cannot be read
 # is not a pin. It never falls back to the committed default.
 _PIN_RAW = os.environ.get("EXPECTED_LEDGERED_BLOCKS", "0")
-try:
-    EXPECTED_LEDGERED_BLOCKS = int(_PIN_RAW)
-    if EXPECTED_LEDGERED_BLOCKS < 0:
-        raise ValueError(_PIN_RAW)
-except ValueError:
+# ONE parse for the whole family (#lzpinparsestrict): a NON-EMPTY run of bare
+# ASCII digits `0`-`9`, and nothing else. Validated BEFORE any parse runs, and
+# deliberately stricter than both `int()` and `str.isdigit()`, because each of
+# those silently accepts a number nobody wrote: `int("1_0")` is 10 (PEP 515
+# separators), `int(" 7 ")` is 7, and `"\u0663".isdigit()` is true for the
+# Arabic-Indic three. This file used to read the pin with a bare `int()`, so all
+# three of those got through. Refused now: whitespace around or inside, a leading
+# `+` or `-`, separators, a radix prefix, a float or an exponent, and any
+# non-ASCII digit. A negative falls out of the same check — no ledger size can
+# equal it, so it would make this rung unsatisfiable rather than exact. Leading
+# zeros are fine and `0` stays valid; this binding pins at zero.
+#
+# An UNSET variable takes the committed literal above. An EXPLICITLY EMPTY one is
+# a REJECTION, not a fall-through to it: `os.environ.get(NAME, DEFAULT)`
+# distinguishes the two, and whoever exported the wrong thing is the one person
+# who cannot see that it was ignored.
+if not _PIN_RAW or _PIN_RAW.strip("0123456789"):
     print(
-        f"ERROR: EXPECTED_LEDGERED_BLOCKS={_PIN_RAW!r} is not a non-negative integer.\n"
+        f"ERROR: EXPECTED_LEDGERED_BLOCKS={_PIN_RAW!r} is not a non-negative integer\n"
+        "       in bare ASCII digits (#lzpinparsestrict).\n"
         "       This pin is the committed size of KNOWN_UNBOUND_BLOCKS and is asserted\n"
         "       EQUAL to it. An unreadable pin fails closed rather than falling back to\n"
-        "       the default: silently guarding a different number than the one the\n"
-        "       operator typed is how a gate stops meaning what it says.",
+        "       the default — not even an empty one: silently guarding a different\n"
+        "       number than the one the operator typed is how a gate stops meaning what\n"
+        "       it says.",
         file=sys.stderr,
     )
     sys.exit(1)
+EXPECTED_LEDGERED_BLOCKS = int(_PIN_RAW)
 
 if len(excuses) != EXPECTED_LEDGERED_BLOCKS:
     if len(excuses) < EXPECTED_LEDGERED_BLOCKS:
