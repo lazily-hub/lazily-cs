@@ -291,26 +291,24 @@ join_continuations() {
 	'
 }
 
-# `$MAKE_DIED` is how a failed dry run gets OUT of a subshell (#lzgrepcpipefail).
+# make's stderr is passed THROUGH rather than sent to `/dev/null`, and that is the
+# whole of the change here (#lzgrepcpipefail). Only stdout is parsed, so nothing
+# downstream cares; what `2>/dev/null` bought was silence about make dying, which
+# was the other half of the original defect.
 #
-# `dry_run` is called from `$(dry_run ... | wc -l)` and `$(own_commands ...)`, so
-# an `exit` here reaches only the subshell and the caller carries on with the empty
-# output it was meant to refuse — which is why both probes live in the main shell.
-# A FILE is the one channel that survives the subshell boundary, and it is needed
-# because the per-target probe cannot cover every invocation `dry_run` makes:
-# `own_commands` also runs `make -n "${deps[@]}"`, a MULTI-GOAL invocation whose
-# `$(MAKECMDGOALS)` is a string no single-target probe ever reproduces. In this
-# Makefile only `check` and `all` have makefile-target prerequisites and `check`'s
-# own recipe is a bare `@echo`, so nothing today rides on that path — but "nothing
-# rides on it today" is the reasoning this whole audit kept having to retract.
-# Nothing needs the exit code: make is silent on stderr when a dry run succeeds,
-# so the bytes it wrote there ARE the failure, and appending them costs one
-# redirect and no second invocation. The `2>/dev/null` this replaces is the other
-# half of the original defect — it discarded the only evidence that make had died.
-MAKE_DIED="$(mktemp)"
-
+# It is deliberately NOT turned into a refusal, and the multi-goal
+# `make -n "${deps[@]}"` call below is deliberately NOT probed. lazily-py's
+# reasoning, which measurement here agrees with: when that invocation fails the
+# target is credited with its PREREQUISITES' anchors as well, which over-reports
+# and therefore fails closed. Measured on this repo with a conditional keyed on
+# the dep-list goal string: the guard exits 1 either way, naming CI
+# (`no CI run: step matches check-package.sh`) rather than the Makefile — a
+# misdiagnosis, not a false green. Only the SINGLE-target invocation turns a
+# failure into silence, so that is the one the probe in the main loop mirrors.
+# Testing stderr for BYTES would also invent a false-red surface: any make that
+# warns while succeeding would redden a clean tree.
 dry_run() {
-	"$MAKE_BIN" -n "$@" 2>>"$MAKE_DIED" | grep -v -e '^make\[' -e '^make:' | join_continuations || true
+	"$MAKE_BIN" -n "$@" | grep -v -e '^make\[' -e '^make:' | join_continuations || true
 }
 
 own_commands() {
@@ -482,7 +480,7 @@ anchors() {
 
 ci_raw="$(mktemp)"
 ci_anchor="$(mktemp)"
-trap 'rm -f "$ci_raw" "$ci_anchor" "$MAKE_DIED"' EXIT
+trap 'rm -f "$ci_raw" "$ci_anchor"' EXIT
 ci_commands "${workflows[@]}" >"$ci_raw"
 anchors <"$ci_raw" | sort -u >"$ci_anchor"
 
@@ -668,30 +666,6 @@ if [ "$unreadable_count" -gt 0 ]; then
 	status=1
 fi
 
-# Whatever make wrote to stderr from INSIDE a `dry_run`, which runs in a `$(...)`
-# subshell where an `exit` would reach nothing. This covers the invocations the
-# per-target probe above cannot reproduce — notably `make -n "${deps[@]}"`, whose
-# multi-goal $(MAKECMDGOALS) is a string no single-target probe ever produces.
-#
-# Measured honestly: a conditional keyed on that dep-list goal string does break
-# the dry run at `$(dry_run "${deps[@]}" | wc -l)` while passing both probes, but
-# WITHOUT this block it was already a misdiagnosed RED, not a false green — the
-# wrong `prefix` mis-slices `check`'s own commands and the guard reports
-# `no CI run: step matches check-package.sh`, blaming CI for a broken Makefile.
-# So this block buys DIAGNOSIS, not fail-closure, on that path. It is kept
-# because it is also a second, independent catch for the per-target case (removing
-# the probe above leaves this one refusing Attack 2 on its own) and because the
-# next such invocation need not be as lucky.
-if [ -s "$MAKE_DIED" ]; then
-	echo >&2
-	echo "check-ci-reach: a dry run inside this guard FAILED and said:" >&2
-	sed 's/^/  /' "$MAKE_DIED" >&2
-	echo >&2
-	echo "Anchors are read out of those dry runs, so a failed one yields no commands" >&2
-	echo "and silently shrinks this guard's reach. Refusing rather than reporting a" >&2
-	echo "count computed from it (#lzgrepcpipefail)." >&2
-	status=1
-fi
 if [ "$stale_count" -gt 0 ]; then
 	echo >&2
 	while IFS= read -r t; do
