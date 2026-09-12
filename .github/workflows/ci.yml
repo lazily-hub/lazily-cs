@@ -50,15 +50,28 @@ jobs:
       #   * TRUNCATED first. A guard that reads an evidence file from an earlier run is
       #     not measuring this run. On a fresh runner the file does not exist yet, but
       #     the truncation is the invariant, not the checkout's freshness.
+      #   * STAMPED with a run id. The truncation is an invariant spelled by hand HERE
+      #     and again in the Makefile, and nothing checked that either had happened —
+      #     a guard invoked without a preceding test step read whatever run last wrote
+      #     the file and reported it as this one (#lzstalemanifest). The recorder now
+      #     writes `# lazily-run-id <value>` into the manifest and every guard that
+      #     reads it requires the value to equal this job's. One id per job, generated
+      #     once here and carried to the test steps that WRITE the evidence and to the
+      #     guard step that READS it, which is what `GITHUB_ENV` is for.
       #
       # LAZILY_CONFORMANCE_STRICT turns the coverage script's "corpus absent, skip"
       # branch into a failure. Here the corpus IS supposed to be present, so a skip
       # would be the vacuous green this whole ladder exists to reject.
+      #
+      # LAZILY_CONFORMANCE_STALE_EVIDENCE_OK is the opt-out from the run-id rung and
+      # is deliberately NOT set: the script refuses it outright when `CI` is set, so
+      # this file cannot acquire it later by accident either.
       - name: Prepare conformance evidence manifest
         run: |
           mkdir -p build
           : > build/conformance-fixtures-loaded.txt
           echo "LAZILY_CONFORMANCE_MANIFEST=$GITHUB_WORKSPACE/build/conformance-fixtures-loaded.txt" >> "$GITHUB_ENV"
+          echo "LAZILY_CONFORMANCE_RUN_ID=$GITHUB_RUN_ID-$GITHUB_RUN_ATTEMPT-$(uuidgen)" >> "$GITHUB_ENV"
           echo "LAZILY_CONFORMANCE_STRICT=1" >> "$GITHUB_ENV"
 
       - name: test

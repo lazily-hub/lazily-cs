@@ -484,14 +484,46 @@ public static class SpecCorpus
         }
     }
 
+    // -- The run id this evidence belongs to (#lzstalemanifest) -----------------
+    //
+    // Every rung in `scripts/check-conformance-coverage.sh` reads this manifest and
+    // asserts something about what the run DID. The guard is a different process
+    // from this recorder, and nothing in the bytes said which run produced them, so
+    // a guard invoked without a preceding test step reported on an older run's
+    // evidence — green, over source that had since changed.
+    //
+    // The stamp is written HERE, by the process that produces the evidence, rather
+    // than by the Makefile that truncates the file. A stamp written by the
+    // truncating shell would only attest that the shell ran; written here it
+    // attests that THIS test host wrote these lines under THIS run id, which is the
+    // claim the guards actually make.
+    //
+    // One stamp per flushing process, first among that process's lines. The
+    // manifest is a UNION across however many test hosts run, so the guard requires
+    // at least one stamp and ALL of them to equal the current invocation's id — a
+    // second host appending under a stale id is the same defect as a stale file.
+    //
+    // An UNSET id writes no stamp, which the guards refuse. That is the intended
+    // direction: unstamped evidence is evidence of unknown provenance, and a guard
+    // that accepts it when the variable happens to be unset is the same hole with
+    // an extra step.
+    internal const string RunIdMarker = "# lazily-run-id";
+
     private static void Flush(string manifest)
     {
         lock (ManifestGate)
         {
             if (Opened.Count == 0) return;
+            var runId = Environment.GetEnvironmentVariable("LAZILY_CONFORMANCE_RUN_ID");
+            var lines = new List<string>(Opened.Count + 1);
+            if (!string.IsNullOrEmpty(runId))
+            {
+                lines.Add(RunIdMarker + " " + runId);
+            }
+            lines.AddRange(Opened);
             try
             {
-                File.AppendAllLines(manifest, Opened);
+                File.AppendAllLines(manifest, lines);
             }
             catch (IOException)
             {

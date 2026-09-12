@@ -4,6 +4,29 @@
 
 DOTNET ?= dotnet
 
+# ---- One run id per `make check` invocation (#lzstalemanifest) ---------------
+#
+# Every rung in `scripts/check-conformance-coverage.sh` reads ONE evidence file,
+# `build/conformance-fixtures-loaded.txt`, and each of its "these bytes were
+# really read" claims is only true of the run that wrote it. Nothing in the file
+# said WHICH run that was. The guard is a SEPARATE process from the recorder — the
+# recorder lives inside the `dotnet test` host, the guard is a shell script a
+# later target runs — so the only thing that made the evidence this run's was the
+# `: >` truncation in the `test` recipe below, an invariant re-spelled by hand in
+# `.github/workflows/ci.yml` and absent from every other path that runs the guard.
+# `make conformance-coverage` alone reported on whatever run last wrote the file,
+# green, over source that had since changed.
+#
+# So the file now carries the id of the run that wrote it and every guard REQUIRES
+# it to equal this invocation's. Generated with `uuidgen`, falling back to
+# nanosecond epoch where that is missing.
+#
+# `:=` is load-bearing. A recursively-expanded `=` re-runs `uuidgen` at every
+# reference, so `test` would stamp one id and `conformance-coverage` would demand
+# a different one — a gate that fails closed, but for a reason that reads like the
+# bug it is guarding against.
+CONFORMANCE_RUN_ID := $(shell uuidgen 2>/dev/null || date +%s%N)
+
 all: check
 
 restore:
@@ -18,6 +41,7 @@ build:
 # the guard then fails with "missing evidence" while the suite is green.
 test:
 	@mkdir -p build && : > build/conformance-fixtures-loaded.txt
+	LAZILY_CONFORMANCE_RUN_ID=$(CONFORMANCE_RUN_ID) \
 	LAZILY_CONFORMANCE_MANIFEST=$(CURDIR)/build/conformance-fixtures-loaded.txt $(DOTNET) test --nologo
 
 # The repairing form. Deliberately NOT in `check` (#lzruffautofixvacuity): a
@@ -74,4 +98,4 @@ clean:
 # canonical corpus grows a fixture no test in this repo even names. Naming is not
 # replaying — see the script header for what this does and does not prove.
 conformance-coverage:
-	./scripts/check-conformance-coverage.sh
+	LAZILY_CONFORMANCE_RUN_ID=$(CONFORMANCE_RUN_ID) ./scripts/check-conformance-coverage.sh

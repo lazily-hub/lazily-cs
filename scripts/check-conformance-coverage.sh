@@ -47,6 +47,7 @@ set -euo pipefail
 # have produced a traceback where a message belongs.
 PY_DIAG="$(cat <<'PY'
 import json
+import os
 import sys
 
 
@@ -54,6 +55,65 @@ def die(lines, code=1):
     for line in lines:
         print(line, file=sys.stderr)
     sys.exit(code)
+
+
+# ---- The evidence must be THIS run's (#lzstalemanifest) ----------------------
+#
+# `SpecCorpus.RunIdMarker`. The recorder writes one such line per flushing test
+# host, carrying the id of the `make check` invocation that produced the lines
+# beneath it; every leg that reads the manifest requires it to equal the id of the
+# invocation asking. See the bash rung of the same name for why a stamp written by
+# the producer is the only kind worth checking.
+RUN_ID_MARKER = "# lazily-run-id"
+STALE_OK_VAR = "LAZILY_CONFORMANCE_STALE_EVIDENCE_OK"
+RUN_ID_VAR = "LAZILY_CONFORMANCE_RUN_ID"
+
+
+def require_run_id(path, text, what="conformance manifest"):
+    """Refuse evidence that is not this invocation's, by name and by id.
+
+    Duplicated deliberately across the bash leg and both python legs rather than
+    checked once up front. Each of these is a GUARD that reads the evidence file
+    and asserts something about what the run did; a freshness check that lives in
+    only one of them is a freshness check that a reordering, or a python leg run
+    on its own, silently drops. The cost is one pass over a file already in memory.
+    """
+    if os.environ.get(STALE_OK_VAR, ""):
+        return
+    want = os.environ.get(RUN_ID_VAR, "")
+    if not want:
+        die([
+            f"ERROR: {RUN_ID_VAR} is unset, so this guard cannot tell whether",
+            f"       {what} '{path}' is THIS run's evidence or an older run's.",
+            "       It REFUSES rather than skipping: accepting unstamped evidence when the",
+            "       variable happens to be unset is the same hole with an extra step",
+            "       (#lzstalemanifest). Run the gate through `make check`, which generates",
+            "       one id per invocation and passes it to both the test step that writes",
+            f"       the evidence and every guard that reads it. To audit an OLD manifest on",
+            f"       purpose, set {STALE_OK_VAR}=1 and read the banner it prints.",
+        ])
+    found = [
+        line[len(RUN_ID_MARKER):].strip()
+        for line in text.splitlines()
+        if line.startswith(RUN_ID_MARKER)
+    ]
+    if not found:
+        die([
+            f"ERROR: {what} '{path}' carries no `{RUN_ID_MARKER}` line.",
+            "       Unstamped evidence has unknown provenance — it predates",
+            "       #lzstalemanifest, or the suite ran without LAZILY_CONFORMANCE_RUN_ID",
+            "       set, or nothing was recorded at all. Re-run `make check`.",
+        ])
+    wrong = sorted({value for value in found if value != want})
+    if wrong:
+        die([
+            f"ERROR: {what} '{path}' is a DIFFERENT run's evidence.",
+            f"       wanted run id: {want}",
+            "       found run id(s): " + ", ".join(wrong),
+            "       Every rung here asserts what the run DID; on these bytes it would be",
+            "       asserting what some earlier run did. Re-run the suite so the recorder",
+            "       rewrites the manifest under this invocation's id (#lzstalemanifest).",
+        ])
 
 
 def diagnose(what, exc, advice=()):
@@ -570,7 +630,111 @@ if [ ! -s "$MANIFEST" ]; then
   echo "      absence." >&2
   exit 1
 fi
-OPENED="$(sort -u "$MANIFEST")"
+# ---- RUNG: the evidence must be THIS run's (#lzstalemanifest) ---------------
+#
+# Everything below — and both python legs — reads this ONE file and asserts
+# something about what the run DID: which fixtures were opened, which scenarios
+# were reached, which assertion blocks were declared and bound. None of that is a
+# property of the bytes; it is a property of the run that wrote them.
+#
+# And the writer is a DIFFERENT PROCESS from every reader. The recorder lives in
+# the `dotnet test` host; this script is a later target in `make check`. The only
+# thing that used to make the file this run's was the `: >` truncation at the top
+# of the `test` recipe — a convention, re-spelled by hand in ci.yml, and absent
+# from every other path that reaches this script. `make conformance-coverage`
+# alone, or this script run directly, read whatever run last wrote the file and
+# reported it as the current one. That is not a hypothetical: `dotnet test` never
+# caches test RESULTS, so unlike lazily-kt's `:test UP-TO-DATE` the stale read
+# here arrives through invoking the guard without the test step, not through a
+# skipped one — and rung 0 is the ONLY thing that sees a detached bind (the suite
+# stays green at 325 + 7 with a bind deleted), so its evidence being this run's is
+# the whole of its value.
+#
+# The stamp is written by the RECORDER, not by the shell that truncates: a stamp
+# written here would attest that the truncation ran, while the claim the guards
+# make is about what the test host recorded.
+RUN_ID_MARKER='# lazily-run-id'
+
+# The named opt-out (#lzstalemanifest). The mutation-probe workflow for the pins
+# in this file — `EXPECTED_LEDGERED_BLOCKS=1 ./scripts/check-conformance-coverage.sh`
+# against a manifest an earlier `make check` wrote — is a legitimate reason to
+# read an old run's evidence, and the alternative dodge is worse: copying the id
+# out of the manifest into the environment is the forgery this rung exists to
+# refuse, wearing an operator's hands. So the escape is EXPLICIT, exactly `1`,
+# loud on stderr, and REFUSED under CI, where trusting unverified evidence is
+# never a thing anybody meant.
+STALE_EVIDENCE_OK="${LAZILY_CONFORMANCE_STALE_EVIDENCE_OK:-}"
+if [ -n "$STALE_EVIDENCE_OK" ] && [ "$STALE_EVIDENCE_OK" != "1" ]; then
+  echo "FAIL: LAZILY_CONFORMANCE_STALE_EVIDENCE_OK=$STALE_EVIDENCE_OK is not \`1\`." >&2
+  echo "      This is an opt-out from the run-id freshness rung, so it takes ONE" >&2
+  echo "      value and refuses every other. A typo that reads as truthy would" >&2
+  echo "      silently disable the rung." >&2
+  exit 1
+fi
+if [ -n "$STALE_EVIDENCE_OK" ] && [ -n "${CI:-}" ]; then
+  echo "FAIL: LAZILY_CONFORMANCE_STALE_EVIDENCE_OK is set and CI=$CI." >&2
+  echo "      The opt-out exists for a local mutation probe against an old manifest." >&2
+  echo "      In CI it would turn every 'these bytes were really read' claim in this" >&2
+  echo "      script back into 'some run really read them' (#lzstalemanifest)." >&2
+  exit 1
+fi
+if [ -n "$STALE_EVIDENCE_OK" ]; then
+  echo "WARNING: LAZILY_CONFORMANCE_STALE_EVIDENCE_OK=1 — the run-id rung is OFF and" >&2
+  echo "         every rung below is reporting on WHOEVER wrote $MANIFEST, which may" >&2
+  echo "         not be this run. Do not read a green here as a green build." >&2
+else
+  CONFORMANCE_RUN_ID="${LAZILY_CONFORMANCE_RUN_ID:-}"
+  if [ -z "$CONFORMANCE_RUN_ID" ]; then
+    echo "FAIL: LAZILY_CONFORMANCE_RUN_ID is unset, so nothing here can tell whether" >&2
+    echo "      $MANIFEST is THIS run's evidence or an older run's." >&2
+    echo "      It REFUSES rather than skipping (#lzstalemanifest): a guard that accepts" >&2
+    echo "      unstamped evidence whenever the variable is unset is the same hole with" >&2
+    echo "      an extra step. Run the gate as \`make check\`, which generates one id per" >&2
+    echo "      invocation and hands it to the test step that WRITES this file and to" >&2
+    echo "      every guard that READS it." >&2
+    exit 1
+  fi
+  # A run id is compared by byte equality and appears inside the evidence file, so
+  # it must not be able to carry a newline or a leading/trailing blank: an id of
+  # "A<newline>B" would have the recorder write a stamp line plus a forged bare
+  # line, and the comparison below would be against something no shell variable
+  # can hold cleanly. Refused up front, where the operator can see why.
+  case "$CONFORMANCE_RUN_ID" in
+    *[!0-9A-Za-z._:-]*)
+      echo "FAIL: LAZILY_CONFORMANCE_RUN_ID='$CONFORMANCE_RUN_ID' contains a character" >&2
+      echo "      outside [0-9A-Za-z._:-]. The id is written into $MANIFEST as one line" >&2
+      echo "      and compared byte for byte; whitespace or a newline in it would forge" >&2
+      echo "      extra evidence lines and make the comparison meaningless." >&2
+      exit 1
+      ;;
+  esac
+  STAMPS="$(awk -v m="$RUN_ID_MARKER" 'index($0, m) == 1 { print substr($0, length(m) + 2) }' "$MANIFEST")"
+  if [ -z "$STAMPS" ]; then
+    echo "FAIL: $MANIFEST carries no \`$RUN_ID_MARKER\` line." >&2
+    echo "      Unstamped evidence has unknown provenance: it predates this rung, or the" >&2
+    echo "      suite ran without LAZILY_CONFORMANCE_RUN_ID set, or the recorder never" >&2
+    echo "      attached. Missing provenance is missing EVIDENCE, never evidence that the" >&2
+    echo "      run was fine (#lzstalemanifest). Re-run \`make check\`." >&2
+    exit 1
+  fi
+  # EVERY stamp, not the first. The manifest is a UNION across however many test
+  # hosts append to it, and a second host writing under a stale id is the same
+  # defect as a stale file.
+  FOREIGN="$(printf '%s\n' "$STAMPS" | sort -u | grep -vxF "$CONFORMANCE_RUN_ID" || true)"
+  if [ -n "$FOREIGN" ]; then
+    echo "FAIL: $MANIFEST is a DIFFERENT run's evidence." >&2
+    echo "      wanted run id: $CONFORMANCE_RUN_ID" >&2
+    echo "      found run id(s): $(printf '%s' "$FOREIGN" | tr '\n' ' ')" >&2
+    echo "      Every rung here asserts what the run DID; on these bytes it would be" >&2
+    echo "      asserting what an earlier run did. Re-run the suite so the recorder" >&2
+    echo "      rewrites this file under this invocation's id (#lzstalemanifest)." >&2
+    exit 1
+  fi
+fi
+
+# Stamp lines are provenance, not records: dropped here so no rung below can count
+# one as a fixture.
+OPENED="$(grep -v "^$RUN_ID_MARKER" "$MANIFEST" | sort -u || true)"
 
 missing=0
 total=0
@@ -897,7 +1061,15 @@ MANIFEST_ADVICE = (
 
 declared = {}
 bound = set()
-for line in read_text(manifest_path, "conformance manifest", MANIFEST_ADVICE).splitlines():
+manifest_text = read_text(manifest_path, "conformance manifest", MANIFEST_ADVICE)
+# This leg re-reads the evidence, so it re-checks the provenance (#lzstalemanifest).
+# The bash rung above already refused a foreign manifest; a freshness check that
+# lives in only one reader is one a reordering silently drops, and this python
+# block is a guard in its own right.
+require_run_id(manifest_path, manifest_text)
+for line in manifest_text.splitlines():
+    if line.startswith(RUN_ID_MARKER):
+        continue
     parts = line.split("\t")
     if parts[0] == "blocks-declared" and len(parts) == 4:
         declared.setdefault(parts[2], set()).add(f"{parts[1]}|{parts[3]}")
@@ -1297,8 +1469,16 @@ MANIFEST_ADVICE = (
 opened = set()
 replayed = set()
 prose_verified = set()
-for line in read_text(manifest_path, "conformance manifest", MANIFEST_ADVICE).splitlines():
+manifest_text = read_text(manifest_path, "conformance manifest", MANIFEST_ADVICE)
+# Same reason as the block leg: every reader of this file checks that it is this
+# run's (#lzstalemanifest).
+require_run_id(manifest_path, manifest_text)
+for line in manifest_text.splitlines():
     if not line:
+        continue
+    if line.startswith(RUN_ID_MARKER):
+        # Provenance, not a record. A bare line otherwise reads as "this fixture
+        # was OPENED", which would file the stamp as a fixture name.
         continue
     if "\t" in line:
         head, tail = line.split("\t", 1)
