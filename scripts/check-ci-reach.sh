@@ -82,6 +82,55 @@ if [ ! -f Makefile ]; then
 	exit 1
 fi
 
+# ---- The dry run has to WORK before its output means anything (#lzgrepcpipefail)
+#
+# Every anchor this guard compares comes out of `dry_run`, which is
+# `make -n "$@" 2>/dev/null | grep -v ... || true`. That `|| true` is indiscriminate:
+# it was put there because `grep -v` legitimately exits 1 when a recipe's whole
+# output is make's own noise, but MAKE's failure leaves through the same pipeline,
+# `2>/dev/null` throws away what make said about it, and the empty stdout that
+# results is then read one layer up as "this recipe runs no checkable command".
+#
+# Measured, on a byte-identical copy of this repo's Makefile with one line changed
+# (`test:` given a prerequisite with no rule, which is all it takes):
+#
+#     make -n test  -> exit 2, "No rule to make target 'build/nonexistent-prereq'"
+#     the guard     -> `no gate  test   recipe runs no checkable command`
+#                      `check-ci-reach: OK — 8 target(s) reached, 0 excused, 2 carrying no gate`
+#                      exit 0
+#
+# A FALSE GREEN: 9 reached became 8, 1 no-gate became 2, and the target that
+# records the entire conformance evidence chain silently stopped being required to
+# appear in CI — described as running no checkable command while its recipe runs
+# the whole suite. The vacuity guard at the bottom does not see it; that one fires
+# only when the tally reaches ZERO, which is the TOTAL-failure case (measured: a
+# Makefile that does not parse exits 1 there, correctly). Partial failure is the
+# hole, and nothing in CI closes it either: CI invokes exactly one make target
+# (`make package-check`) and runs every other gate as a direct command, so a
+# broken prerequisite on `test:` reddens no CI step at all. Only a local
+# `make check` would catch it, and this guard exists precisely because local-only
+# enforcement is what rots.
+#
+# So the dry run is gated ONCE, up front, in the MAIN shell. Not inside `dry_run`:
+# that function is called from `$(dry_run ... | wc -l)` and from
+# `$(own_commands ... )`, where an `exit` kills only the subshell and the script
+# carries on with the very empty output it was meant to refuse. And make's stderr
+# is deliberately NOT suppressed here — the message is the diagnosis.
+#
+# This is not a `|| true` site. A dry run that failed is missing EVIDENCE about
+# what `make $ROOT_TARGET` runs, never evidence that it runs nothing.
+if ! "$MAKE_BIN" -n "$ROOT_TARGET" >/dev/null; then
+	echo >&2
+	echo "check-ci-reach: \`$MAKE_BIN -n $ROOT_TARGET\` FAILED (see its message above)." >&2
+	echo "      Every anchor this guard compares is read out of that dry run, and a" >&2
+	echo "      dry run that failed produces no commands for the target it died on —" >&2
+	echo "      which this guard would otherwise report as a target 'carrying no gate'" >&2
+	echo "      and stop requiring in CI. That is a false green, so it refuses here." >&2
+	echo "      Fix the Makefile; a partial failure silently shrinks this guard's" >&2
+	echo "      reach count instead of failing it (#lzgrepcpipefail)." >&2
+	exit 1
+fi
+
 # ---------------------------------------------------------------- configuration
 
 workflows=()
