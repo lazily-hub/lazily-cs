@@ -177,9 +177,21 @@
 #   INSIDE that step instead of anywhere in the workflow. Its churn is
 #   step-name-rate: a recipe gaining a flag moves the recipe and the step body
 #   together and the mapping does not move. See the array's own comment for the
-#   measurements, for why a `make <target>`-invoked member is refused a pin rather
-#   than mapped, and for why the rung asserts step-name uniqueness instead of
+#   measurements and for why the rung asserts step-name uniqueness instead of
 #   qualifying by job.
+#
+#   THE MODE IS PINNED TOO, and it had to be. The step pin alone left the
+#   anchor-reached POPULATION fixed only as its own complement: a member with no
+#   entry was read as make-invoked by observation. A two-part edit that moved both
+#   halves together -- a CI step body changed to `make <member>` AND that member's
+#   entry deleted -- cancelled at exit 0 with two integers on an OK line as the
+#   only trace, and put the member back within reach of the repoint above. Each
+#   half alone exited 1. `EXPECTED_MAKE_INVOKED_TARGETS` pins the other population
+#   as a SET, both directions, disjoint from the step pin by construction, and its
+#   findings are reported BEFORE the membership ones because a mode change is the
+#   cause and "no step pinned" is the symptom. A population pinned only as the
+#   complement of another pinned population is not pinned, and a count is not a
+#   pin.
 #
 #   WHY THE ORACLE IS `make -n`, AND NOT THE SET OF GATES ci.yml INVOKES. Worth
 #   settling explicitly in this binding, because ci.yml here invokes exactly ONE
@@ -350,6 +362,46 @@ EXPECTED_GATE_STEPS=(
 	"format-check|dotnet format --verify-no-changes"
 	"interop-peer-check|Interop peer self-check (#lzinteroppeerci)"
 	"test|test"
+)
+
+# ---- The MODE each gate is reached in, pinned by set equality -----------------
+#
+# Closure members CI reaches by invoking `make <target>` rather than by spelling
+# the gate. These are exactly the members EXPECTED_GATE_STEPS must NOT hold an
+# entry for, and the two arrays are checked disjoint below.
+#
+# WHY THIS EXISTS, measured on this repo AFTER the step pin landed and found live
+# in it. The step pin fixed which STEP runs each anchor-reached gate, and left the
+# anchor-reached POPULATION fixed only as the complement of itself: a member with
+# no entry was read as make-invoked by observation alone. So a two-part edit that
+# moves both halves together cancels:
+#
+#   (1) change `FFI surface check (#lzinteroppeerci)`s body from
+#       `./scripts/check-ffi.sh` to `make ffi-check`, and
+#   (2) delete ffi-check from EXPECTED_GATE_STEPS.
+#
+# Each half alone exits 1 -- (1) as a gate pinned to a step CI reaches through
+# make, (2) as a gate with no entry. TOGETHER, measured: exit 0, the only trace an
+# OK line reading `7 gate(s) ... 2 invoked through make` instead of `8 ... 1`. The
+# CI step that runs this guard checks exit status and greps for
+# `check-ci-reach: OK`, so it passes on the runner too. And the retirement is not
+# bookkeeping: with ffi-check moved into the unpinned mode, the original recipe
+# repoint works again on it -- measured, `$(DOTNET) restore` in its recipe, exit 0,
+# `make -n check` running check-ffi.sh ZERO times.
+#
+# THE GENERAL FAULT, and it is the one this family keeps re-finding: a population
+# pinned only as the complement of another pinned population is not pinned against
+# an edit that moves both together. A COUNT IS NOT A PIN -- that OK line held the
+# only difference and held it as two integers. So the mode is pinned as a SET, both
+# directions, and retiring a gate from the step-pinned population now costs three
+# reviewable changes that each name the target: the CI step body, the
+# EXPECTED_GATE_STEPS deletion, and the addition here.
+#
+# NOT excused members, and not no-gate members. An excuse removes the reach
+# requirement altogether and a no-gate recipe has nothing to reach, so neither is
+# classified into a mode; `EXPECTED_NO_GATE_TARGETS` and ci-reach.conf own those.
+EXPECTED_MAKE_INVOKED_TARGETS=(
+	package-check
 )
 
 if [ ! -f Makefile ]; then
@@ -1079,6 +1131,37 @@ for _e in ${EXPECTED_GATE_STEPS[@]+"${EXPECTED_GATE_STEPS[@]}"}; do
 	fi
 done
 
+# Same three shape checks for the mode pin, plus DISJOINTNESS. A target in both
+# arrays is a contradiction -- "CI spells this gate, in this step" and "CI does not
+# spell this gate" -- and the only reason to write it is to satisfy both rungs at
+# once while the mode really moved.
+_mode_seen=" "
+for _t in ${EXPECTED_MAKE_INVOKED_TARGETS[@]+"${EXPECTED_MAKE_INVOKED_TARGETS[@]}"}; do
+	case "$_mode_seen" in
+	*" $_t "*)
+		echo "check-ci-reach: '$_t' appears twice in EXPECTED_MAKE_INVOKED_TARGETS" >&2
+		exit 1
+		;;
+	esac
+	_mode_seen="$_mode_seen$_t "
+	case "$seen" in
+	*" $_t "*) ;;
+	*)
+		echo "check-ci-reach: EXPECTED_MAKE_INVOKED_TARGETS names '$_t', which is not in" >&2
+		echo "      \`$ROOT_TARGET\`'s prerequisite closure at all — the pin covers nothing." >&2
+		exit 1
+		;;
+	esac
+	if [ -n "$(gate_step_of "$_t")" ]; then
+		echo >&2
+		echo "check-ci-reach: '$_t' is in BOTH EXPECTED_MAKE_INVOKED_TARGETS and" >&2
+		echo "      EXPECTED_GATE_STEPS. Those say opposite things about how CI reaches it:" >&2
+		echo "      one that CI spells its gate in a named step, the other that CI only runs" >&2
+		echo "      \`$MAKE_BIN $_t\`. Exactly one is true (#reversereachdirection)." >&2
+		exit 1
+	fi
+done
+
 # Does CI contain a command whose tokens contain this anchor as an in-order
 # subsequence? Extra flags and arguments on the CI side are fine; missing ones are
 # not.
@@ -1145,10 +1228,8 @@ unreadable_count=0
 step_ok=0
 stepmiss=""
 stepmiss_count=0
-unmapped=""
-unmapped_count=0
-overpinned=""
-overpinned_count=0
+makeobserved=""
+anchorobserved=""
 makereached_count=0
 
 while IFS= read -r target; do
@@ -1236,28 +1317,31 @@ while IFS= read -r target; do
 		done <<<"$missing_anchors"
 	fi
 
-	# ---- D. reach INSIDE the member's own CI step (#reversereachdirection) ----
+	# ---- D. the MODE, then reach INSIDE the member's own CI step ---------------
+	#      (#reversereachdirection)
 	#
 	# Runs after the flat verdict above, and reports separately, because the two
 	# make different claims: "some counted run: step carries this anchor" and "the
 	# step this gate is pinned to does". A member that fails the flat check has
 	# already failed the build with the stronger finding, so its step is not
 	# re-reported.
+	#
+	# The OBSERVED mode is recorded here and compared to EXPECTED_MAKE_INVOKED_TARGETS
+	# by set equality at the bottom. Both observed sets are accumulated
+	# unconditionally, so neither population is the other's complement.
 	if [ "$invoked_via_make" -eq 1 ]; then
+		makeobserved="$makeobserved$target"$'\n'
 		makereached_count=$((makereached_count + 1))
-		if [ -n "$(gate_step_of "$target")" ]; then
-			overpinned="$overpinned$target"$'\n'
-			overpinned_count=$((overpinned_count + 1))
-		fi
 		continue
 	fi
 
+	anchorobserved="$anchorobserved$target"$'\n'
 	gate_step="$(gate_step_of "$target")"
-	if [ -z "$gate_step" ]; then
-		unmapped="$unmapped$target"$'\n'
-		unmapped_count=$((unmapped_count + 1))
-		continue
-	fi
+	# No pin, or a mode that moved: both are findings the set-equality blocks at the
+	# bottom own, and the mode one is reported FIRST because a mode change is the
+	# CAUSE and a missing step pin is its symptom. Nothing to check inside a step
+	# that is not pinned, so fall through.
+	[ -n "$gate_step" ] || continue
 	[ "$hit" -eq 1 ] || continue
 
 	step_anchors="$(step_anchor_file "$target" "$gate_step")"
@@ -1286,8 +1370,27 @@ while IFS= read -r target; do
 	printf 'no gate  %-32s recipe runs no checkable command\n' "$target"
 done <<<"$nogate"
 
-if [ "$((stepmiss_count + unmapped_count + overpinned_count))" -eq 0 ]; then
-	printf 'gate step pin satisfied: %s gate(s) reached inside their pinned CI step, %s invoked through `%s <target>` (no CI-side spelling to pin)\n' \
+# ---- D. the two populations, each pinned as a SET in both directions ---------
+#
+# `sort -u` on both sides of both comparisons, and LC_ALL=C on every one of them so
+# `comm` sees one collation. -23 is pinned-only, -13 is observed-only.
+mode_obs_sorted="$(printf '%s' "$makeobserved" | sed '/^[[:space:]]*$/d' | LC_ALL=C sort -u)"
+mode_pin_sorted="$(printf '%s\n' ${EXPECTED_MAKE_INVOKED_TARGETS[@]+"${EXPECTED_MAKE_INVOKED_TARGETS[@]}"} | sed '/^[[:space:]]*$/d' | LC_ALL=C sort -u)"
+mode_pin_only="$(LC_ALL=C comm -23 <(printf '%s\n' "$mode_pin_sorted") <(printf '%s\n' "$mode_obs_sorted"))"
+mode_obs_only="$(LC_ALL=C comm -13 <(printf '%s\n' "$mode_pin_sorted") <(printf '%s\n' "$mode_obs_sorted"))"
+mode_changed="$(printf '%s\n%s\n' "$mode_pin_only" "$mode_obs_only" | sed '/^[[:space:]]*$/d' | LC_ALL=C sort -u)"
+
+anchor_obs_sorted="$(printf '%s' "$anchorobserved" | sed '/^[[:space:]]*$/d' | LC_ALL=C sort -u)"
+step_pin_sorted="$(printf '%s\n' ${EXPECTED_GATE_STEPS[@]+"${EXPECTED_GATE_STEPS[@]}"} | sed 's/|.*$//' | sed '/^[[:space:]]*$/d' | LC_ALL=C sort -u)"
+# A target already named by the mode block is NOT re-reported here. A mode change
+# is the cause; "no step pinned" and "a step pinned that nothing uses" are its two
+# symptoms, and telling the reader to add a step pin for a gate whose CI step was
+# deleted is the wrong fix.
+step_pin_only="$(LC_ALL=C comm -23 <(printf '%s\n' "$step_pin_sorted") <(printf '%s\n' "$anchor_obs_sorted") | LC_ALL=C comm -23 - <(printf '%s\n' "$mode_changed"))"
+step_obs_only="$(LC_ALL=C comm -13 <(printf '%s\n' "$step_pin_sorted") <(printf '%s\n' "$anchor_obs_sorted") | LC_ALL=C comm -23 - <(printf '%s\n' "$mode_changed"))"
+
+if [ -z "$mode_changed" ] && [ -z "$step_pin_only" ] && [ -z "$step_obs_only" ] && [ "$stepmiss_count" -eq 0 ]; then
+	printf 'gate step pin satisfied: %s gate(s) reached inside their pinned CI step, %s invoked through `%s <target>` (both populations pinned as sets)\n' \
 		"$step_ok" "$makereached_count" "$MAKE_BIN"
 fi
 
@@ -1366,7 +1469,75 @@ if [ -n "$nogate_pin_only" ] || [ -n "$nogate_new" ]; then
 	status=1
 fi
 
-# ---- D. findings (#reversereachdirection) ----------------------------------
+# ---- D. findings, MODE FIRST (#reversereachdirection) ----------------------
+#
+# Order is load-bearing. A mode change is the CAUSE; a gate with no step pin and a
+# step pin nothing uses are its SYMPTOMS, and reporting a symptom first sends the
+# reader to the wrong fix -- "add a pin" for a gate whose CI step was deleted.
+if [ -n "$mode_changed" ]; then
+	echo >&2
+	echo "check-ci-reach: the set of gates CI reaches through \`$MAKE_BIN <target>\` does not" >&2
+	echo "      match EXPECTED_MAKE_INVOKED_TARGETS in $0." >&2
+	if [ -n "$mode_obs_only" ]; then
+		echo >&2
+		echo "  CI NOW INVOKES THESE THROUGH MAKE, and they are not pinned that way — the" >&2
+		echo "  gate stopped being spelled in CI, so it left the population whose step is" >&2
+		echo "  pinned and entered the one whose step cannot be. Paired with deleting the" >&2
+		echo "  target's EXPECTED_GATE_STEPS entry, this used to CANCEL and exit 0, leaving" >&2
+		echo "  two integers on an OK line as the only trace:" >&2
+		while IFS= read -r t; do
+			[ -n "$t" ] || continue
+			echo "    - $t" >&2
+		done <<<"$mode_obs_only"
+	fi
+	if [ -n "$mode_pin_only" ]; then
+		echo >&2
+		echo "  PINNED as make-invoked, but CI no longer invokes them that way — the step" >&2
+		echo "  that ran \`$MAKE_BIN <target>\` was deleted or rewritten. Restoring that step" >&2
+		echo "  is the fix; adding an EXPECTED_GATE_STEPS entry is not, unless CI now really" >&2
+		echo "  spells the gate in a step of its own:" >&2
+		while IFS= read -r t; do
+			[ -n "$t" ] || continue
+			echo "    - $t" >&2
+		done <<<"$mode_pin_only"
+	fi
+	echo >&2
+	echo "A population pinned only as the complement of another pinned population is not" >&2
+	echo "pinned against an edit that moves both together, and a COUNT IS NOT A PIN. Both" >&2
+	echo "modes are therefore sets, compared in both directions. Retiring a gate from the" >&2
+	echo "step-pinned population is meant to cost three reviewable changes that each name" >&2
+	echo "it: the CI step body, the EXPECTED_GATE_STEPS deletion, and the addition to" >&2
+	echo "EXPECTED_MAKE_INVOKED_TARGETS." >&2
+	status=1
+fi
+
+if [ -n "$step_pin_only" ] || [ -n "$step_obs_only" ]; then
+	echo >&2
+	echo "check-ci-reach: the set of gates CI spells directly does not match the target" >&2
+	echo "      set of EXPECTED_GATE_STEPS in $0." >&2
+	if [ -n "$step_obs_only" ]; then
+		echo >&2
+		echo "  CI SPELLS THESE GATES, so there is a step to pin, and until it is pinned the" >&2
+		echo "  gate is held only by the flat check — satisfied by any counted run: step" >&2
+		echo "  anywhere in the workflow. Add \`target|step name\`:" >&2
+		while IFS= read -r t; do
+			[ -n "$t" ] || continue
+			echo "    - $t" >&2
+		done <<<"$step_obs_only"
+	fi
+	if [ -n "$step_pin_only" ]; then
+		echo >&2
+		echo "  PINNED to a step, but not observed reaching CI by an anchor at all. The pin" >&2
+		echo "  is asserting nothing: the target was excused, stopped carrying a gate, or" >&2
+		echo "  left the closure. Drop the entry, or restore what the target used to run:" >&2
+		while IFS= read -r t; do
+			[ -n "$t" ] || continue
+			echo "    - $t" >&2
+		done <<<"$step_pin_only"
+	fi
+	status=1
+fi
+
 if [ "$stepmiss_count" -gt 0 ]; then
 	echo >&2
 	echo "check-ci-reach: $stepmiss_count gate(s) whose anchors are somewhere in CI but NOT in the" >&2
@@ -1386,38 +1557,6 @@ if [ "$stepmiss_count" -gt 0 ]; then
 	echo "Two remedies, NOT interchangeable: restore the recipe if it was repointed by" >&2
 	echo "accident — that is the finding — or, if the gate genuinely moved to another" >&2
 	echo "step, re-point its EXPECTED_GATE_STEPS entry in the same commit." >&2
-	status=1
-fi
-
-if [ "$unmapped_count" -gt 0 ]; then
-	echo >&2
-	echo "check-ci-reach: $unmapped_count gate(s) reached by an anchor with no EXPECTED_GATE_STEPS entry:" >&2
-	while IFS= read -r t; do
-		[ -n "$t" ] || continue
-		echo "  - $t" >&2
-	done <<<"$unmapped"
-	echo >&2
-	echo "CI spells this gate as a direct command, so there IS a step to pin, and until" >&2
-	echo "it is pinned the gate is held only by the flat check — satisfied by any counted" >&2
-	echo "run: step anywhere in the workflow. Add \`target|step name\` to" >&2
-	echo "EXPECTED_GATE_STEPS (#reversereachdirection)." >&2
-	status=1
-fi
-
-if [ "$overpinned_count" -gt 0 ]; then
-	echo >&2
-	echo "check-ci-reach: $overpinned_count gate(s) pinned to a CI step that CI reaches through" >&2
-	echo "      \`$MAKE_BIN <target>\` rather than by spelling the gate:" >&2
-	while IFS= read -r t; do
-		[ -n "$t" ] || continue
-		echo "  - $t   (pinned step: \`$(gate_step_of "$t")\`)" >&2
-	done <<<"$overpinned"
-	echo >&2
-	echo "Pinning a step name here asserts nothing. CI's instruction is 'run the target'," >&2
-	echo "so after a repoint CI faithfully runs whatever the target now runs and the" >&2
-	echo "pinned step still contains \`$MAKE_BIN <target>\` — the check passes by" >&2
-	echo "construction in exactly the state it would exist to catch. Drop the entry, and" >&2
-	echo "if you want the gate independently spelled in CI, spell it in CI." >&2
 	status=1
 fi
 
