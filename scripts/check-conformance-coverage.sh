@@ -993,14 +993,38 @@ if unknown:
 # constant. The whole point of the number is that it comes from somewhere the run
 # cannot influence.
 #
-# The walk mirrors the loader's rule and must keep mirroring it: block names
-# {assertions, expect, expected}; OBJECT-valued blocks only (an array-valued `expect`
-# declares no site here, which is why cs derives 743 where lazily-js derives 747 over
-# the same opened set); descent STOPS at a declared block, because what lives inside
-# one is a key, not a block; and it counts SITES (fixture|where pairs), not distinct
-# digests — two sites carrying identical bytes share one digest, so a digest count
-# silently absorbs a deleted fixture whose blocks happen to be spelled like another's.
-ASSERTION_BLOCK_NAMES = ("assertions", "expect", "expected")
+# The walk mirrors the loader's rule and must keep mirroring it: the FAMILY block
+# names {assertions, expect, expect_after, expect_initial, expected}; the OBJECT
+# value of such a key, and one site per plain-OBJECT ELEMENT of an ARRAY value of
+# one (#lzarrayelementsites); descent STOPS at a declared block, because what lives
+# inside one is a key, not a block; and it counts SITES (fixture|where pairs), not
+# distinct digests — two sites carrying identical bytes share one digest, so a digest
+# count silently absorbs a deleted fixture whose blocks happen to be spelled like
+# another's.
+#
+# Both halves of that rule were narrower until #lzarrayelementsites, and neither
+# narrowness was hypothetical:
+#
+#   * the name tuple carried only {assertions, expect, expected}, while
+#     `collections/semtree_incremental.json` holds six `expect_initial` /
+#     `expect_after` blocks the semtree runner has always read and compared. 743/634
+#     -> 749/640.
+#   * an array-valued tracked key declared NOTHING, on the stated grounds that a
+#     runner binds elements rather than the array — a site nobody emitted, while
+#     `signaling/anti_spoof_session.json`'s runner bound and verified all 12 of its
+#     per-step frame elements through `FixtureAssertions.Wrap`. 749/640 -> 761/652.
+#
+# This tuple and this walk must stay IDENTICAL to `SpecCorpus.AssertionBlockNames`
+# and `SpecCorpus.DeclareWalk`: the two sides of the equality below are only
+# comparable while they agree about what a block IS, and either side being the wider
+# one makes a green run impossible rather than merely inaccurate.
+ASSERTION_BLOCK_NAMES = (
+    "assertions",
+    "expect",
+    "expect_after",
+    "expect_initial",
+    "expected",
+)
 
 
 def walk_sites(fixture_id, node, path, sites, blocks=None):
@@ -1014,11 +1038,28 @@ def walk_sites(fixture_id, node, path, sites, blocks=None):
     if isinstance(node, dict):
         for name, value in node.items():
             child = name if not path else path + "." + name
-            if isinstance(value, dict) and name in ASSERTION_BLOCK_NAMES:
-                sites.add(f"{fixture_id}|{child}")
-                if blocks is not None:
-                    blocks.append(value)
-                continue
+            if name in ASSERTION_BLOCK_NAMES:
+                if isinstance(value, dict):
+                    sites.add(f"{fixture_id}|{child}")
+                    if blocks is not None:
+                        blocks.append(value)
+                    continue
+                if isinstance(value, list):
+                    # One site per plain-OBJECT element, exactly one level, by TRUE index
+                    # (#lzarrayelementsites) — the twin of `SpecCorpus.DeclareArrayElements`.
+                    # A non-object element gets no site and is WALKED instead, so `[[{..}]]`
+                    # declares nothing for the inner object while a tracked key nested deeper
+                    # inside it is still found.
+                    for index, item in enumerate(value):
+                        if isinstance(item, dict):
+                            sites.add(f"{fixture_id}|{child}[{index}]")
+                            if blocks is not None:
+                                blocks.append(item)
+                        else:
+                            walk_sites(
+                                fixture_id, item, f"{child}[{index}]", sites, blocks
+                            )
+                    continue
             walk_sites(fixture_id, value, child, sites, blocks)
     elif isinstance(node, list):
         for index, item in enumerate(node):

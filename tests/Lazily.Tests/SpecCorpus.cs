@@ -277,17 +277,23 @@ public static class SpecCorpus
     }
 
     /// <summary>
-    /// The property names that carry an assertion BLOCK — the same three
+    /// The property names that carry an assertion BLOCK — the five
     /// <see cref="FixtureAssertions.Of"/> is bound to across every runner here.
     /// </summary>
     /// <remarks>
-    /// Read off the runners, not invented: `assertions`, `expect`, and `expected` are the only
-    /// names any call site passes. Adding a fourth upstream means adding it here, and until then
-    /// blocks under that name are invisible to rung 0 — which is why the name set lives in ONE
-    /// place rather than being spelled per container.
+    /// Read off the corpus, not invented, and it is the FAMILY set: `assertions`, `expect`,
+    /// `expect_after`, `expect_initial`, `expected`. It carried only the first three until
+    /// `#lzarrayelementsites`, and the two missing names were not hypothetical — the semtree
+    /// runner has read `collections/semtree_incremental.json`'s per-scenario `expect_initial`
+    /// and `expect_after` since it was written, six blocks that rung 0 had no record of, so
+    /// every rung above was scoped past them. A name this set omits is invisible HERE, which
+    /// is precisely why the set lives in ONE place rather than being spelled per container.
     /// </remarks>
     private static readonly HashSet<string> AssertionBlockNames =
-        new(StringComparer.Ordinal) { "assertions", "expect", "expected" };
+        new(StringComparer.Ordinal)
+        {
+            "assertions", "expect", "expect_after", "expect_initial", "expected",
+        };
 
     /// <summary>
     /// Inventory every assertion block these bytes carry, at any depth.
@@ -305,6 +311,17 @@ public static class SpecCorpus
     /// business of the rungs `FixtureAssertions.Verify` raises. Walking into it would book a
     /// sub-object as a block in its own right, and the tracker never binds those separately —
     /// every such site would be reported unbound forever.
+    ///
+    /// A tracked key holding an ARRAY declares one site per plain-OBJECT ELEMENT of that
+    /// array (`#lzarrayelementsites`). "A runner binds elements, not the array" was this
+    /// rule's own parenthetical for excusing an array-valued key entirely, and it was
+    /// pointing at a site nobody emitted: `signaling/anti_spoof_session.json` holds its
+    /// expected outbound frames that way — 12 elements across 8 steps — and the runner has
+    /// bound and verified every one of them through `FixtureAssertions.Wrap` while rung 0
+    /// enumerated none. The SITE is the ELEMENT, `steps[3].expect[1]`, never the array: one
+    /// label per array would collapse a step's frames into a single site, and two frames
+    /// that are individually falsifiable would stop being individually NAMEABLE, which is
+    /// the set-identity failure the site dimension exists to catch.
     /// </remarks>
     private static void RecordDeclaredBlocks(string fixtureKey, JsonElement root) =>
         DeclareWalk(fixtureKey, root, string.Empty);
@@ -317,11 +334,19 @@ public static class SpecCorpus
                 foreach (var property in node.EnumerateObject())
                 {
                     var child = path.Length == 0 ? property.Name : path + "." + property.Name;
-                    if (property.Value.ValueKind == JsonValueKind.Object
-                        && AssertionBlockNames.Contains(property.Name))
+                    if (AssertionBlockNames.Contains(property.Name))
                     {
-                        Declare(fixtureKey, child, property.Value);
-                        continue;
+                        if (property.Value.ValueKind == JsonValueKind.Object)
+                        {
+                            Declare(fixtureKey, child, property.Value);
+                            continue;
+                        }
+
+                        if (property.Value.ValueKind == JsonValueKind.Array)
+                        {
+                            DeclareArrayElements(fixtureKey, child, property.Value);
+                            continue;
+                        }
                     }
 
                     DeclareWalk(fixtureKey, property.Value, child);
@@ -337,6 +362,39 @@ public static class SpecCorpus
                 }
 
                 break;
+        }
+    }
+
+    /// <summary>
+    /// Declare one site per plain-OBJECT element of an array held at a tracked key
+    /// (<c>#lzarrayelementsites</c>).
+    /// </summary>
+    /// <remarks>
+    /// Exactly ONE level, and by TRUE index. A mixed array <c>[{..}, 3, {..}]</c> declares
+    /// <c>expect[0]</c> and <c>expect[2]</c> — never <c>[0]</c> and <c>[1]</c>, which would
+    /// name a site the runner's own element cannot be matched against by position, and
+    /// renumber every later element the day the corpus grows a scalar in the middle. An
+    /// element that is not an object gets no site and is WALKED instead, exactly as it was
+    /// before: `[[{..}]]` therefore declares nothing for the inner object — it is not
+    /// directly under a tracked key — while a tracked key nested deeper inside it is still
+    /// found. The canonical corpus carries no such shape; the rule is stated so a fixture
+    /// that grows one does not silently change what this counts.
+    /// </remarks>
+    private static void DeclareArrayElements(string fixtureKey, string where, JsonElement array)
+    {
+        var index = 0;
+        foreach (var item in array.EnumerateArray())
+        {
+            if (item.ValueKind == JsonValueKind.Object)
+            {
+                Declare(fixtureKey, $"{where}[{index}]", item);
+            }
+            else
+            {
+                DeclareWalk(fixtureKey, item, $"{where}[{index}]");
+            }
+
+            index++;
         }
     }
 

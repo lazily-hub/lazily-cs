@@ -36,10 +36,22 @@ public sealed class SemTreeConformanceTests
         {
             var name = scenario.GetProperty("name").GetString()!;
 
-            void Check(string key, object? got, object? want)
+            // Every comparison goes THROUGH the tracker that owns the block (#lzarrayelementsites).
+            // `want.Compare` hands the FIXTURE's value to the comparison and books the key as
+            // compared, and it hands the result back instead of throwing, so the divergence
+            // ledger below still collects every mismatch in one pass rather than stopping at the
+            // first. A `Check(key, got, want)` that took both operands from the call site could
+            // not be booked by anything: nothing but the call site knew the fixture was on one
+            // side of it.
+            void Check<T>(FixtureAssertions block, string label, string key, Func<JsonElement, T> decode, T got)
             {
                 assertions++;
-                if (!Equals(got?.ToString(), want?.ToString())) divergences.Add($"{name}:{key} — got {got}, want {want}");
+                block.AssertKeyWith(key, want =>
+                {
+                    var diff = want.Compare(decode, got);
+                    if (diff.Diverged)
+                        divergences.Add($"{name}:{label} — got {diff.Got}, want {diff.Want}");
+                });
             }
 
             var ctx = new Context();
@@ -73,10 +85,21 @@ public sealed class SemTreeConformanceTests
             foreach (var w in watchers.Values) _ = w.Get();
             _ = consumer.Get();
 
-            foreach (var want in scenario.GetProperty("expect_initial").EnumerateObject())
+            // Rung 0 (#lzarrayelementsites): BIND the block. `expect_initial` and `expect_after`
+            // were read and compared from the day this runner was written and bound by NOTHING,
+            // so the bind ledger had no record of them and every rung above it — unconsumed key,
+            // read-but-not-asserted, uncompared value — was scoped past all six sites.
+            var initial = FixtureAssertions.Of(
+                scenario,
+                "expect_initial",
+                $"collections/{Fixture} {name} expect_initial");
+            foreach (var key in KeysOf(initial))
             {
-                Check($"initial.{want.Name}", tree.Derived(want.Name), want.Value.GetInt32());
+                var got = tree.Derived(key);
+                Check(initial, $"initial.{key}", key, static want => want.GetInt32(), got);
             }
+
+            initial.Verify();
 
             var runsBefore = nodeRuns.ToDictionary(kv => kv.Key, kv => kv.Value, StringComparer.Ordinal);
             var consumerBefore = consumerRuns;
@@ -95,25 +118,33 @@ public sealed class SemTreeConformanceTests
             foreach (var w in watchers.Values) _ = w.Get();
             _ = consumer.Get();
 
-            var after = scenario.GetProperty("expect_after");
-            foreach (var want in after.EnumerateObject())
+            var after = FixtureAssertions.Of(
+                scenario,
+                "expect_after",
+                $"collections/{Fixture} {name} expect_after");
+            foreach (var key in KeysOf(after))
             {
-                switch (want.Name)
+                switch (key)
                 {
                     case "sibling_a_cached":
                         // The sibling subtree must not have recomputed: nothing it reads changed.
-                        Check("sibling_a_cached", nodeRuns["a"] == runsBefore["a"], want.Value.GetBoolean());
+                        var cached = nodeRuns["a"] == runsBefore["a"];
+                        Check(after, key, key, static want => want.GetBoolean(), cached);
                         break;
 
                     case "downstream_consumer_reran":
-                        Check("downstream_consumer_reran", consumerRuns > consumerBefore, want.Value.GetBoolean());
+                        var reran = consumerRuns > consumerBefore;
+                        Check(after, key, key, static want => want.GetBoolean(), reran);
                         break;
 
                     default:
-                        Check($"after.{want.Name}", tree.Derived(want.Name), want.Value.GetInt32());
+                        var derived = tree.Derived(key);
+                        Check(after, $"after.{key}", key, static want => want.GetInt32(), derived);
                         break;
                 }
             }
+
+            after.Verify();
 
             scenarios++;
         }
@@ -122,6 +153,15 @@ public sealed class SemTreeConformanceTests
         Assert.True(scenarios > 0, "loaded the fixture but replayed no scenario");
         Assert.True(assertions > 0, "replayed scenarios but checked nothing");
     }
+
+    /// <summary>The key names <paramref name="block"/> carries, snapshotted.</summary>
+    /// <remarks>
+    /// Read off the BLOCK rather than from a list written here, so a key the corpus grows
+    /// arrives as a comparison — or, if no arm claims it, as the tracker's unconsumed-key
+    /// failure — instead of being silently omitted by a hand-kept list.
+    /// </remarks>
+    private static string[] KeysOf(FixtureAssertions block) =>
+        block.EnumerateObject().Select(property => property.Name).ToArray();
 
     private static FoldFn<int, int> FoldOf(string name) => name switch
     {

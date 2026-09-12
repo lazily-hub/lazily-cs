@@ -53,11 +53,22 @@ reported green while testing nothing.
   MIN_FIXTURES` (145); rung 4 fails on zero scenarios across the opened fixtures and on
   `replayed < MIN_SCENARIOS` (165). The assertion-block rung no longer carries a typed floor at
   all: it DERIVES its expected count from the canonical corpus listing minus `KNOWN_UNCOVERED`
-  and asserts EQUALITY against what the run inventoried (743 sites over 151 opened fixtures at
-  lazily-spec `67aa54a`), so corpus GROWTH reddens it exactly as a shrink does — the direction a
-  `>=` floor can never see, and the direction every one of its three re-pins (692 -> 740 -> 743)
-  actually arrived in (`#lzblockfloorpin`). Derive an expectation wherever the population is
-  computable from the corpus plus a committed ledger, and prefer that to any exact floor; never
+  and asserts EQUALITY against what the run inventoried (761 sites and 652 distinct digests over
+  151 opened fixtures at lazily-spec `67aa54a`), so corpus GROWTH reddens it exactly as a shrink
+  does — the direction a `>=` floor can never see, and the direction every one of its three
+  re-pins (692 -> 740 -> 743) actually arrived in (`#lzblockfloorpin`). Derive an expectation
+  wherever the population is computable from the corpus plus a committed ledger, and prefer that
+  to any exact floor. What counts as a SITE is the family rule, and both halves of it were
+  narrower here until `#lzarrayelementsites`: the tracked names are {`assertions`, `expect`,
+  `expect_after`, `expect_initial`, `expected`} — the last two were missing while the semtree
+  runner read and compared six of them — and a tracked key holding an ARRAY declares one site per
+  plain-OBJECT ELEMENT, by TRUE index, exactly one level deep, where before it declared nothing at
+  all on the grounds that "a runner binds elements, not the array" (a site nobody emitted, while
+  `signaling/anti_spoof_session.json`'s 12 per-step frame elements were bound and verified by the
+  runner and enumerated by no guard). 743/634 -> 749/640 -> 761/652. `SpecCorpus.DeclareWalk` and
+  the python twin in the guard script must state that rule IDENTICALLY: either side being the
+  wider one makes a green run impossible rather than merely inaccurate, which is what pins them to
+  each other. Never
   derive one from the MANIFEST, which moves with the run and would take the expectation to zero
   alongside a detached loader. A derived equality is a MEASUREMENT, and measurement alone
   leaves one hole: the unbound ledger `KNOWN_UNBOUND_BLOCKS` is asserted as a set equality
