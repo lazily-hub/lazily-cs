@@ -291,8 +291,26 @@ join_continuations() {
 	'
 }
 
+# `$MAKE_DIED` is how a failed dry run gets OUT of a subshell (#lzgrepcpipefail).
+#
+# `dry_run` is called from `$(dry_run ... | wc -l)` and `$(own_commands ...)`, so
+# an `exit` here reaches only the subshell and the caller carries on with the empty
+# output it was meant to refuse — which is why both probes live in the main shell.
+# A FILE is the one channel that survives the subshell boundary, and it is needed
+# because the per-target probe cannot cover every invocation `dry_run` makes:
+# `own_commands` also runs `make -n "${deps[@]}"`, a MULTI-GOAL invocation whose
+# `$(MAKECMDGOALS)` is a string no single-target probe ever reproduces. In this
+# Makefile only `check` and `all` have makefile-target prerequisites and `check`'s
+# own recipe is a bare `@echo`, so nothing today rides on that path — but "nothing
+# rides on it today" is the reasoning this whole audit kept having to retract.
+# Nothing needs the exit code: make is silent on stderr when a dry run succeeds,
+# so the bytes it wrote there ARE the failure, and appending them costs one
+# redirect and no second invocation. The `2>/dev/null` this replaces is the other
+# half of the original defect — it discarded the only evidence that make had died.
+MAKE_DIED="$(mktemp)"
+
 dry_run() {
-	"$MAKE_BIN" -n "$@" 2>/dev/null | grep -v -e '^make\[' -e '^make:' | join_continuations || true
+	"$MAKE_BIN" -n "$@" 2>>"$MAKE_DIED" | grep -v -e '^make\[' -e '^make:' | join_continuations || true
 }
 
 own_commands() {
@@ -464,7 +482,7 @@ anchors() {
 
 ci_raw="$(mktemp)"
 ci_anchor="$(mktemp)"
-trap 'rm -f "$ci_raw" "$ci_anchor"' EXIT
+trap 'rm -f "$ci_raw" "$ci_anchor" "$MAKE_DIED"' EXIT
 ci_commands "${workflows[@]}" >"$ci_raw"
 anchors <"$ci_raw" | sort -u >"$ci_anchor"
 
@@ -530,9 +548,46 @@ nogate=""
 nogate_count=0
 reached=0
 excused_ok=0
+unreadable=""
+unreadable_count=0
 
 while IFS= read -r target; do
 	[ -n "$target" ] || continue
+
+	# ---- PER-TARGET dry-run probe (#lzgrepcpipefail) --------------------------
+	#
+	# The up-front `make -n $ROOT_TARGET` gate above is NOT sufficient, and the
+	# hole is ordinary make, not a contrivance. `$(MAKECMDGOALS)` differs between
+	# the root invocation and the per-target ones this guard actually makes, so a
+	# goal-conditional prerequisite is readable from the root and unreadable from
+	# the member:
+	#
+	#     ifeq ($(MAKECMDGOALS),test)
+	#     test: only-when-test-is-the-goal
+	#     endif
+	#
+	# Measured on a byte-identical copy of this repo's Makefile plus those three
+	# lines: `make -n check` exit 0 — the root gate sees nothing at all — while
+	# `make -n test` exits 2. The root-only gate therefore passed it straight
+	# through and the guard printed `no gate test` / `OK — 8 reached, 2 no gate`,
+	# exit 0. The same false green as before, with the fix already in place.
+	#
+	# So every closure member is probed on its OWN goal, before its output is
+	# read, and an unreadable target is counted as a FAILURE rather than excused
+	# by silence. It gets its own bucket instead of joining `unreached`: the
+	# finding is "this guard cannot see what the target runs", which is not the
+	# same claim as "CI does not run it", and naming it wrongly is how the
+	# original defect read.
+	if ! probe_err="$("$MAKE_BIN" -n "$target" 2>&1 >/dev/null)"; then
+		unreadable="$unreadable$target"$'\n'
+		unreadable_count=$((unreadable_count + 1))
+		printf 'UNREADABLE  %s\n' "$target"
+		while IFS= read -r l; do
+			[ -n "$l" ] || continue
+			printf '           %s\n' "$l"
+		done <<<"$probe_err"
+		continue
+	fi
 
 	target_anchors="$(own_commands "$target" | anchors | sort -u || true)"
 
@@ -586,12 +641,57 @@ done <<<"$nogate"
 
 # A guard that examined nothing must not report OK — the same vacuity rule the
 # conformance guards apply (#lzvacuousrun).
-if [ "$((reached + excused_ok + unreached_count))" -eq 0 ]; then
+if [ "$((reached + excused_ok + unreached_count + unreadable_count))" -eq 0 ]; then
 	echo "check-ci-reach: '$ROOT_TARGET' has no prerequisite target carrying a gate — nothing was verified" >&2
 	exit 1
 fi
 
 status=0
+
+# An unreadable target is a REFUSAL, not a reach verdict: with the dry run broken
+# this guard has no idea what the target runs, so it can neither require a CI step
+# nor excuse the absence of one. Reported first, because every other line below is
+# computed from dry runs and a broken one makes the rest of the report suspect.
+if [ "$unreadable_count" -gt 0 ]; then
+	echo >&2
+	echo "check-ci-reach: $unreadable_count target(s) whose dry run FAILED, so what they run is unknown:" >&2
+	while IFS= read -r t; do
+		[ -n "$t" ] || continue
+		echo "  - $t   (\`$MAKE_BIN -n $t\` exited nonzero; its message is above)" >&2
+	done <<<"$unreadable"
+	echo >&2
+	echo "This is not the same finding as 'CI does not reach it'. A target whose dry" >&2
+	echo "run fails produces no commands, which this guard used to report as a target" >&2
+	echo "'carrying no gate' and stop requiring in CI — a false green the root-level" >&2
+	echo "\`$MAKE_BIN -n $ROOT_TARGET\` gate cannot see, because \$(MAKECMDGOALS) differs" >&2
+	echo "between the root goal and this one (#lzgrepcpipefail). Fix the Makefile." >&2
+	status=1
+fi
+
+# Whatever make wrote to stderr from INSIDE a `dry_run`, which runs in a `$(...)`
+# subshell where an `exit` would reach nothing. This covers the invocations the
+# per-target probe above cannot reproduce — notably `make -n "${deps[@]}"`, whose
+# multi-goal $(MAKECMDGOALS) is a string no single-target probe ever produces.
+#
+# Measured honestly: a conditional keyed on that dep-list goal string does break
+# the dry run at `$(dry_run "${deps[@]}" | wc -l)` while passing both probes, but
+# WITHOUT this block it was already a misdiagnosed RED, not a false green — the
+# wrong `prefix` mis-slices `check`'s own commands and the guard reports
+# `no CI run: step matches check-package.sh`, blaming CI for a broken Makefile.
+# So this block buys DIAGNOSIS, not fail-closure, on that path. It is kept
+# because it is also a second, independent catch for the per-target case (removing
+# the probe above leaves this one refusing Attack 2 on its own) and because the
+# next such invocation need not be as lucky.
+if [ -s "$MAKE_DIED" ]; then
+	echo >&2
+	echo "check-ci-reach: a dry run inside this guard FAILED and said:" >&2
+	sed 's/^/  /' "$MAKE_DIED" >&2
+	echo >&2
+	echo "Anchors are read out of those dry runs, so a failed one yields no commands" >&2
+	echo "and silently shrinks this guard's reach. Refusing rather than reporting a" >&2
+	echo "count computed from it (#lzgrepcpipefail)." >&2
+	status=1
+fi
 if [ "$stale_count" -gt 0 ]; then
 	echo >&2
 	while IFS= read -r t; do
