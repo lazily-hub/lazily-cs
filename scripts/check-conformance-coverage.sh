@@ -734,6 +734,12 @@ echo "conformance coverage OK: $covered/$total canonical fixtures OPENED by the 
 # Two-directional, exactly like KNOWN_UNCOVERED and ExcuseKey: an excuse for a block
 # this run DID bind fails as stale, and so does one naming a site no opened fixture
 # declares. An excuse nothing can falsify is an allowlist entry wearing a hat.
+#
+# Under a CEILING as well as an equality (#lzledgerceiling): `MAX_LEDGERED_BLOCKS`
+# below defaults to 0 and this array is empty, so the two agree by construction and
+# the first entry cannot be added silently. Set equality alone is satisfied by any
+# CONSISTENT pair — detach N binds, write the N entries, and both directions pass —
+# so the ledger is allowed to shrink and nothing else.
 KNOWN_UNBOUND_BLOCKS=(
 )
 
@@ -759,6 +765,53 @@ for raw in sys.argv[3:]:
         )
         sys.exit(1)
     excuses[f"{parts[0]}|{parts[1]}"] = parts[2].strip()
+
+# ---- A CEILING on the excused set, because set equality alone has a hole
+#      (#lzledgerceiling)
+#
+# The three rungs below assert this ledger as a SET EQUALITY against the run, and
+# they fail in BOTH directions: an unbound site nobody excused fails, and an excuse
+# the run outlived fails. That is strictly stronger than an allowlist, and it is
+# still satisfied by ANY CONSISTENT PAIR. A commit that detaches N binds and writes
+# the N matching entries agrees with itself and passes both directions. The derived
+# SITE and DIGEST equalities further down miss it too: a detached site is still
+# DECLARED by the corpus walk — it has merely stopped being bound — so both
+# magnitudes hold at 743 and 634 while the bound population drops.
+#
+# lazily-rs demonstrated the hole by dropping one bound record and adding its
+# matching entry; lazily-cs reproduced it by deleting the `arena_blob.json`
+# `assertions` bind — the very site #lznullformblind was named for — and excusing it.
+# Every other rung stayed green.
+#
+# What closes it is not a COUNT of what is excused but a CEILING on how much may be.
+# A count mirrors the ledger, so it carries nothing the set equality does not and
+# adds a second edit site that drifts — `MIN_BLOCKS` in a new costume. A ceiling is
+# POLICY: it does not move with the corpus and never needs re-pinning except
+# deliberately, upward, in review. At zero, where this binding sits, it needs no
+# maintenance at all and an empty ledger stays empty by construction — the first
+# excuse cannot be added silently.
+#
+# Raise it ONLY for a genuinely unbindable block, with a reason, and expect to be
+# asked why the capability cannot exist here. Never raise it to park a block a
+# runner could bind today: that is the laundering this rung exists to refuse.
+MAX_LEDGERED_BLOCKS = int(os.environ.get("MAX_LEDGERED_BLOCKS", "0"))
+if len(excuses) > MAX_LEDGERED_BLOCKS:
+    print(
+        f"ERROR: {len(excuses)} assertion block site(s) are ledgered as unbound in\n"
+        f"       KNOWN_UNBOUND_BLOCKS; the ceiling is {MAX_LEDGERED_BLOCKS}. This ledger may only\n"
+        "       SHRINK. The set equality below only checks that the ledger and the run\n"
+        "       AGREE, which any consistent pair satisfies — a commit that detaches binds\n"
+        "       and writes the matching entries passes it in both directions, and the\n"
+        "       derived site/digest magnitudes do not move because a detached site is\n"
+        "       still declared. This ceiling is what makes enlarging the excused set an\n"
+        "       explicit act instead of a side effect.\n"
+        "       Bind the block with FixtureAssertions.Of/Wrap. Raise this line only for a\n"
+        "       genuinely unbindable one, with a reason:",
+        file=sys.stderr,
+    )
+    for site, reason in sorted(excuses.items()):
+        print(f"         {site} — \"{reason}\"", file=sys.stderr)
+    sys.exit(1)
 
 # The manifest is EVIDENCE, and evidence that cannot be decoded is not evidence
 # of absence. The bash leg proved it non-empty; bytes the recorder interleaved or
@@ -1051,7 +1104,8 @@ if len(declared) != len(expected_digests):
 
 print(
     f"assertion-block bind OK: {len(bound_sites)}/{len(declared_sites)} assertion block sites "
-    f"carried by opened fixtures were BOUND to a tracker ({len(excuses)} declared unbindable; "
+    f"carried by opened fixtures were BOUND to a tracker ({len(excuses)} declared unbindable of "
+    f"at most {MAX_LEDGERED_BLOCKS}, a ceiling the ledger may only shrink under; "
     f"derived {expected_blocks} sites AND {len(expected_digests)} distinct digests from {walked} "
     f"opened fixtures, both asserted EQUAL; content-keyed, so a runner's block NAME cannot "
     f"satisfy it)"

@@ -59,7 +59,16 @@ reported green while testing nothing.
   actually arrived in (`#lzblockfloorpin`). Derive an expectation wherever the population is
   computable from the corpus plus a committed ledger, and prefer that to any exact floor; never
   derive one from the MANIFEST, which moves with the run and would take the expectation to zero
-  alongside a detached loader. Where a floor remains, it is the EXACT count a completed CI run
+  alongside a detached loader. A derived equality is a MEASUREMENT, and measurement alone
+  leaves one hole: the unbound ledger `KNOWN_UNBOUND_BLOCKS` is asserted as a set equality
+  against the run, failing in BOTH directions, and is still satisfied by any CONSISTENT pair —
+  a commit that detaches N binds and writes the N matching entries passes it, while the derived
+  site and digest counts do not move because a detached site is still DECLARED. So that ledger
+  sits under a POLICY as well: `MAX_LEDGERED_BLOCKS` (0, env-overridable) caps how much may be
+  excused instead of counting what is, so it never needs re-pinning except deliberately and
+  upward, and the ledger may only SHRINK (`#lzledgerceiling`). Never pin a count that MIRRORS a
+  ledger or the bound population — equal sets have equal counts, so the number carries nothing
+  the equality does not and adds an edit site that drifts, which is `MIN_BLOCKS` in a new costume. Where a floor remains, it is the EXACT count a completed CI run
   reports against the published corpus. This paragraph used to describe the scenario floor as "calibrated below the observed",
   and that advice was the bug: a floor deliberately set under reality has stopped guarding,
   because the drop it exists to catch fits inside its own margin. It let 17 scenarios of slack
