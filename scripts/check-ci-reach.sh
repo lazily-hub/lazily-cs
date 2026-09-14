@@ -222,6 +222,12 @@
 #   message, not a caught escape.
 set -euo pipefail
 
+# A step that reaches a gate is still inert when its workflow or job does not
+# run. Keep that outer activation proof separate from the mature command/Makefile
+# reach proof below, and exercise its mutation regressions on every invocation.
+python3 scripts/check-ci-activation.py --self-test
+python3 scripts/check-ci-activation.py --config scripts/ci-activation.conf --guard scripts/check-ci-reach.sh
+
 MAKE_BIN="${MAKE:-make}"
 ROOT_TARGET="${CI_REACH_ROOT_TARGET:-check}"
 CONF="${CI_REACH_CONF:-scripts/ci-reach.conf}"
