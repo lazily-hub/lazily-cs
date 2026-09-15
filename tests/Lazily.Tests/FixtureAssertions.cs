@@ -174,7 +174,12 @@ public sealed class FixtureAssertions
     {
     }
 
-    private FixtureAssertions(JsonElement block, string where, ProseLedger? ledger, bool recordBind)
+    private FixtureAssertions(
+        JsonElement block,
+        string where,
+        ProseLedger? ledger,
+        bool recordBind,
+        bool selfTest = false)
     {
         // Rung 0 (#lznullformblind): book this block as BOUND, keyed by its CONTENT rather
         // than by <paramref name="where"/>. Every other rung is scoped to a block a runner
@@ -186,7 +191,7 @@ public sealed class FixtureAssertions
         // two-directional against the blocks `SpecCorpus` inventoried at read time, and a
         // sub-object is not one of them. Booking it would put a bind in the ledger with no
         // inventory entry to match.
-        if (recordBind) SpecCorpus.RecordBlockBind(block);
+        if (recordBind) SpecCorpus.RecordBlockBind(block, selfTest);
         _block = block;
         _where = where;
         _ledger = ledger;
@@ -212,6 +217,13 @@ public sealed class FixtureAssertions
     /// <summary>Track a block the caller already holds.</summary>
     public static FixtureAssertions Wrap(JsonElement block, string where, ProseLedger? ledger = null) =>
         new(block, where, ledger);
+
+    /// <summary>
+    /// Track a fabricated block used to falsify this guard itself, without claiming the bytes
+    /// came from the conformance corpus.
+    /// </summary>
+    internal static FixtureAssertions SelfTest(JsonElement block, string where) =>
+        new(block, where, ledger: null, recordBind: true, selfTest: true);
 
     /// <summary>
     /// Bind the WHOLE block and consume it by comparing it structurally against

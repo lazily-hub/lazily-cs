@@ -31,7 +31,7 @@ public sealed class ComparisonSeamGuardTests
     public void A_callback_that_reads_the_value_without_comparing_it_fails()
     {
         using var block = JsonDocument.Parse("""{"nonterminal_outcomes": ["observed", "accepted"]}""");
-        var tracker = FixtureAssertions.Wrap(block.RootElement, "guard");
+        var tracker = FixtureAssertions.SelfTest(block.RootElement, "guard");
 
         tracker.AssertKeyWith(
             "nonterminal_outcomes",
@@ -50,7 +50,7 @@ public sealed class ComparisonSeamGuardTests
     public void A_vacuous_callback_over_an_empty_array_fails_too()
     {
         using var block = JsonDocument.Parse("""{"nonterminal_outcomes": []}""");
-        var tracker = FixtureAssertions.Wrap(block.RootElement, "guard");
+        var tracker = FixtureAssertions.SelfTest(block.RootElement, "guard");
 
         tracker.AssertKeyWith(
             "nonterminal_outcomes",
@@ -74,7 +74,7 @@ public sealed class ComparisonSeamGuardTests
     public void A_comparison_against_a_hardcoded_literal_fails()
     {
         using var block = JsonDocument.Parse("""{"terminal_outcome": "applied"}""");
-        var tracker = FixtureAssertions.Wrap(block.RootElement, "guard");
+        var tracker = FixtureAssertions.SelfTest(block.RootElement, "guard");
 
         var failure = Assert.Throws<Xunit.Sdk.XunitException>(
             () => tracker.AssertKeyWith(
@@ -89,7 +89,7 @@ public sealed class ComparisonSeamGuardTests
     public void A_comparison_against_a_literal_collection_fails()
     {
         using var block = JsonDocument.Parse("""{"outcomes": ["a", "b"]}""");
-        var tracker = FixtureAssertions.Wrap(block.RootElement, "guard");
+        var tracker = FixtureAssertions.SelfTest(block.RootElement, "guard");
 
         var failure = Assert.Throws<Xunit.Sdk.XunitException>(
             () => tracker.AssertKeyWith(
@@ -106,7 +106,7 @@ public sealed class ComparisonSeamGuardTests
     public void A_comparison_against_replayed_state_books_the_key()
     {
         using var block = JsonDocument.Parse("""{"receipt_count": 4}""");
-        var tracker = FixtureAssertions.Wrap(block.RootElement, "guard");
+        var tracker = FixtureAssertions.SelfTest(block.RootElement, "guard");
         var replayed = Enumerable.Range(0, 4).Count();
 
         tracker.AssertKeyWith("receipt_count", want => want.AssertEqual(w => w.GetInt32(), replayed));
@@ -128,7 +128,7 @@ public sealed class ComparisonSeamGuardTests
     public void A_divergence_recording_runner_still_records_instead_of_throwing()
     {
         using var block = JsonDocument.Parse("""{"len": 3, "head": "a"}""");
-        var tracker = FixtureAssertions.Wrap(block.RootElement, "guard");
+        var tracker = FixtureAssertions.SelfTest(block.RootElement, "guard");
         var divergences = new List<string>();
 
         void Check<T>(string key, Divergence<T> comparison)
@@ -148,7 +148,7 @@ public sealed class ComparisonSeamGuardTests
         // The same runner over a replay that disagrees: still no throw, and the ledger now holds
         // the finding. A guard that could only be satisfied by a throwing comparison would have
         // forced this runner to stop recording, which is a different test rather than a guarded one.
-        var tracker2 = FixtureAssertions.Wrap(block.RootElement, "guard");
+        var tracker2 = FixtureAssertions.SelfTest(block.RootElement, "guard");
         var wrongLength = "ab".Length;
         tracker2.AssertKeyWith("len", want => Check("len", want.Compare(w => w.GetInt32(), wrongLength)));
         tracker2.AssertKeyWith("head", want => Check("head", want.Compare(w => w.GetString(), replayedHead)));
@@ -168,7 +168,7 @@ public sealed class ComparisonSeamGuardTests
     public void An_uncompared_key_passes_when_its_call_site_is_declared()
     {
         using var block = JsonDocument.Parse("""{"nonterminal_outcomes": ["observed"]}""");
-        var tracker = FixtureAssertions.Wrap(block.RootElement, "guard");
+        var tracker = FixtureAssertions.SelfTest(block.RootElement, "guard");
 
         tracker.AssertKeyWith(
             "nonterminal_outcomes",
@@ -186,7 +186,7 @@ public sealed class ComparisonSeamGuardTests
     public void A_declared_call_site_that_compares_fails_as_stale()
     {
         using var block = JsonDocument.Parse("""{"receipt_count": 2}""");
-        var tracker = FixtureAssertions.Wrap(block.RootElement, "guard");
+        var tracker = FixtureAssertions.SelfTest(block.RootElement, "guard");
         var replayed = Enumerable.Range(0, 2).Count();
 
         var failure = Assert.Throws<Xunit.Sdk.XunitException>(
@@ -206,7 +206,7 @@ public sealed class ComparisonSeamGuardTests
     public void A_bare_projection_is_not_a_comparison()
     {
         using var block = JsonDocument.Parse("""{"id": "node-1"}""");
-        var tracker = FixtureAssertions.Wrap(block.RootElement, "guard");
+        var tracker = FixtureAssertions.SelfTest(block.RootElement, "guard");
 
         Assert.Equal("node-1", tracker.AssertKeyInto("id", value => value.GetString()!));
 
@@ -224,7 +224,7 @@ public sealed class ComparisonSeamGuardTests
     public void A_composite_comparison_books_the_keys_it_projected()
     {
         using var block = JsonDocument.Parse("""{"generation": 7, "stamped_at": 11}""");
-        var tracker = FixtureAssertions.Wrap(block.RootElement, "guard");
+        var tracker = FixtureAssertions.SelfTest(block.RootElement, "guard");
         var replayed = (Generation: 6L + 1L, StampedAt: 10L + 1L);
 
         tracker.CompareInto(

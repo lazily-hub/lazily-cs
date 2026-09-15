@@ -962,6 +962,15 @@ echo "conformance coverage OK: $covered/$total canonical fixtures OPENED by the 
 # scenario-ledger failure — and the alternative, keying by the runner's own label,
 # is what this ledger exists NOT to do.
 #
+# The reverse direction matters too (#lzcsreverserung): a bound digest the loader
+# declared nowhere used to disappear. It now has exactly three dispositions,
+# derived from this run rather than held to a bare count: (1) it matches an object
+# the opened corpus carries at a path the block walk deliberately does not emit,
+# such as a whole `steps[n]` object; (2) it is explicitly marked as fabricated by
+# the guard's own self-tests; or (3) it matches no corpus object at all. The first
+# two are reported as the decomposition. Only the third fails, because it is the
+# runner-owning-a-rebuilt-parse hole the reverse rung exists to expose.
+#
 # An unbindable block belongs HERE, as a documented excuse read on every run, not
 # as a runner fabricated to manufacture coverage. Format: "fixture|where|reason".
 # Two-directional, exactly like KNOWN_UNCOVERED and ExcuseKey: an excuse for a block
@@ -1132,6 +1141,7 @@ MANIFEST_ADVICE = (
 
 declared = {}
 bound = set()
+self_test_bound = set()
 manifest_text = read_text(manifest_path, "conformance manifest", MANIFEST_ADVICE)
 # This leg re-reads the evidence, so it re-checks the provenance (#lzstalemanifest).
 # The bash rung above already refused a foreign manifest; a freshness check that
@@ -1146,6 +1156,9 @@ for line in manifest_text.splitlines():
         declared.setdefault(parts[2], set()).add(f"{parts[1]}|{parts[3]}")
     elif parts[0] == "blocks-bound" and len(parts) == 2:
         bound.add(parts[1])
+    elif parts[0] == "blocks-self-test" and len(parts) == 2:
+        bound.add(parts[1])
+        self_test_bound.add(parts[1])
 
 unbound = []
 bound_sites = set()
@@ -1382,7 +1395,21 @@ uncovered_ledger = {
 
 expected_sites = set()
 expected_blocks_walked = []
+all_corpus_object_digests = set()
 walked = 0
+
+
+def collect_object_digests(node, found):
+    """Collect every object digest below node, descending through arrays too."""
+    if isinstance(node, dict):
+        found.add(block_digest(node))
+        for value in node.values():
+            collect_object_digests(value, found)
+    elif isinstance(node, list):
+        for value in node:
+            collect_object_digests(value, found)
+
+
 for fixture_id in corpus_fixtures:
     if fixture_id in uncovered_ledger:
         continue
@@ -1400,9 +1427,52 @@ for fixture_id in corpus_fixtures:
         )
         sys.exit(1)
     walk_sites(fixture_id, document, "", expected_sites, expected_blocks_walked)
+    collect_object_digests(document, all_corpus_object_digests)
     walked += 1
 
 expected_digests = {block_digest(block) for block in expected_blocks_walked}
+
+
+def classify_undeclared_binds(bound_digests, declared_digests,
+                              self_test_digests, corpus_object_digests):
+    """Partition reverse-ledger records without imposing a bare count equality."""
+    undeclared = bound_digests - declared_digests
+    self_tests = undeclared & self_test_digests
+    remaining = undeclared - self_tests
+    below = remaining & corpus_object_digests
+    no_corpus_object = remaining - below
+    return undeclared, below, self_tests, no_corpus_object
+
+
+undeclared_bound, below_emitted, self_tests, no_corpus_object = (
+    classify_undeclared_binds(
+        bound,
+        set(declared),
+        self_test_bound,
+        all_corpus_object_digests,
+    )
+)
+
+if no_corpus_object:
+    print(
+        "ERROR: bound assertion-block digest(s) were declared by no opened fixture block.\n"
+        "       A bind may be undeclared only when it matches a corpus object at a path\n"
+        "       the block walk deliberately does not emit, or when\n"
+        "       the guard's own synthetic test explicitly records it as blocks-self-test.\n"
+        "       These records match no corpus object at all, so fabricated/rebuilt bytes can\n"
+        "       look covered (#lzcsreverserung):",
+        file=sys.stderr,
+    )
+    for digest in sorted(no_corpus_object):
+        print(f"         {digest} — matches no corpus object at all", file=sys.stderr)
+    sys.exit(1)
+
+print(
+    f"assertion-block reverse bind OK: {len(undeclared_bound)} bound digest(s) were not "
+    f"declared sites ({len(below_emitted)} below an emitted block, "
+    f"{len(self_tests)} self-test-fabricated, 0 matching no corpus object; "
+    "no bare count equality — classifications are derived from this run and corpus)"
+)
 
 # Positive-evidence floor (#lzvacuousrun): an empty opened set derives zero expected
 # sites, and zero == zero would report OK having compared nothing.
@@ -1523,10 +1593,9 @@ for line in sys.argv[3:]:
 PROSE_VERIFIED = "prose-verified"
 # The rung-0 channels ride the same manifest under their own prefixes
 # (#lznullformblind). A corpus-relative fixture id can never be spelled like one,
-# so the split stays unambiguous — but a `blocks-bound<TAB><digest>` line read by
-# the branch below would be reported as a scenario of a fixture named
-# "blocks-bound".
-BLOCK_MARKERS = ("blocks-declared", "blocks-bound")
+# so the split stays unambiguous — but a block marker line read by the branch below
+# would otherwise be reported as a scenario of a fixture named after that marker.
+BLOCK_MARKERS = ("blocks-declared", "blocks-bound", "blocks-self-test")
 
 MANIFEST_ADVICE = (
     "       Re-run the suite with LAZILY_CONFORMANCE_MANIFEST set to an ABSOLUTE",

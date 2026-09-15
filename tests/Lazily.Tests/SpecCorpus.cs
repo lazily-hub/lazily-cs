@@ -264,16 +264,18 @@ public static class SpecCorpus
     // `scenarios[2].expect`) and a label-keyed ledger would silently miss the
     // mismatch rather than report it.
     //
-    // Both channels ride the SAME manifest as everything above, under `blocks-`
-    // prefixes — no second file, no second env var, and no second CI wiring.
+    // All three channels ride the SAME manifest as everything above, under `blocks-`
+    // prefixes — declared corpus sites, ordinary binds, and explicitly fabricated guard
+    // self-tests. No second file, no second env var, and no second CI wiring.
     internal const string BlockDeclaredMarker = "blocks-declared";
     internal const string BlockBoundMarker = "blocks-bound";
+    internal const string BlockSelfTestMarker = "blocks-self-test";
 
     /// <summary>Book an assertion block as BOUND. Called from the FixtureAssertions ctor.</summary>
-    internal static void RecordBlockBind(JsonElement block)
+    internal static void RecordBlockBind(JsonElement block, bool selfTest = false)
     {
         if (block.ValueKind != JsonValueKind.Object) return;
-        Append(BlockBoundMarker + "\t" + BlockDigest(block));
+        Append((selfTest ? BlockSelfTestMarker : BlockBoundMarker) + "\t" + BlockDigest(block));
     }
 
     /// <summary>
