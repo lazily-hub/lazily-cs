@@ -555,6 +555,11 @@ fi
 # Fixtures deliberately not covered by this binding yet. Every entry is a
 # reviewed finding, never a silent skip.
 KNOWN_UNCOVERED=(
+  # Phase 0 durable-owner contracts are not implemented in this binding.
+  "durable-owner/atomic_crash_boundary.json"
+  "durable-owner/inbox_outbox_deduplication.json"
+  "durable-owner/ordered_replay.json"
+  "durable-owner/projection_fingerprint.json"
   # Reactive egress is currently Rust-only; C# has no egress replay runner.
   "egress/egress_generation_fence.json"
   "egress/egress_inflight_window.json"
