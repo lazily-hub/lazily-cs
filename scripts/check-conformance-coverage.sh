@@ -578,7 +578,7 @@ KNOWN_UNCOVERED=(
 # reports "coverage OK: 2/2" and exits 0, which is the vacuous green #lzvacuousrun
 # named after this binding printed "0/0" on three rungs in a row.
 #
-# EXACT: 151 is what a green CI run on the current corpus actually opens, with
+# EXACT: 152 is what a green CI run on the current corpus actually opens, with
 # no margin. NEVER lower this to make the gate green: a drop means a replay was
 # removed, renamed, or short-circuited, and that is the finding, not the floor.
 #
@@ -591,9 +591,8 @@ KNOWN_UNCOVERED=(
 #
 # Re-pinned for lazily-spec f89d865, which carries the three replay-equivalence
 # fixtures this binding now replays through `ReplayConformanceTests`
-# (`conformance coverage OK: 151/156`), matching a local green `make check`.
-# Verified exact: 152 fails this floor.
-MIN_FIXTURES="${MIN_FIXTURES:-151}"
+# plus the durable-client envelope replay.
+MIN_FIXTURES="${MIN_FIXTURES:-152}"
 
 # Scenarios deliberately not replayed, one per line as
 #   corpus/fixture.json|scenario-id|reason
