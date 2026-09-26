@@ -19,7 +19,7 @@
     <Version>0.5.0</Version>
     <Authors>lazily-hub</Authors>
     <Description>Lazy reactive primitives for C#/.NET — Sources, Computeds, and Effects with automatic dependency tracking, plus the lazily-spec wire protocol.</Description>
-    <PackageLicenseExpression>MIT</PackageLicenseExpression>
+    <PackageLicenseExpression>Apache-2.0</PackageLicenseExpression>
     <PackageReadmeFile>README.md</PackageReadmeFile>
     <RepositoryUrl>https://github.com/lazily-hub/lazily-cs</RepositoryUrl>
     <PackageProjectUrl>https://github.com/lazily-hub/lazily-cs</PackageProjectUrl>
@@ -28,6 +28,8 @@
   <ItemGroup>
     <InternalsVisibleTo Include="Lazily.Tests" />
     <None Include="../../README.md" Pack="true" PackagePath="/" />
+    <None Include="../../LICENSE" Pack="true" PackagePath="/" />
+    <None Include="../../NOTICE" Pack="true" PackagePath="/" />
   </ItemGroup>
 
   <ItemGroup Condition="'$(TargetFramework)' == 'netstandard2.1'">

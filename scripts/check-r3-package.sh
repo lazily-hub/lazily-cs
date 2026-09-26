@@ -35,6 +35,10 @@ if ! grep -qxF "    <version>${expected_version}</version>" <<< "$nuspec"; then
     echo "R3 package check FAILED: Lazily.R3.nuspec version is not '$expected_version'" >&2
     exit 1
 fi
+if ! grep -q '<license type="expression">Apache-2.0</license>' <<< "$nuspec"; then
+    echo "R3 package check FAILED: Lazily.R3.nuspec license is not Apache-2.0" >&2
+    exit 1
+fi
 if ! grep -q '<dependency id="Lazily" version="' <<< "$nuspec"; then
     echo "R3 package check FAILED: missing Lazily dependency" >&2
     exit 1
@@ -45,11 +49,11 @@ if ! grep -q '<dependency id="R3" version="' <<< "$nuspec"; then
 fi
 
 entries="$(unzip -Z1 "$package_path")"
-for entry in lib/net10.0/Lazily.R3.dll README.md; do
+for entry in lib/net10.0/Lazily.R3.dll README.md LICENSE NOTICE; do
     if ! grep -qxF "$entry" <<< "$entries"; then
         echo "R3 package check FAILED: missing $entry" >&2
         exit 1
     fi
 done
 
-echo "R3 package check OK: Lazily.R3 $expected_version; net10.0 assembly, dependencies, and README"
+echo "R3 package check OK: Lazily.R3 $expected_version; Apache-2.0 metadata, notices, net10.0 assembly, and dependencies"

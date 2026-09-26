@@ -35,6 +35,10 @@ if ! grep -qxF "    <version>${expected_version}</version>" <<< "$nuspec"; then
     echo "package check FAILED: Lazily.nuspec version is not '$expected_version'" >&2
     exit 1
 fi
+if ! grep -q '<license type="expression">Apache-2.0</license>' <<< "$nuspec"; then
+    echo "package check FAILED: Lazily.nuspec license is not Apache-2.0" >&2
+    exit 1
+fi
 
 entries="$(unzip -Z1 "$package_path")"
 assembly_version="${expected_version%%[-+]*}.0"
@@ -53,9 +57,11 @@ for target in netstandard2.1 net8.0 net10.0; do
         -property:ExpectedVersion="$assembly_version"
 done
 
-if ! grep -qxF "README.md" <<< "$entries"; then
-    echo "package check FAILED: missing README.md" >&2
-    exit 1
-fi
+for entry in README.md LICENSE NOTICE; do
+    if ! grep -qxF "$entry" <<< "$entries"; then
+        echo "package check FAILED: missing $entry" >&2
+        exit 1
+    fi
+done
 
-echo "package check OK: Lazily $expected_version; netstandard2.1 + net8.0 + net10.0 assemblies and README"
+echo "package check OK: Lazily $expected_version; Apache-2.0 metadata, notices, and netstandard2.1 + net8.0 + net10.0 assemblies"

@@ -366,4 +366,4 @@ single source for cross-binding feature coverage.
 
 ## License
 
-MIT
+Apache-2.0 — see [LICENSE](LICENSE) and [NOTICE](NOTICE).
