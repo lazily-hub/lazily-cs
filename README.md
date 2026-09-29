@@ -275,6 +275,13 @@ with an empty fixture ledger. Support remains feature-specific: for example, the
 topic, and work-queue peers participate, while their not-yet-implemented thread-safe and async
 flavors remain staged in the matrix.
 
+`SimConsumerTestkit` is the public consumer boundary parity harness. It runs a materialized
+generated history through one in-memory adapter and explicitly selected PostgreSQL, NATS, or
+external-process adapters. The in-memory side exposes only stable world identity, step count, and
+immutable action trace entries; real sides expose probe, reset, apply, observation, and exact
+materialized-history callbacks. Topology validation happens before callbacks, and `Run` reports
+the first divergent action and adapter while replaying `simulation/consumer_testkit.json`.
+
 The runner is parameterised over the **execution model** and replays the same op stream against
 `Context`, `ThreadSafeContext`, and `AsyncContext`. That is not thoroughness for its own sake: a
 cascade that stops one level below the write is correct synchronously and broken asynchronously,

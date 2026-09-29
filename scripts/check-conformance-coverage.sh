@@ -592,7 +592,7 @@ KNOWN_UNCOVERED=(
 # Re-pinned for lazily-spec f89d865, which carries the three replay-equivalence
 # fixtures this binding now replays through `ReplayConformanceTests`
 # plus the durable-client envelope replay.
-MIN_FIXTURES="${MIN_FIXTURES:-152}"
+MIN_FIXTURES="${MIN_FIXTURES:-153}"
 
 # Scenarios deliberately not replayed, one per line as
 #   corpus/fixture.json|scenario-id|reason
@@ -643,7 +643,7 @@ KNOWN_UNREPLAYED_SCENARIOS=(
 # matching a local green `make check`. The three replay fixtures carry `steps`
 # rather than `scenarios`, so the move here is corpus growth elsewhere rather
 # than the new runner. Verified exact: 170 fails this floor.
-MIN_SCENARIOS="${MIN_SCENARIOS:-169}"
+MIN_SCENARIOS="${MIN_SCENARIOS:-174}"
 
 MANIFEST="${LAZILY_CONFORMANCE_MANIFEST:-build/conformance-fixtures-loaded.txt}"
 # PRESENCE, not size (#lzstampsatisfiesnonempty).
