@@ -59,6 +59,9 @@ public sealed class CodecConformanceTests
         DeltaOp.NodeRemove => "NodeRemove",
         DeltaOp.EdgeAdd => "EdgeAdd",
         DeltaOp.EdgeRemove => "EdgeRemove",
+        DeltaOp.QueuePush => "QueuePush",
+        DeltaOp.QueuePop => "QueuePop",
+        DeltaOp.QueueClose => "QueueClose",
         _ => throw new InvalidOperationException($"unknown DeltaOp {op}"),
     };
 
