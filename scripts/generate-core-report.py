@@ -29,6 +29,17 @@ def run(argv: list[str], *, env: dict[str, str]) -> None:
         raise RuntimeError(f"{' '.join(argv)} exited {completed.returncode}")
 
 
+# A mutant only counts as killed when the runner rejected it through its divergence
+# assertion: the library's observed value disagreed with the mutated expectation.
+# Any other non-zero exit (a KeyNotFoundException on a renamed scenario label, a
+# missing fixture, a build error) proves the runner READ the leaf, not that the
+# assertion over it discriminates, so it is recorded and the next leaf is tried.
+DIVERGENCE_MARKER = "unexpected divergences:"
+DIVERGENCE_LINE = re.compile(
+    r"unexpected divergences:\s*\n\s*(?:Context|ThreadSafeContext|AsyncContext)/[^\s#]+\.json(?:\[[^\]\s]+\])?#-?\d+:"
+)
+
+
 def run_negative_control(argv: list[str], *, env: dict[str, str]) -> dict[str, object]:
     completed = subprocess.run(
         argv,
@@ -41,10 +52,12 @@ def run_negative_control(argv: list[str], *, env: dict[str, str]) -> dict[str, o
     if completed.returncode == 0:
         raise RuntimeError("mutated assertion was accepted by the reactive-graph runner")
     output = completed.stdout or ""
+    start = output.find(DIVERGENCE_MARKER)
     return {
         "status": "rejected",
         "exit_code": completed.returncode,
-        "output_excerpt": output[-1000:],
+        "rejected_by": "divergence" if DIVERGENCE_LINE.search(output) else "other_failure",
+        "output_excerpt": output[start:start + 1000] if start >= 0 else output[-1000:],
     }
 
 
@@ -79,23 +92,32 @@ def pointer_matches(document: object, pointer: str) -> list[tuple[object, str]]:
     return matches
 
 
-def mutate_assertion(value: object, path: str) -> tuple[object, dict[str, object]] | None:
+MAX_MUTANTS_PER_ROUTE = 8
+
+
+def assertion_leaves(value: object, path: str) -> list[tuple[object, object, str]]:
+    """Every mutable leaf beneath an assertion block, in document order."""
+    leaves: list[tuple[object, object, str]] = []
     if isinstance(value, dict):
         for key, child in value.items():
             if key == "note":
                 continue
-            result = mutate_assertion(child, f"{path}/{pointer_token(key)}")
-            if result is not None:
-                value[key], detail = result
-                return value, detail
-        return None
-    if isinstance(value, list):
+            child_path = f"{path}/{pointer_token(key)}"
+            if isinstance(child, (dict, list)):
+                leaves.extend(assertion_leaves(child, child_path))
+            elif mutate_leaf(child) is not None:
+                leaves.append((value, key, child_path))
+    elif isinstance(value, list):
         for index, child in enumerate(value):
-            result = mutate_assertion(child, f"{path}/{index}")
-            if result is not None:
-                value[index], detail = result
-                return value, detail
-        return None
+            child_path = f"{path}/{index}"
+            if isinstance(child, (dict, list)):
+                leaves.extend(assertion_leaves(child, child_path))
+            elif mutate_leaf(child) is not None:
+                leaves.append((value, index, child_path))
+    return leaves
+
+
+def mutate_leaf(value: object) -> object | None:
     if isinstance(value, bool):
         replacement: object = not value
     elif isinstance(value, int):
@@ -108,7 +130,7 @@ def mutate_assertion(value: object, path: str) -> tuple[object, dict[str, object
         replacement = "__negative_control__"
     else:
         return None
-    return replacement, {"json_pointer": path, "before": value, "after": replacement}
+    return replacement
 
 
 def reject_mutated_assertion(
@@ -120,33 +142,51 @@ def reject_mutated_assertion(
     route: str,
     ordinal: int,
 ) -> dict[str, object]:
+    pristine = json.loads((spec_root / "conformance" / fixture_path).read_text(encoding="utf-8"))
+    leaf_count = sum(len(assertion_leaves(value, path)) for value, path in pointer_matches(pristine, route))
+    if leaf_count == 0:
+        if not pointer_matches(pristine, route):
+            raise RuntimeError(f"{fixture_path}#{route}: mutation route did not resolve")
+        raise RuntimeError(f"{fixture_path}#{route}: no mutable assertion leaf")
+    not_discriminating: list[dict[str, object]] = []
     with tempfile.TemporaryDirectory(prefix="core-mutant-", dir=build) as temporary:
         mutation_root = Path(temporary) / "conformance"
         shutil.copytree(spec_root / "conformance", mutation_root)
         fixture_file = mutation_root / fixture_path
-        document = json.loads(fixture_file.read_text(encoding="utf-8"))
-        matches = pointer_matches(document, route)
-        if not matches:
-            raise RuntimeError(f"{fixture_path}#{route}: mutation route did not resolve")
-        assertion, assertion_path = matches[0]
-        mutation = mutate_assertion(assertion, assertion_path)
-        if mutation is None:
-            raise RuntimeError(f"{fixture_path}#{route}: no mutable assertion leaf")
-        _, detail = mutation
-        fixture_file.write_text(json.dumps(document, indent=2) + "\n", encoding="utf-8")
-        mutant_manifest = build / f"core-mutant-{ordinal}.txt"
-        mutant_manifest.unlink(missing_ok=True)
-        mutant_env = os.environ.copy()
-        mutant_env.update({
-            "LAZILY_SPEC_CONFORMANCE_DIR": str(mutation_root),
-            "LAZILY_CONFORMANCE_MANIFEST": str(mutant_manifest),
-            "LAZILY_CONFORMANCE_RUN_ID": f"core-mutant-{os.getpid()}-{ordinal}",
-        })
-        rejection = run_negative_control([
-            "dotnet", "test", "tests/Lazily.Tests/Lazily.Tests.csproj", "--nologo",
-            "--no-build", "--filter", "FullyQualifiedName~ReactiveGraphConformanceTests",
-        ], env=mutant_env)
-        return {"mutation": detail, **rejection}
+        for attempt in range(min(leaf_count, MAX_MUTANTS_PER_ROUTE)):
+            # A fresh parse per attempt: exactly one leaf differs from the corpus.
+            document = json.loads(json.dumps(pristine))
+            leaves = [
+                leaf
+                for value, path in pointer_matches(document, route)
+                for leaf in assertion_leaves(value, path)
+            ]
+            container, key, leaf_path = leaves[attempt]
+            before = container[key]
+            after = mutate_leaf(before)
+            container[key] = after
+            detail = {"json_pointer": leaf_path, "before": before, "after": after}
+            fixture_file.write_text(json.dumps(document, indent=2) + "\n", encoding="utf-8")
+            mutant_manifest = build / f"core-mutant-{ordinal}-{attempt}.txt"
+            mutant_manifest.unlink(missing_ok=True)
+            mutant_env = os.environ.copy()
+            mutant_env.update({
+                "LAZILY_SPEC_CONFORMANCE_DIR": str(mutation_root),
+                "LAZILY_CONFORMANCE_MANIFEST": str(mutant_manifest),
+                "LAZILY_CONFORMANCE_RUN_ID": f"core-mutant-{os.getpid()}-{ordinal}-{attempt}",
+            })
+            rejection = run_negative_control([
+                "dotnet", "test", "tests/Lazily.Tests/Lazily.Tests.csproj", "--nologo",
+                "--no-build", "--filter", "FullyQualifiedName~ReactiveGraphConformanceTests",
+            ], env=mutant_env)
+            if rejection["rejected_by"] == "divergence":
+                return {"mutation": detail, **rejection, "non_discriminating_mutants": not_discriminating}
+            not_discriminating.append({"mutation": detail, **rejection})
+    raise RuntimeError(
+        f"{fixture_path}#{route}: no mutated assertion leaf was rejected by a library divergence "
+        f"({len(not_discriminating)} mutant(s) failed for another reason: "
+        f"{[item['mutation']['json_pointer'] for item in not_discriminating]})"
+    )
 
 
 def parse_manifest(path: Path) -> tuple[set[str], set[tuple[str, str]], dict[str, list[tuple[str, str]]], set[str]]:
