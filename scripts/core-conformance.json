@@ -1,0 +1,14 @@
+{
+  "schema_version": 1,
+  "profile_id": "core-v1",
+  "binding_id": "csharp",
+  "report_command": ["python3", "scripts/generate-core-report.py"],
+  "runtime_skips": [],
+  "fixtureless_claims": [
+    {
+      "id": "c_abi_ffi_boundary",
+      "proof_classes": ["native_artifact_consumer"],
+      "command": ["python3", "scripts/core-ffi-proof.py"]
+    }
+  ]
+}
