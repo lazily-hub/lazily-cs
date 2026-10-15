@@ -1,0 +1,219 @@
+{
+  "schema_version": 1,
+  "profile_id": "core-v1-csharp",
+  "assembly": "Lazily",
+  "comparison": "exact",
+  "assembly_metadata": {
+    "LazilyCoreApiGeneration": "1"
+  },
+  "types": [
+    "Lazily.Compute",
+    "Lazily.Computed\u00601",
+    "Lazily.Context",
+    "Lazily.Disposal",
+    "Lazily.DisposedNodeException",
+    "Lazily.Effect",
+    "Lazily.EffectRun",
+    "Lazily.IComputeOps",
+    "Lazily.Reactive",
+    "Lazily.Source\u00601",
+    "Lazily.StaleComputeException",
+    "Lazily.TeardownScope"
+  ],
+  "deprecation_policy": {
+    "minimum_compatible_generations": 2,
+    "minimum_days": 90,
+    "required_fields": [
+      "introduced_generation",
+      "deprecated_since_generation",
+      "replacement",
+      "deprecated_on",
+      "earliest_removal_generation",
+      "earliest_removal_on"
+    ]
+  },
+  "symbols": [
+    {
+      "id": "context",
+      "public_api_owners": [
+        "Lazily.Context",
+        "Lazily.Compute",
+        "Lazily.IComputeOps"
+      ],
+      "lifecycle": {
+        "introduced_generation": 1,
+        "deprecated_since_generation": null,
+        "replacement": null,
+        "deprecated_on": null,
+        "earliest_removal_generation": null,
+        "earliest_removal_on": null
+      }
+    },
+    {
+      "id": "source",
+      "public_api_owners": [
+        "Lazily.Source\u00601",
+        "Lazily.Reactive.Source"
+      ],
+      "lifecycle": {
+        "introduced_generation": 1,
+        "deprecated_since_generation": null,
+        "replacement": null,
+        "deprecated_on": null,
+        "earliest_removal_generation": null,
+        "earliest_removal_on": null
+      }
+    },
+    {
+      "id": "computed",
+      "public_api_owners": [
+        "Lazily.Computed\u00601",
+        "Lazily.Reactive.Computed"
+      ],
+      "lifecycle": {
+        "introduced_generation": 1,
+        "deprecated_since_generation": null,
+        "replacement": null,
+        "deprecated_on": null,
+        "earliest_removal_generation": null,
+        "earliest_removal_on": null
+      }
+    },
+    {
+      "id": "effect",
+      "public_api_owners": [
+        "Lazily.Effect",
+        "Lazily.EffectRun",
+        "Lazily.Reactive.Effect"
+      ],
+      "lifecycle": {
+        "introduced_generation": 1,
+        "deprecated_since_generation": null,
+        "replacement": null,
+        "deprecated_on": null,
+        "earliest_removal_generation": null,
+        "earliest_removal_on": null
+      }
+    },
+    {
+      "id": "batch",
+      "public_api_owners": [
+        "Lazily.Context.Batch"
+      ],
+      "lifecycle": {
+        "introduced_generation": 1,
+        "deprecated_since_generation": null,
+        "replacement": null,
+        "deprecated_on": null,
+        "earliest_removal_generation": null,
+        "earliest_removal_on": null
+      }
+    },
+    {
+      "id": "scope",
+      "public_api_owners": [
+        "Lazily.Disposal.Scope",
+        "Lazily.TeardownScope"
+      ],
+      "lifecycle": {
+        "introduced_generation": 1,
+        "deprecated_since_generation": null,
+        "replacement": null,
+        "deprecated_on": null,
+        "earliest_removal_generation": null,
+        "earliest_removal_on": null
+      }
+    },
+    {
+      "id": "typed_context",
+      "public_api_owners": [
+        "Lazily.Context"
+      ],
+      "lifecycle": {
+        "introduced_generation": 1,
+        "deprecated_since_generation": null,
+        "replacement": null,
+        "deprecated_on": null,
+        "earliest_removal_generation": null,
+        "earliest_removal_on": null
+      }
+    }
+  ],
+  "api": [
+    "constructor Lazily.Context()",
+    "constructor Lazily.DisposedNodeException(System.String name, System.String kind)",
+    "constructor Lazily.Effect(Lazily.Context ctx, Lazily.EffectRun run)",
+    "constructor Lazily.EffectRun(System.Object object, System.IntPtr method)",
+    "constructor Lazily.StaleComputeException(System.String stage)",
+    "field const System.Int32 Lazily.Context.DefaultDrainBudget = 100000",
+    "method Lazily.Computed\u003CT\u003E Lazily.Computed\u003CT\u003E.Eager()",
+    "method Lazily.Context Lazily.Compute.Untracked()",
+    "method Lazily.Context Lazily.Context.Untracked()",
+    "method System.Boolean Lazily.Computed\u003CT\u003E.Peek(out T value)",
+    "method System.Boolean Lazily.Computed\u003CT\u003E.TryGet(out T value, out Lazily.DisposedNodeException error)",
+    "method System.Boolean Lazily.Source\u003CT\u003E.TryGet(out T value, out Lazily.DisposedNodeException error)",
+    "method System.Void Lazily.Compute.Batch(System.Action fn)",
+    "method System.Void Lazily.Computed\u003CT\u003E.Dispose()",
+    "method System.Void Lazily.Computed\u003CT\u003E.Lazy()",
+    "method System.Void Lazily.Context.Batch(System.Action fn)",
+    "method System.Void Lazily.Context.Clear()",
+    "method System.Void Lazily.Context.ClearDrainExhaustion()",
+    "method System.Void Lazily.Effect.Dispose()",
+    "method System.Void Lazily.Source\u003CT\u003E.Dispose()",
+    "method System.Void Lazily.Source\u003CT\u003E.Invalidate()",
+    "method System.Void Lazily.Source\u003CT\u003E.Merge(T op)",
+    "method System.Void Lazily.Source\u003CT\u003E.Set(T newValue)",
+    "method System.Void Lazily.TeardownScope.Close()",
+    "method System.Void Lazily.TeardownScope.Disarm()",
+    "method T Lazily.Computed\u003CT\u003E.Get()",
+    "method T Lazily.Computed\u003CT\u003E.Get(Lazily.IComputeOps ops)",
+    "method T Lazily.Source\u003CT\u003E.Get()",
+    "method T Lazily.Source\u003CT\u003E.Get(Lazily.IComputeOps ops)",
+    "method T Lazily.Source\u003CT\u003E.Peek()",
+    "method TNode Lazily.TeardownScope.Own\u003CTNode\u003E(TNode node) where TNode : Lazily.ReactiveNode",
+    "method abstract Lazily.Context Lazily.IComputeOps.Untracked()",
+    "method abstract System.Void Lazily.IComputeOps.Batch(System.Action fn)",
+    "method extension static Lazily.Computed\u003CT\u003E Lazily.Reactive.Computed\u003CT\u003E(Lazily.Context ctx, System.Func\u003CLazily.Compute, T\u003E compute, System.Collections.Generic.IEqualityComparer\u003CT\u003E comparer = null, System.String name = null)",
+    "method extension static Lazily.Computed\u003CT\u003E Lazily.Reactive.ComputedRippleWhen\u003CT\u003E(Lazily.Context ctx, System.Func\u003CLazily.Compute, T\u003E compute, System.Func\u003CT, T, System.Boolean\u003E changed, System.String name = null)",
+    "method extension static Lazily.Computed\u003CT\u003E Lazily.Reactive.Slot\u003CT\u003E(Lazily.Context ctx, System.Func\u003CLazily.Compute, T\u003E compute, System.String name = null)",
+    "method extension static Lazily.Effect Lazily.Reactive.Effect(Lazily.Context ctx, Lazily.EffectRun run)",
+    "method extension static Lazily.Source\u003CT\u003E Lazily.Reactive.Source\u003CT\u003E(Lazily.Context ctx, T initial, Lazily.MergePolicy\u003CT\u003E policy, System.Collections.Generic.IEqualityComparer\u003CT\u003E comparer = null)",
+    "method extension static Lazily.Source\u003CT\u003E Lazily.Reactive.Source\u003CT\u003E(Lazily.Context ctx, T initial, System.Collections.Generic.IEqualityComparer\u003CT\u003E comparer = null)",
+    "method extension static Lazily.TeardownScope Lazily.Disposal.Scope(Lazily.Context ctx)",
+    "method extension static System.Boolean Lazily.Disposal.IsDisposed(Lazily.Context ctx, Lazily.ReactiveNode node)",
+    "method extension static System.Int32 Lazily.Disposal.DependencyCount(Lazily.Context ctx, Lazily.ReactiveNode node)",
+    "method extension static System.Int32 Lazily.Disposal.DependentCount(Lazily.Context ctx, Lazily.ReactiveNode node)",
+    "method extension static System.Void Lazily.Disposal.WithScope(Lazily.Context ctx, System.Action\u003CLazily.TeardownScope\u003E fn)",
+    "method extension static T Lazily.Reactive.Get\u003CT\u003E(Lazily.IComputeOps ops, Lazily.ITrackable\u003CT\u003E handle)",
+    "method virtual System.Action Lazily.EffectRun.EndInvoke(System.IAsyncResult result)",
+    "method virtual System.Action Lazily.EffectRun.Invoke(Lazily.Compute compute)",
+    "method virtual System.IAsyncResult Lazily.EffectRun.BeginInvoke(Lazily.Compute compute, System.AsyncCallback callback, System.Object object)",
+    "property Lazily.Context Lazily.Compute.Scope { get; }",
+    "property Lazily.Context Lazily.Context.Scope { get; }",
+    "property Lazily.Context Lazily.IComputeOps.Scope { get; }",
+    "property Lazily.DrainExhaustion Lazily.Context.LastDrainExhaustion { get; }",
+    "property Lazily.MergePolicy\u003CT\u003E Lazily.Source\u003CT\u003E.Policy { get; }",
+    "property System.Boolean Lazily.Computed\u003CT\u003E.IsEager { get; }",
+    "property System.Boolean Lazily.Context.IsBatching { get; }",
+    "property System.Boolean Lazily.Effect.IsActive { get; }",
+    "property System.Int32 Lazily.Context.DrainBudget { get; set; }",
+    "property System.Int32 Lazily.Context.Size { get; }",
+    "property System.Int32 Lazily.TeardownScope.Count { get; }",
+    "property System.String Lazily.Computed\u003CT\u003E.Name { get; }",
+    "property System.String Lazily.DisposedNodeException.Kind { get; }",
+    "property System.String Lazily.DisposedNodeException.NodeName { get; }",
+    "property System.String Lazily.StaleComputeException.Stage { get; }",
+    "type public interface Lazily.IComputeOps",
+    "type public sealed class Lazily.Compute : Lazily.IComputeOps",
+    "type public sealed class Lazily.Computed\u003CT\u003E : Lazily.ReactiveNode, Lazily.ICacheable, Lazily.ITrackable\u003CT\u003E, System.IDisposable",
+    "type public sealed class Lazily.Context : Lazily.IComputeOps",
+    "type public sealed class Lazily.DisposedNodeException : System.InvalidOperationException, System.Runtime.Serialization.ISerializable",
+    "type public sealed class Lazily.Effect : Lazily.ReactiveNode",
+    "type public sealed class Lazily.Source\u003CT\u003E : Lazily.ReactiveNode, Lazily.ITrackable\u003CT\u003E, System.IDisposable",
+    "type public sealed class Lazily.StaleComputeException : System.InvalidOperationException, System.Runtime.Serialization.ISerializable",
+    "type public sealed class Lazily.TeardownScope",
+    "type public sealed delegate Lazily.EffectRun : System.ICloneable, System.Runtime.Serialization.ISerializable",
+    "type public static class Lazily.Disposal",
+    "type public static class Lazily.Reactive"
+  ]
+}

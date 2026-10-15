@@ -1,0 +1,87 @@
+{
+  "schema_version": 1,
+  "profile_id": "r3-v1-csharp",
+  "assembly": "Lazily.R3",
+  "comparison": "exact",
+  "assembly_metadata": {
+    "LazilyCoreApiMinimumGeneration": "1",
+    "LazilyCoreApiMaximumGeneration": "1"
+  },
+  "types": [
+    "Lazily.R3.R3Adapters",
+    "Lazily.R3.R3StateBinding\u00601",
+    "Lazily.R3.SharedR3State\u00601"
+  ],
+  "deprecation_policy": {
+    "minimum_compatible_generations": 2,
+    "minimum_days": 90,
+    "required_fields": [
+      "introduced_generation",
+      "deprecated_since_generation",
+      "replacement",
+      "deprecated_on",
+      "earliest_removal_generation",
+      "earliest_removal_on"
+    ]
+  },
+  "symbols": [
+    {
+      "id": "r3_adapters",
+      "public_api_owners": [
+        "Lazily.R3.R3Adapters"
+      ],
+      "lifecycle": {
+        "introduced_generation": 1,
+        "deprecated_since_generation": null,
+        "replacement": null,
+        "deprecated_on": null,
+        "earliest_removal_generation": null,
+        "earliest_removal_on": null
+      }
+    },
+    {
+      "id": "shared_r3_state",
+      "public_api_owners": [
+        "Lazily.R3.SharedR3State\u00601"
+      ],
+      "lifecycle": {
+        "introduced_generation": 1,
+        "deprecated_since_generation": null,
+        "replacement": null,
+        "deprecated_on": null,
+        "earliest_removal_generation": null,
+        "earliest_removal_on": null
+      }
+    },
+    {
+      "id": "r3_state_binding",
+      "public_api_owners": [
+        "Lazily.R3.R3StateBinding\u00601"
+      ],
+      "lifecycle": {
+        "introduced_generation": 1,
+        "deprecated_since_generation": null,
+        "replacement": null,
+        "deprecated_on": null,
+        "earliest_removal_generation": null,
+        "earliest_removal_on": null
+      }
+    }
+  ],
+  "api": [
+    "method System.Void Lazily.R3.R3StateBinding\u003CT\u003E.Dispose()",
+    "method System.Void Lazily.R3.SharedR3State\u003CT\u003E.Dispose()",
+    "method extension static Lazily.R3.R3StateBinding\u003CT\u003E Lazily.R3.R3Adapters.BindR3State\u003CT\u003E(Lazily.Context context, R3.Observable\u003CT\u003E observable, T initial, System.Collections.Generic.IEqualityComparer\u003CT\u003E comparer = null)",
+    "method extension static Lazily.R3.R3StateBinding\u003CT\u003E Lazily.R3.R3Adapters.BindR3State\u003CT\u003E(Lazily.ThreadSafeContext context, R3.Observable\u003CT\u003E observable, T initial, System.Collections.Generic.IEqualityComparer\u003CT\u003E comparer = null)",
+    "method extension static Lazily.R3.SharedR3State\u003CT\u003E Lazily.R3.R3Adapters.ToSharedR3State\u003CT\u003E(Lazily.Context context, System.Func\u003CLazily.Compute, T\u003E read, System.Collections.Generic.IEqualityComparer\u003CT\u003E comparer = null)",
+    "method extension static R3.Observable\u003CT\u003E Lazily.R3.R3Adapters.ToR3State\u003CT\u003E(Lazily.Context context, System.Func\u003CLazily.Compute, T\u003E read, System.Collections.Generic.IEqualityComparer\u003CT\u003E comparer = null)",
+    "property Lazily.Source\u003CT\u003E Lazily.R3.R3StateBinding\u003CT\u003E.State { get; }",
+    "property R3.Observable\u003CT\u003E Lazily.R3.SharedR3State\u003CT\u003E.Observable { get; }",
+    "property System.Boolean Lazily.R3.R3StateBinding\u003CT\u003E.IsCompleted { get; }",
+    "property System.Exception Lazily.R3.R3StateBinding\u003CT\u003E.LastError { get; }",
+    "property System.Nullable\u003CR3.Result\u003E Lazily.R3.R3StateBinding\u003CT\u003E.Completion { get; }",
+    "type public sealed class Lazily.R3.R3StateBinding\u003CT\u003E : System.IDisposable",
+    "type public sealed class Lazily.R3.SharedR3State\u003CT\u003E : System.IDisposable",
+    "type public static class Lazily.R3.R3Adapters"
+  ]
+}

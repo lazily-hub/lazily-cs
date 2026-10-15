@@ -95,6 +95,9 @@ jobs:
       - name: Package layout check (#lzinteroppeerci)
         run: make package-check
 
+      - name: Core API compatibility gate
+        run: make api-compat-check
+
       - name: FFI surface check (#lzinteroppeerci)
         run: ./scripts/check-ffi.sh
 

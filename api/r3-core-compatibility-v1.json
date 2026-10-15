@@ -1,0 +1,73 @@
+{
+  "schema_version": 1,
+  "profile_id": "r3-core-generation-1",
+  "assembly": "Lazily",
+  "comparison": "subset",
+  "assembly_metadata": {
+    "LazilyCoreApiGeneration": "1"
+  },
+  "types": [
+    "Lazily.Compute",
+    "Lazily.Context",
+    "Lazily.Effect",
+    "Lazily.EffectRun",
+    "Lazily.Reactive",
+    "Lazily.Source\u00601",
+    "Lazily.ThreadSafeContext"
+  ],
+  "deprecation_policy": {
+    "minimum_compatible_generations": 2,
+    "minimum_days": 90,
+    "required_fields": [
+      "introduced_generation",
+      "deprecated_since_generation",
+      "replacement",
+      "deprecated_on",
+      "earliest_removal_generation",
+      "earliest_removal_on"
+    ]
+  },
+  "symbols": [
+    {
+      "id": "r3_core_contract",
+      "public_api_owners": [
+        "Lazily.Context",
+        "Lazily.Source\u00601",
+        "Lazily.Effect",
+        "Lazily.ThreadSafeContext"
+      ],
+      "lifecycle": {
+        "introduced_generation": 1,
+        "deprecated_since_generation": null,
+        "replacement": null,
+        "deprecated_on": null,
+        "earliest_removal_generation": null,
+        "earliest_removal_on": null
+      }
+    }
+  ],
+  "api": [
+    "constructor Lazily.Compute()",
+    "constructor Lazily.Context()",
+    "constructor Lazily.Effect()",
+    "constructor Lazily.EffectRun(System.Object object, System.IntPtr method)",
+    "constructor Lazily.Source\u003CT\u003E()",
+    "constructor Lazily.ThreadSafeContext()",
+    "method System.Void Lazily.Effect.Dispose()",
+    "method System.Void Lazily.Source\u003CT\u003E.Set(T value)",
+    "method System.Void Lazily.ThreadSafeContext.Set\u003CT\u003E(Lazily.Source\u003CT\u003E cell, T value)",
+    "method System.Void Lazily.ThreadSafeContext.WithLock(System.Action\u003CLazily.Context\u003E fn)",
+    "method extension static Lazily.Effect Lazily.Reactive.Effect(Lazily.Context context, Lazily.EffectRun run)",
+    "method extension static Lazily.Source\u003CT\u003E Lazily.Reactive.Source\u003CT\u003E(Lazily.Context context, T initial, System.Collections.Generic.IEqualityComparer\u003CT\u003E comparer = null)",
+    "method virtual System.Action Lazily.EffectRun.EndInvoke(System.IAsyncResult result)",
+    "method virtual System.Action Lazily.EffectRun.Invoke(Lazily.Compute compute)",
+    "method virtual System.IAsyncResult Lazily.EffectRun.BeginInvoke(Lazily.Compute compute, System.AsyncCallback callback, System.Object object)",
+    "type public sealed class Lazily.Compute",
+    "type public sealed class Lazily.Context",
+    "type public sealed class Lazily.Effect : System.IDisposable",
+    "type public sealed class Lazily.Source\u003CT\u003E",
+    "type public sealed class Lazily.ThreadSafeContext",
+    "type public sealed delegate Lazily.EffectRun : System.ICloneable, System.Runtime.Serialization.ISerializable",
+    "type public static class Lazily.Reactive"
+  ]
+}

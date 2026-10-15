@@ -270,6 +270,7 @@ EXPECTED_ROOT_TARGET="check"
 # dropped prerequisite is the finding, editing this list is a decision. The
 # failure message spells both out; do not reach for the second reflexively.
 EXPECTED_CLOSURE_TARGETS=(
+	api-compat-check
 	assertion-ordering-check
 	build
 	check
@@ -435,6 +436,7 @@ EXPECTED_GATE_STEPS=(
 # requirement altogether and a no-gate recipe has nothing to reach, so neither is
 # classified into a mode; `EXPECTED_NO_GATE_TARGETS` and ci-reach.conf own those.
 EXPECTED_MAKE_INVOKED_TARGETS=(
+	api-compat-check
 	package-check
 )
 

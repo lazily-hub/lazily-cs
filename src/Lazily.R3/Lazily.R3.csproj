@@ -16,10 +16,15 @@
     <PackageProjectUrl>https://github.com/lazily-hub/lazily-cs</PackageProjectUrl>
   </PropertyGroup>
   <ItemGroup>
-    <ProjectReference Include="../Lazily/Lazily.csproj" />
+    <ProjectReference Include="../Lazily/Lazily.csproj"
+                      Condition="'$(LazilyCoreCompatibilityProject)' == ''" />
+    <ProjectReference Include="$(LazilyCoreCompatibilityProject)"
+                      Condition="'$(LazilyCoreCompatibilityProject)' != ''" />
     <PackageReference Include="R3" Version="1.3.1" />
     <None Include="../../docs/r3-adapter.md" Pack="true" PackagePath="README.md" />
     <None Include="../../LICENSE" Pack="true" PackagePath="/" />
     <None Include="../../NOTICE" Pack="true" PackagePath="/" />
+    <None Include="../../api/r3-api-v1.json" Pack="true" PackagePath="compatibility/" />
+    <None Include="../../api/r3-core-compatibility-v1.json" Pack="true" PackagePath="compatibility/" />
   </ItemGroup>
 </Project>

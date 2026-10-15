@@ -1,6 +1,6 @@
 # lazily-cs — build, test, and verification targets.
 
-.PHONY: all restore build test format format-check conformance pack package-check ffi-check interop-peer-check benchmark-r3 check clean conformance-coverage assertion-ordering-check ci-reach
+.PHONY: all restore build test format format-check conformance pack package-check api-compat-check ffi-check interop-peer-check benchmark-r3 check clean conformance-coverage assertion-ordering-check ci-reach
 
 DOTNET ?= dotnet
 
@@ -68,6 +68,19 @@ package-check:
 	./scripts/check-package.sh
 	./scripts/check-r3-package.sh
 
+api-compat-check:
+	$(DOTNET) build src/Lazily/Lazily.csproj -c Release --nologo
+	$(DOTNET) build src/Lazily.R3/Lazily.R3.csproj -c Release --nologo
+	$(DOTNET) build compat/core-generation-1/Lazily.CoreGeneration1.csproj -c Release --nologo
+	$(DOTNET) build tools/Lazily.ApiCompat/Lazily.ApiCompat.csproj --nologo
+	$(DOTNET) run --project tools/Lazily.ApiCompat/Lazily.ApiCompat.csproj --no-build -- check api/core-api-v1.json src/Lazily/bin/Release/net10.0/Lazily.dll
+	$(DOTNET) run --project tools/Lazily.ApiCompat/Lazily.ApiCompat.csproj --no-build -- self-test api/core-api-v1.json src/Lazily/bin/Release/net10.0/Lazily.dll
+	$(DOTNET) run --project tools/Lazily.ApiCompat/Lazily.ApiCompat.csproj --no-build -- check api/r3-api-v1.json src/Lazily.R3/bin/Release/net10.0/Lazily.R3.dll
+	$(DOTNET) run --project tools/Lazily.ApiCompat/Lazily.ApiCompat.csproj --no-build -- self-test api/r3-api-v1.json src/Lazily.R3/bin/Release/net10.0/Lazily.R3.dll
+	$(DOTNET) run --project tools/Lazily.ApiCompat/Lazily.ApiCompat.csproj --no-build -- check api/r3-core-compatibility-v1.json compat/core-generation-1/bin/Release/net10.0/Lazily.dll
+	$(DOTNET) run --project tools/Lazily.ApiCompat/Lazily.ApiCompat.csproj --no-build -- self-test api/r3-core-compatibility-v1.json compat/core-generation-1/bin/Release/net10.0/Lazily.dll
+	$(DOTNET) build src/Lazily.R3/Lazily.R3.csproj -c Release --nologo -p:LazilyCoreCompatibilityProject=$(CURDIR)/compat/core-generation-1/Lazily.CoreGeneration1.csproj
+
 ffi-check:
 	./scripts/check-ffi.sh
 
@@ -81,7 +94,7 @@ benchmark-r3:
 assertion-ordering-check:
 	python3 ../lazily-spec/scripts/check-assertion-ordering.py --binding cs --root .
 
-check: format-check build test conformance-coverage package-check ffi-check interop-peer-check assertion-ordering-check ci-reach
+check: format-check build test conformance-coverage package-check api-compat-check ffi-check interop-peer-check assertion-ordering-check ci-reach
 	@echo "lazily-cs: check OK"
 
 # CI-reachability guard (#lzcheckcireachguard). Fails when a target above runs a
