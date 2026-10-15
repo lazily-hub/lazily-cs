@@ -1,6 +1,6 @@
 # lazily-cs — build, test, and verification targets.
 
-.PHONY: all restore build test format format-check conformance pack package-check api-compat-check ffi-check interop-peer-check benchmark-r3 check clean conformance-coverage assertion-ordering-check ci-reach
+.PHONY: all restore build test format format-check conformance pack package-check api-compat-check ffi-check interop-peer-check benchmark-r3 check clean conformance-coverage assertion-ordering-check ci-reach core-artifact-consumer-check
 
 DOTNET ?= dotnet
 
@@ -28,6 +28,9 @@ DOTNET ?= dotnet
 CONFORMANCE_RUN_ID := $(shell uuidgen 2>/dev/null || date +%s%N)
 
 all: check
+
+core-artifact-consumer-check:
+	./scripts/core-artifact-consumer-check.sh
 
 restore:
 	$(DOTNET) restore
@@ -94,7 +97,7 @@ benchmark-r3:
 assertion-ordering-check:
 	python3 ../lazily-spec/scripts/check-assertion-ordering.py --binding cs --root .
 
-check: format-check build test conformance-coverage package-check api-compat-check ffi-check interop-peer-check assertion-ordering-check ci-reach
+check: format-check build test conformance-coverage package-check api-compat-check ffi-check interop-peer-check assertion-ordering-check core-artifact-consumer-check ci-reach
 	@echo "lazily-cs: check OK"
 
 # CI-reachability guard (#lzcheckcireachguard). Fails when a target above runs a
