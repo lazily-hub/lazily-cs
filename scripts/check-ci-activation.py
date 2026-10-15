@@ -21,6 +21,11 @@ class CheckError(RuntimeError):
 class Step:
     name: str
     run: str
+    # Step-level activation (#lzcoreciactivationfixes). A gate step that is
+    # unique, named and spells its gate exactly still enforces nothing under a
+    # step-level `if: false` or `continue-on-error: true`; the job-level pins
+    # cannot see either, so the step's own keys are recorded here.
+    activation: dict[str, str] = field(default_factory=dict)
 
 
 @dataclass
@@ -211,14 +216,28 @@ def parse_workflow(path: Path) -> Workflow:
                 raise CheckError(f"{path}: inline steps are unsupported")
             k = 0
             current_name = ""
+            current_activation: dict[str, str] = {}
             while k < len(step_rows):
                 step_number, step_indent, step_text = step_rows[k]
                 if step_indent == 6 and step_text.startswith("- "):
                     current_name = ""
+                    current_activation = {}
                     first = step_text[2:]
                     if first.startswith("name:"):
                         _, current_name = key_value(first)
                         current_name = unquote(current_name)
+                    elif re.match(r"^(if|continue-on-error):", first):
+                        key, value = key_value(first)
+                        current_activation[key] = value
+                    elif first.startswith("run:"):
+                        raise CheckError(f"{path}:{step_number}: a run: step must not open its list item")
+                    k += 1
+                    continue
+                if step_indent == 8 and re.match(r"^(if|continue-on-error):", step_text):
+                    key, value = key_value(step_text)
+                    if key in current_activation:
+                        raise CheckError(f"{path}:{step_number}: duplicate step-level {key}:")
+                    current_activation[key] = value
                     k += 1
                     continue
                 if step_indent == 8 and step_text.startswith("name:"):
@@ -235,7 +254,7 @@ def parse_workflow(path: Path) -> Workflow:
                         run = run_value
                     else:
                         raise CheckError(f"{path}:{step_number}: empty run:")
-                    job.steps.append(Step(current_name, run))
+                    job.steps.append(Step(current_name, run, current_activation))
                     k = next_k
                     continue
                 k += 1
@@ -275,7 +294,7 @@ def parse_config(path: Path):
     workflows = []
     allowed = {
         "workflow", "trigger", "filter", "gate-job", "activation", "matrix",
-        "required-trigger", "required-branch",
+        "required-trigger", "required-branch", "step-activation",
     }
     for number, raw in enumerate(path.read_text(encoding="utf-8").splitlines(), 1):
         line = raw.strip()
@@ -337,6 +356,10 @@ def activation(job: Job) -> str:
     return ";".join(f"{key}={job.activation.get(key, '')}" for key in ("continue-on-error", "if", "needs"))
 
 
+def step_activation(step: Step) -> str:
+    return ";".join(f"{key}={step.activation.get(key, '')}" for key in ("continue-on-error", "if"))
+
+
 def matrix(job: Job) -> str:
     return ";".join(f"{axis}={','.join(sorted(job.matrix[axis]))}" for axis in sorted(job.matrix))
 
@@ -376,9 +399,10 @@ def check(root: Path, config: Path, guard: Path, quiet: bool = False) -> None:
                     raise CheckError(f"{wf}: {event} branches do not include {branch!r}")
 
     located_jobs = set()
+    gate_steps: dict[tuple[str, str, str], Step] = {}
     for name in step_pin_names(guard):
         matches = [
-            (wf, job_id)
+            (wf, job_id, step)
             for wf, data in workflows.items()
             for job_id, job in data.jobs.items()
             for step in job.steps
@@ -386,19 +410,43 @@ def check(root: Path, config: Path, guard: Path, quiet: bool = False) -> None:
         ]
         if len(matches) != 1:
             raise CheckError(f"gate step {name!r} resolves to {len(matches)} jobs")
-        located_jobs.add(matches[0])
+        wf, job_id, step = matches[0]
+        located_jobs.add((wf, job_id))
+        gate_steps[(wf, job_id, step.name)] = step
 
     for target in make_pin_targets(guard):
-        matches = {
-            (wf, job_id)
+        hits = [
+            (wf, job_id, step)
             for wf, data in workflows.items()
             for job_id, job in data.jobs.items()
             for step in job.steps
             if match_make(step.run, target)
-        }
+        ]
+        matches = {(wf, job_id) for wf, job_id, _ in hits}
         if len(matches) != 1:
             raise CheckError(f"make-invoked gate {target!r} resolves to {len(matches)} jobs")
         located_jobs.update(matches)
+        for wf, job_id, step in hits:
+            if not step.name:
+                raise CheckError(f"{wf}:{job_id}: make-invoked gate {target!r} runs in an unnamed step")
+            gate_steps[(wf, job_id, step.name)] = step
+
+    # STEP-LEVEL ACTIVATION. Every located gate step is unconditional unless its
+    # exact step-level values are pinned; a pin for a step that is not a gate
+    # step is stale and refused, so the set cannot grow a dead entry.
+    expected_step_activation = {
+        (wf, job_id, name): value for wf, job_id, name, value in pins(rows, "step-activation", 4)
+    }
+    stale = sorted(set(expected_step_activation) - set(gate_steps))
+    if stale:
+        raise CheckError(f"step-activation pin names no located gate step: {stale!r}")
+    for key, step in sorted(gate_steps.items(), key=lambda item: item[0]):
+        found = step_activation(step)
+        expected = expected_step_activation.get(key, "continue-on-error=;if=")
+        if found != expected:
+            raise CheckError(
+                f"{key[0]}:{key[1]}: gate step {key[2]!r} step-level activation {found!r} != pinned {expected!r}"
+            )
 
     expected_jobs = pins(rows, "gate-job", 2)
     if located_jobs != expected_jobs:
@@ -442,7 +490,8 @@ def check(root: Path, config: Path, guard: Path, quiet: bool = False) -> None:
         print(
             f"check-ci-reach: activated — {len(found_triggers)} trigger(s), "
             f"{len(found_filters)} filter(s), {len(expected_jobs)} gate job(s), "
-            f"exact activation/matrix pins; {','.join(sorted(required))}/{branch} floors"
+            f"exact activation/matrix pins, {len(gate_steps)} gate step(s) with exact step-level activation; "
+            f"{','.join(sorted(required))}/{branch} floors"
         )
 
 
@@ -496,6 +545,15 @@ jobs:
             "discard-all-repinned": (healthy_workflow.replace(expression, "true"), healthy_config.replace(expression, "true")),
             "advisory-only-repinned": (healthy_workflow.replace("[stable, master]", "[master]"), healthy_config.replace("version=master,stable", "version=master")),
             "moved-gate": (healthy_workflow.replace("  test:", "  moved:"), healthy_config),
+            "step-if-false": (healthy_workflow.replace("      - name: Gate\n", "      - name: Gate\n        if: false\n"), healthy_config),
+            "step-if-retargeted": (healthy_workflow.replace("      - name: Gate\n", "      - name: Gate\n        if: matrix.version == 'nightly'\n"), healthy_config),
+            "step-discard": (healthy_workflow.replace("      - name: Gate\n", "      - name: Gate\n        continue-on-error: true\n"), healthy_config),
+            "step-if-first-key": (healthy_workflow.replace("      - name: Gate\n", "      - if: false\n        name: Gate\n"), healthy_config),
+            "step-activation-stale-pin": (healthy_workflow, healthy_config + "step-activation|.github/workflows/ci.yml|test|Gone|continue-on-error=;if=\n"),
+            "step-activation-pinned-drift": (
+                healthy_workflow.replace("      - name: Gate\n", "      - name: Gate\n        if: matrix.version == 'nightly'\n"),
+                healthy_config + "step-activation|.github/workflows/ci.yml|test|Gate|continue-on-error=;if=matrix.version == 'stable'\n",
+            ),
             "unsupported-on": (healthy_workflow.replace("  push:\n", "  - push\n", 1), healthy_config),
         }
         for name, (workflow_text, config_text) in attacks.items():

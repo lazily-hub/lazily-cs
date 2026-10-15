@@ -193,4 +193,4 @@ jobs:
         with:
           dotnet-version: ${{ matrix.dotnet }}.x
       - name: Core artifact consumer (minimum/current)
-        run: make core-artifact-consumer-check TARGET_FRAMEWORK=net${{ matrix.dotnet }}
+        run: TARGET_FRAMEWORK=net${{ matrix.dotnet }} ./scripts/core-artifact-consumer-check.sh
