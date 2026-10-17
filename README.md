@@ -260,12 +260,9 @@ backend, while `LazilyBenchmark.RunSuite()` provides deterministic in-process be
 ## Conformance
 
 The cross-language corpus lives in [lazily-spec](https://github.com/lazily-hub/lazily-spec) and is
-**never vendored here** — a bundled copy drifts from the spec. Clone it beside this repo:
-
-```bash
-git clone https://github.com/lazily-hub/lazily-spec.git ../lazily-spec
-make check
-```
+**never vendored here** — a bundled copy drifts from the spec. See
+[CONTRIBUTING.md](CONTRIBUTING.md) for the required sibling checkout and local
+verification commands.
 
 The runner fails hard when the corpus is absent rather than skipping, asserts a positive fixture
 and assertion count, and keeps an explicit ledger of unsupported fixtures and known divergences —
@@ -335,14 +332,6 @@ Generated from `coverage.json` in lazily-spec — do not edit by hand.
 
 A family cell summarises 83 feature rows. For row-level marks, per-cell notes, and platform carve-outs see [the canonical coverage matrix in `lazily-spec`](https://github.com/lazily-hub/lazily-spec/blob/main/docs/coverage.md).
 <!-- coverage-table:end -->
-
-## Development
-
-```bash
-make check          # build + test — run before committing
-make conformance    # replay the shared lazily-spec fixtures only
-make format-check   # dotnet format --verify-no-changes
-```
 
 ## The lazily family
 
