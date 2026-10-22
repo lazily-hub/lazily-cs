@@ -70,6 +70,8 @@ public abstract class AsyncNode
     internal readonly HashSet<AsyncNode> Dependents = [];
     internal readonly HashSet<AsyncNode> Dependencies = [];
     internal bool Disposed;
+    internal int AllocationSlot = -1;
+    internal ulong AllocationGeneration;
 }
 
 internal sealed class AsyncCellNode : AsyncNode
@@ -353,6 +355,13 @@ public sealed class AsyncContext : IAsyncDisposable
 {
     private readonly object _gate = new();
 
+    // Public async handles retain their node object, but teardown authority is still explicitly
+    // generation-fenced. Slots are reused LIFO so conformance can prove both cross-kind and
+    // same-kind ABA safety instead of relying on the GC not to recycle an address.
+    private readonly List<AsyncNode?> _nodeAllocations = [];
+    private readonly List<ulong> _nodeGenerations = [];
+    private readonly Stack<int> _freeNodeAllocations = [];
+
     private bool _disposed;
     private int _batchDepth;
     private readonly HashSet<AsyncNode> _batchQueue = [];
@@ -401,7 +410,12 @@ public sealed class AsyncContext : IAsyncDisposable
     /// <summary>Creates a mutable input cell.</summary>
     /// <typeparam name="T">The value type.</typeparam>
     /// <param name="initial">The initial value.</param>
-    public AsyncSource<T> Source<T>(T initial) => new(this, new AsyncCellNode { Value = initial });
+    public AsyncSource<T> Source<T>(T initial)
+    {
+        var node = new AsyncCellNode { Value = initial };
+        lock (_gate) RegisterNodeLocked(node);
+        return new AsyncSource<T>(this, node);
+    }
 
     /// <summary>Creates an UNGUARDED async computed slot: every resolution cascades.</summary>
     /// <typeparam name="T">The value type.</typeparam>
@@ -433,6 +447,7 @@ public sealed class AsyncContext : IAsyncDisposable
             Compute = async cc => await compute(cc).ConfigureAwait(false),
             Guard = equals,
         };
+        lock (_gate) RegisterNodeLocked(node);
         return new AsyncComputed<T>(this, node);
     }
 
@@ -451,11 +466,43 @@ public sealed class AsyncContext : IAsyncDisposable
         var handle = new AsyncEffectHandle(this, node);
         lock (_gate)
         {
+            RegisterNodeLocked(node);
             if (_disposed) return handle;
             _effects.Add(node);
             ScheduleEffectRerun(node);
         }
         return handle;
+    }
+
+    private void RegisterNodeLocked(AsyncNode node)
+    {
+        if (_freeNodeAllocations.TryPop(out var slot))
+        {
+            var generation = checked(_nodeGenerations[slot] + 1);
+            _nodeGenerations[slot] = generation;
+            _nodeAllocations[slot] = node;
+            node.AllocationSlot = slot;
+            node.AllocationGeneration = generation;
+            return;
+        }
+
+        node.AllocationSlot = _nodeAllocations.Count;
+        node.AllocationGeneration = 1;
+        _nodeAllocations.Add(node);
+        _nodeGenerations.Add(1);
+    }
+
+    private bool IsCurrentAllocationLocked(AsyncNode node) =>
+        node.AllocationSlot >= 0
+        && node.AllocationSlot < _nodeAllocations.Count
+        && node.AllocationGeneration == _nodeGenerations[node.AllocationSlot]
+        && ReferenceEquals(_nodeAllocations[node.AllocationSlot], node);
+
+    private void UnregisterNodeLocked(AsyncNode node)
+    {
+        if (!IsCurrentAllocationLocked(node)) return;
+        _nodeAllocations[node.AllocationSlot] = null;
+        _freeNodeAllocations.Push(node.AllocationSlot);
     }
 
     /// <summary>Opens a teardown scope on this async graph.</summary>
@@ -822,7 +869,7 @@ public sealed class AsyncContext : IAsyncDisposable
         Func<Task>? cleanup;
         lock (_gate)
         {
-            if (node.Disposed) return;
+            if (!IsCurrentAllocationLocked(node) || node.Disposed) return;
             node.Disposed = true;
             node.RerunScheduled = false;
             node.Cts?.Cancel();
@@ -830,6 +877,7 @@ public sealed class AsyncContext : IAsyncDisposable
             DetachUpstream(node);
             cleanup = node.Cleanup;
             node.Cleanup = null;
+            UnregisterNodeLocked(node);
         }
         if (cleanup is not null) await RunCleanupSafe(cleanup).ConfigureAwait(false);
     }
@@ -896,9 +944,10 @@ public sealed class AsyncContext : IAsyncDisposable
     {
         lock (_gate)
         {
-            if (node.Disposed) return;
+            if (!IsCurrentAllocationLocked(node) || node.Disposed) return;
             node.Disposed = true;
             DetachNode(node);
+            UnregisterNodeLocked(node);
         }
     }
 
@@ -906,7 +955,7 @@ public sealed class AsyncContext : IAsyncDisposable
     {
         lock (_gate)
         {
-            if (node.Disposed) return;
+            if (!IsCurrentAllocationLocked(node) || node.Disposed) return;
             node.Disposed = true;
             // Blocked waiters get the disposal error rather than a supersession, which would send
             // them round the re-resolve loop only to find the slot gone.
@@ -920,6 +969,7 @@ public sealed class AsyncContext : IAsyncDisposable
             node.HasValue = false;
             DetachUpstream(node);
             DetachNode(node);
+            UnregisterNodeLocked(node);
         }
     }
 

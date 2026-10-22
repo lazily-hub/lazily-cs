@@ -20,9 +20,19 @@ namespace Lazily;
 /// </remarks>
 public abstract class ReactiveNode
 {
-    internal ReactiveNode(Context ctx) => Ctx = ctx;
+    internal ReactiveNode(Context ctx)
+    {
+        Ctx = ctx;
+        (AllocationSlot, AllocationGeneration) = ctx.RegisterNode(this);
+    }
 
     internal Context Ctx { get; }
+
+    /// <summary>The production allocator slot captured by this handle.</summary>
+    internal int AllocationSlot { get; }
+
+    /// <summary>The slot generation captured by this handle.</summary>
+    internal ulong AllocationGeneration { get; }
 
     /// <summary>Nodes that read this one (downstream / reverse edges).</summary>
     internal readonly HashSet<ReactiveNode> Dependents = [];

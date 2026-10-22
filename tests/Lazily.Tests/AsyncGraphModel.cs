@@ -190,6 +190,15 @@ public sealed class AsyncGraphModel : IGraphModel
     /// <inheritdoc/>
     public bool IsEffectActive(NodeRef node) => ((AsyncEffectHandle)node.Handle).IsActive;
 
+    /// <inheritdoc/>
+    public bool RecycledIdentityConfirmed(NodeRef stale, NodeRef successor)
+    {
+        var oldNode = GraphNode(stale);
+        var newNode = GraphNode(successor);
+        return oldNode.AllocationSlot == newNode.AllocationSlot
+            && oldNode.AllocationGeneration != newNode.AllocationGeneration;
+    }
+
     private static AsyncNode GraphNode(NodeRef node) => node.Handle switch
     {
         AsyncSource<long> s => s.GraphNode,

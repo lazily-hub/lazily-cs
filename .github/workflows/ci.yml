@@ -28,7 +28,9 @@ jobs:
       # ../lazily-spec/conformance. Fixtures are never vendored into this repo —
       # a bundled copy drifts from the spec.
       - name: Fetch canonical lazily-spec conformance fixtures
-        run: git clone --depth 1 https://github.com/lazily-hub/lazily-spec.git ../lazily-spec
+        run: |
+          git clone --depth 1 --branch v0.43.0 https://github.com/lazily-hub/lazily-spec.git ../lazily-spec
+          test "$(git -C ../lazily-spec rev-parse HEAD)" = 4b34879b26566a0616b97cf661ac4f1a23762af6
 
       # Assert the fixtures are actually present BEFORE running the suite. The runner
       # fails hard when the corpus is absent rather than skipping, but checking here

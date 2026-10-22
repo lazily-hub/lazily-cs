@@ -232,6 +232,15 @@ public class SyncGraphModel : IGraphModel
     public bool IsEffectActive(NodeRef node) => Run(() => ((Effect)node.Handle).IsActive);
 
     /// <inheritdoc/>
+    public bool RecycledIdentityConfirmed(NodeRef stale, NodeRef successor) => Run(() =>
+    {
+        var oldNode = (ReactiveNode)stale.Handle;
+        var newNode = (ReactiveNode)successor.Handle;
+        return oldNode.AllocationSlot == newNode.AllocationSlot
+            && oldNode.AllocationGeneration != newNode.AllocationGeneration;
+    });
+
+    /// <inheritdoc/>
     public virtual void Batch(Action writes) => _ctx.Batch(writes);
 
     /// <inheritdoc/>

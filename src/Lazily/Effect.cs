@@ -59,7 +59,10 @@ public sealed class Effect : ReactiveNode
     /// Disposes the Effect: invokes the last cleanup, then unsubscribes from all dependencies.
     /// Idempotent.
     /// </summary>
-    public void Dispose()
+    public void Dispose() => Ctx.DisposeNode(this);
+
+    /// <summary>The effect-specific half of the unified, generation-fenced teardown path.</summary>
+    internal void DisposeCore()
     {
         if (!_active) return;
         _active = false;

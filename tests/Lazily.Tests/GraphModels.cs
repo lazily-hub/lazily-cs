@@ -154,6 +154,11 @@ public interface IGraphModel : INodeFactory, IDisposable
     /// <param name="node">The effect to test.</param>
     bool IsEffectActive(NodeRef node);
 
+    /// <summary>
+    /// Whether two handles name different generations of the same production allocator slot.
+    /// </summary>
+    bool RecycledIdentityConfirmed(NodeRef stale, NodeRef successor);
+
     /// <summary>Runs <paramref name="writes"/> inside a coalescing batch.</summary>
     /// <param name="writes">The batch body.</param>
     void Batch(Action writes);

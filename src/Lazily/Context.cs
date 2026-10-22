@@ -54,6 +54,14 @@ public sealed class Context : IComputeOps
     // recompute returns, and the stamp lets a superseded view be told apart from the live one.
     private ulong _computeGen;
 
+    // Every public node handle carries the allocation identity assigned here. The object
+    // reference is still the fast path for reads, but teardown authority is the tuple
+    // (slot, generation, kind): recycling a slot must never let an old handle mutate its new
+    // occupant. LIFO reuse makes the invariant deterministic enough for conformance to prove.
+    private readonly List<ReactiveNode?> _nodeAllocations = [];
+    private readonly List<ulong> _nodeGenerations = [];
+    private readonly Stack<int> _freeNodeAllocations = [];
+
     private readonly List<ICacheable> _slots = [];
     private int _cachedCount;
 
@@ -81,6 +89,35 @@ public sealed class Context : IComputeOps
 
     /// <summary>Creates an empty reactive scope.</summary>
     public Context() { }
+
+    internal (int Slot, ulong Generation) RegisterNode(ReactiveNode node)
+    {
+        if (_freeNodeAllocations.TryPop(out var slot))
+        {
+            var generation = checked(_nodeGenerations[slot] + 1);
+            _nodeGenerations[slot] = generation;
+            _nodeAllocations[slot] = node;
+            return (slot, generation);
+        }
+
+        var next = _nodeAllocations.Count;
+        _nodeAllocations.Add(node);
+        _nodeGenerations.Add(1);
+        return (next, 1);
+    }
+
+    internal bool IsCurrentAllocation(ReactiveNode node) =>
+        node.AllocationSlot >= 0
+        && node.AllocationSlot < _nodeAllocations.Count
+        && node.AllocationGeneration == _nodeGenerations[node.AllocationSlot]
+        && ReferenceEquals(_nodeAllocations[node.AllocationSlot], node);
+
+    internal void UnregisterNode(ReactiveNode node)
+    {
+        if (!IsCurrentAllocation(node)) return;
+        _nodeAllocations[node.AllocationSlot] = null;
+        _freeNodeAllocations.Push(node.AllocationSlot);
+    }
 
     ReactiveNode? IComputeOps.TrackNode => null;
 

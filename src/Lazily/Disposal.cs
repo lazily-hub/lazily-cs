@@ -134,7 +134,10 @@ public static class Disposal
     /// <summary>The single teardown path for every node kind.</summary>
     internal static void DisposeNode(this Context ctx, ReactiveNode? n)
     {
-        if (n is null || n.Disposed) return; // idempotent
+        // Kind is carried by the concrete handle; allocation identity is checked before any
+        // graph, scheduler, cache, or cleanup state is touched. This is the same-kind ABA half
+        // of the stale-handle fence; normal C# object identity alone must not be the proof.
+        if (n is null || !ctx.IsCurrentAllocation(n) || n.Disposed) return; // idempotent
 
         // An eager computed owns a puller effect; tear it down first so disposing the formula
         // never strands a live puller that re-pulls a disposed node.
@@ -145,10 +148,12 @@ public static class Disposal
             // Effects own a cleanup callback and a pending-queue entry, so their teardown is
             // Effect.Dispose. It detaches upstream and marks the node disposed; effects are
             // sinks, so there is no cone to dirty.
-            e.Dispose();
+            e.DisposeCore();
+            ctx.UnregisterNode(e);
             return;
         }
         ctx.Teardown(n);
+        ctx.UnregisterNode(n);
     }
 
     /// <summary>Detaches a node in both directions and dirties what survives.</summary>

@@ -67,6 +67,7 @@ public sealed class ReactiveGraphEngine
             var runsBefore = _model.RunLog.Count;
             long? opValue = null;
             var opError = false;
+            bool? recycledIdConfirmed = null;
             Ops++;
 
             // Measure this op's drain in isolation: exhaustion is a cumulative observable.
@@ -204,7 +205,18 @@ public sealed class ReactiveGraphEngine
                         };
                         if (!matches)
                             throw new InvalidOperationException($"{_fixture}: handle_kind {want} does not match recorded handle for {of}");
-                        _model.DisposeNode(h);
+                        var successorId = Str(op, "successor")!;
+                        if (!_nodes.TryGetValue(successorId, out var successor))
+                            throw new InvalidOperationException($"{_fixture}: no live successor {successorId}");
+                        var successorKind = Str(op, "successor_kind")!;
+                        if (!KindMatches(successorKind, successor.Kind))
+                            throw new InvalidOperationException(
+                                $"{_fixture}: successor_kind {successorKind} does not match {successorId}");
+
+                        recycledIdConfirmed = _model.RecycledIdentityConfirmed(h, successor);
+                        // The spec forbids a runner from invoking the stale handle unless reuse
+                        // was proved from the implementation's own allocation identity.
+                        if (recycledIdConfirmed.Value) _model.DisposeNode(h);
                         break;
                     }
 
@@ -217,7 +229,13 @@ public sealed class ReactiveGraphEngine
             _model.Settle();
 
             if (!step.TryGetProperty("expect", out var expect)) continue;
-            Assert(expect, op, opValue, opError, _model.RunLog.Skip(runsBefore).ToList());
+            Assert(
+                expect,
+                op,
+                opValue,
+                opError,
+                recycledIdConfirmed,
+                _model.RunLog.Skip(runsBefore).ToList());
         }
     }
 
@@ -372,7 +390,13 @@ public sealed class ReactiveGraphEngine
     /// THROUGH the tracker, which is what books the block as bound and lets
     /// <see cref="FixtureAssertions.Verify"/> raise the key-level rungs here too.
     /// </remarks>
-    private void Assert(JsonElement expect, JsonElement op, long? opValue, bool opError, List<string> observed)
+    private void Assert(
+        JsonElement expect,
+        JsonElement op,
+        long? opValue,
+        bool opError,
+        bool? recycledIdConfirmed,
+        List<string> observed)
     {
         var tracked = FixtureAssertions.Wrap(expect, $"{_fixture}#{_step}.expect");
 
@@ -527,6 +551,49 @@ public sealed class ReactiveGraphEngine
                     });
                     break;
 
+                case "writable":
+                    tracked.AssertObjectKey("writable", writable =>
+                    {
+                        foreach (var p in writable.EnumerateObject())
+                        {
+                            var name = p.Name;
+                            writable.AssertKeyWith(
+                                name,
+                                want => want.Against(
+                                    _nodes.TryGetValue(name, out var node)
+                                    && node.Kind == NodeKind.Cell
+                                    && Readable(name),
+                                    (expect, actual) =>
+                                        Check($"writable.{name}", actual, expect.GetBoolean())));
+                        }
+                    });
+                    break;
+
+                case "recycled_id_confirmed":
+                    tracked.AssertKeyWith(
+                        "recycled_id_confirmed",
+                        want => want.Against(
+                            recycledIdConfirmed ?? false,
+                            (expect, actual) =>
+                                Check("recycled_id_confirmed", actual, expect.GetBoolean())));
+                    break;
+
+                case "cleanups_of":
+                    tracked.AssertObjectKey("cleanups_of", cleanups =>
+                    {
+                        foreach (var p in cleanups.EnumerateObject())
+                        {
+                            var name = p.Name;
+                            cleanups.AssertKeyWith(
+                                name,
+                                want => want.Against(
+                                    _model.CleanupLog.Count(id => id == name),
+                                    (expect, actual) =>
+                                        Check($"cleanups_of.{name}", actual, expect.GetInt32())));
+                        }
+                    });
+                    break;
+
                 case "observed_by":
                     tracked.AssertKeyWith("observed_by", want => want.Against(
                         string.Join(",", observed),
@@ -582,6 +649,14 @@ public sealed class ReactiveGraphEngine
         Divergences.Add(string.Create(
             CultureInfo.InvariantCulture, $"{_fixture}#{_step}:{key} — got {got}, want {want}"));
     }
+
+    private static bool KindMatches(string declared, NodeKind actual) => declared switch
+    {
+        "cell" => actual == NodeKind.Cell,
+        "slot" or "computed" => actual is NodeKind.Computed or NodeKind.Signal,
+        "effect" => actual == NodeKind.Effect,
+        _ => false,
+    };
 
     // -----------------------------------------------------------------------
     // Node construction
