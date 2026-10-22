@@ -16,7 +16,7 @@
 
   <PropertyGroup>
     <PackageId>Lazily</PackageId>
-    <Version>0.8.0</Version>
+    <Version>0.9.0</Version>
     <Authors>lazily-hub</Authors>
     <Description>Lazy reactive primitives for C#/.NET — Sources, Computeds, and Effects with automatic dependency tracking, plus the lazily-spec wire protocol.</Description>
     <PackageLicenseExpression>Apache-2.0</PackageLicenseExpression>

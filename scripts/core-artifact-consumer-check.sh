@@ -18,7 +18,7 @@ DOTNET_ROLL_FORWARD=Major NUGET_PACKAGES="$tmp/nuget" dotnet run --project "$tmp
   --no-restore --framework "$framework" \
   -p:TargetFramework="$framework"
 
-grep -Fq "$tmp/packages" "$tmp/nuget/lazily/0.8.0/.nupkg.metadata" || {
+grep -Fq "$tmp/packages" "$tmp/nuget/lazily/0.9.0/.nupkg.metadata" || {
   echo "consumer did not resolve Lazily from the built package directory" >&2
   exit 1
 }
