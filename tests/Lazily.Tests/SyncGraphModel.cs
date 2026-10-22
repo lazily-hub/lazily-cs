@@ -220,6 +220,10 @@ public class SyncGraphModel : IGraphModel
     });
 
     /// <inheritdoc/>
+    public bool RecycledIdConfirmed(NodeRef stale, NodeRef successor) => Run(() =>
+        Context.RecycledIdConfirmed((ReactiveNode)stale.Handle, (ReactiveNode)successor.Handle));
+
+    /// <inheritdoc/>
     public void DisposeSignal(NodeRef node) => Run(() => ((Computed<long>)node.Handle).Lazy());
 
     /// <inheritdoc/>

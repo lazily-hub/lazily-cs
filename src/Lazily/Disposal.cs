@@ -134,7 +134,15 @@ public static class Disposal
     /// <summary>The single teardown path for every node kind.</summary>
     internal static void DisposeNode(this Context ctx, ReactiveNode? n)
     {
-        if (n is null || n.Disposed) return; // idempotent
+        if (n is null) return;
+        ctx.DisposeHandle(n.Handle);
+    }
+
+    /// <summary>Disposes the live occupant named by a generation-fenced allocator handle.</summary>
+    internal static void DisposeHandle(this Context ctx, ReactiveNodeHandle handle)
+    {
+        if (!ctx.TryRetireNode(handle, out var live) || live is null) return;
+        var n = live;
 
         // An eager computed owns a puller effect; tear it down first so disposing the formula
         // never strands a live puller that re-pulls a disposed node.
@@ -145,7 +153,7 @@ public static class Disposal
             // Effects own a cleanup callback and a pending-queue entry, so their teardown is
             // Effect.Dispose. It detaches upstream and marks the node disposed; effects are
             // sinks, so there is no cone to dirty.
-            e.Dispose();
+            e.DisposeCore();
             return;
         }
         ctx.Teardown(n);

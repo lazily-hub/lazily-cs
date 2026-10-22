@@ -182,6 +182,10 @@ public sealed class AsyncGraphModel : IGraphModel
     }
 
     /// <inheritdoc/>
+    public bool RecycledIdConfirmed(NodeRef stale, NodeRef successor) =>
+        _ctx.RecycledIdConfirmed(GraphNode(stale), GraphNode(successor));
+
+    /// <inheritdoc/>
     public int DependentCount(NodeRef node) => _ctx.DependentCount(GraphNode(node));
 
     /// <inheritdoc/>

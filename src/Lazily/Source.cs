@@ -27,7 +27,7 @@ public sealed class Source<T> : ReactiveNode, ITrackable<T>, IDisposable
     private readonly IEqualityComparer<T> _comparer;
 
     internal Source(Context ctx, T initial, MergePolicy<T> policy, IEqualityComparer<T>? comparer)
-        : base(ctx)
+        : base(ctx, ReactiveNodeKind.Cell)
     {
         _value = initial;
         Policy = policy;

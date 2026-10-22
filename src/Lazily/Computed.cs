@@ -42,7 +42,7 @@ public sealed class Computed<T> : ReactiveNode, ITrackable<T>, ICacheable, IDisp
     private bool _eager;
 
     internal Computed(Context ctx, Func<Compute, T> compute, Func<T, T, bool>? equals, string? name)
-        : base(ctx)
+        : base(ctx, ReactiveNodeKind.Computed)
     {
         _compute = compute;
         _equals = equals;

@@ -43,7 +43,7 @@ public sealed class Effect : ReactiveNode
     /// <param name="ctx">The owning reactive scope.</param>
     /// <param name="run">The effect body.</param>
     public Effect(Context ctx, EffectRun run)
-        : base(ctx)
+        : base(ctx, ReactiveNodeKind.Effect)
     {
         Guard.NotNull(ctx, nameof(ctx));
         Guard.NotNull(run, nameof(run));
@@ -60,6 +60,12 @@ public sealed class Effect : ReactiveNode
     /// Idempotent.
     /// </summary>
     public void Dispose()
+    {
+        Ctx.DisposeNode(this);
+    }
+
+    /// <summary>Performs effect teardown after the context validates and retires the handle.</summary>
+    internal void DisposeCore()
     {
         if (!_active) return;
         _active = false;

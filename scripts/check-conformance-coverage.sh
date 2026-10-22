@@ -578,7 +578,7 @@ KNOWN_UNCOVERED=(
 # reports "coverage OK: 2/2" and exits 0, which is the vacuous green #lzvacuousrun
 # named after this binding printed "0/0" on three rungs in a row.
 #
-# EXACT: 152 is what a green CI run on the current corpus actually opens, with
+# EXACT: 154 is what a green CI run on the current corpus actually opens, with
 # no margin. NEVER lower this to make the gate green: a drop means a replay was
 # removed, renamed, or short-circuited, and that is the finding, not the floor.
 #
@@ -589,10 +589,9 @@ KNOWN_UNCOVERED=(
 # reality, so the gap only ever widens. It had reached 141 against an actual
 # 145: four fixtures could stop being opened while the gate kept printing OK.
 #
-# Re-pinned for lazily-spec f89d865, which carries the three replay-equivalence
-# fixtures this binding now replays through `ReplayConformanceTests`
-# plus the durable-client envelope replay.
-MIN_FIXTURES="${MIN_FIXTURES:-153}"
+# Re-pinned for lazily-spec v0.44.0 (c30bd8f), including the canonical
+# generation-fenced stale-handle matrix. Verified exact: 155 fails this floor.
+MIN_FIXTURES="${MIN_FIXTURES:-154}"
 
 # Scenarios deliberately not replayed, one per line as
 #   corpus/fixture.json|scenario-id|reason
@@ -621,7 +620,7 @@ KNOWN_UNREPLAYED_SCENARIOS=(
 # at 138/138 and then prints "0/0 scenarios across 0 opened fixtures" and exits 0.
 # That was reproducible on this script before this constant existed.
 #
-# EXACT: 169 is what a green CI run on the current corpus actually replays,
+# EXACT: 183 is what a green CI run on the current corpus actually replays,
 # with no margin. A fixture growing scenarios while the floor stays put is how
 # a binding replays the old half of a hardened fixture and reports the same
 # green as before, so the floor moves WITH the corpus — all the way, not part
@@ -639,11 +638,10 @@ KNOWN_UNREPLAYED_SCENARIOS=(
 # NEVER lower this to make the gate green: a drop means scenarios stopped being
 # reached, and that is the finding, not the floor.
 #
-# Re-pinned for lazily-spec f89d865 (`scenario replay coverage OK: 169/169`),
-# matching a local green `make check`. The three replay fixtures carry `steps`
-# rather than `scenarios`, so the move here is corpus growth elsewhere rather
-# than the new runner. Verified exact: 170 fails this floor.
-MIN_SCENARIOS="${MIN_SCENARIOS:-174}"
+# Re-pinned for lazily-spec v0.44.0 (`scenario replay coverage OK: 183/183`),
+# matching a local green replay of the nine-scenario stale-handle matrix.
+# Verified exact: 184 fails this floor.
+MIN_SCENARIOS="${MIN_SCENARIOS:-183}"
 
 MANIFEST="${LAZILY_CONFORMANCE_MANIFEST:-build/conformance-fixtures-loaded.txt}"
 # PRESENCE, not size (#lzstampsatisfiesnonempty).

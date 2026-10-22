@@ -142,6 +142,9 @@ public interface IGraphModel : INodeFactory, IDisposable
     /// <param name="node">The node to dispose.</param>
     void DisposeNode(NodeRef node);
 
+    /// <summary>Proves that two handles name different generations of one allocator slot.</summary>
+    bool RecycledIdConfirmed(NodeRef stale, NodeRef successor);
+
     /// <summary>The size of a node's reverse edge set.</summary>
     /// <param name="node">The node to measure.</param>
     int DependentCount(NodeRef node);

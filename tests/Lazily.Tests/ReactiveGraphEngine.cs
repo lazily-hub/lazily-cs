@@ -67,6 +67,7 @@ public sealed class ReactiveGraphEngine
             var runsBefore = _model.RunLog.Count;
             long? opValue = null;
             var opError = false;
+            bool? recycledIdConfirmed = null;
             Ops++;
 
             // Measure this op's drain in isolation: exhaustion is a cumulative observable.
@@ -204,7 +205,27 @@ public sealed class ReactiveGraphEngine
                         };
                         if (!matches)
                             throw new InvalidOperationException($"{_fixture}: handle_kind {want} does not match recorded handle for {of}");
-                        _model.DisposeNode(h);
+                        var successorId = Str(op, "successor")
+                            ?? throw new InvalidOperationException($"{_fixture}: dispose_stale_handle names no successor");
+                        if (!_nodes.TryGetValue(successorId, out var successor))
+                            throw new InvalidOperationException($"{_fixture}: unknown successor {successorId}");
+                        var successorKind = Str(op, "successor_kind");
+                        var successorMatches = successorKind switch
+                        {
+                            "cell" => successor.Kind == NodeKind.Cell,
+                            "computed" or "slot" => successor.Kind is NodeKind.Computed or NodeKind.Signal,
+                            "effect" => successor.Kind == NodeKind.Effect,
+                            _ => false,
+                        };
+                        if (!successorMatches)
+                            throw new InvalidOperationException(
+                                $"{_fixture}: successor_kind {successorKind} does not match {successorId}");
+
+                        recycledIdConfirmed = _model.RecycledIdConfirmed(h, successor);
+                        // The spec forbids invoking a stale handle until reuse is proved. A false
+                        // witness remains observable below and cannot accidentally mutate an
+                        // unrelated node merely to discover whether its raw id matched.
+                        if (recycledIdConfirmed is true) _model.DisposeNode(h);
                         break;
                     }
 
@@ -217,7 +238,13 @@ public sealed class ReactiveGraphEngine
             _model.Settle();
 
             if (!step.TryGetProperty("expect", out var expect)) continue;
-            Assert(expect, op, opValue, opError, _model.RunLog.Skip(runsBefore).ToList());
+            Assert(
+                expect,
+                op,
+                opValue,
+                opError,
+                recycledIdConfirmed,
+                _model.RunLog.Skip(runsBefore).ToList());
         }
     }
 
@@ -372,7 +399,13 @@ public sealed class ReactiveGraphEngine
     /// THROUGH the tracker, which is what books the block as bound and lets
     /// <see cref="FixtureAssertions.Verify"/> raise the key-level rungs here too.
     /// </remarks>
-    private void Assert(JsonElement expect, JsonElement op, long? opValue, bool opError, List<string> observed)
+    private void Assert(
+        JsonElement expect,
+        JsonElement op,
+        long? opValue,
+        bool opError,
+        bool? recycledIdConfirmed,
+        List<string> observed)
     {
         var tracked = FixtureAssertions.Wrap(expect, $"{_fixture}#{_step}.expect");
 
@@ -428,6 +461,15 @@ public sealed class ReactiveGraphEngine
                         "drain_exhausted",
                         want => want.Against(_model.DrainExhausted, (expect, actual) =>
                             Check("drain_exhausted", actual, expect.GetBoolean())));
+                    break;
+
+                case "recycled_id_confirmed":
+                    tracked.AssertKeyWith(
+                        "recycled_id_confirmed",
+                        want => want.Against(
+                            recycledIdConfirmed is true,
+                            (expect, actual) => Check(
+                                "recycled_id_confirmed", actual, expect.GetBoolean())));
                     break;
 
                 case "dependents_of":
@@ -523,6 +565,38 @@ public sealed class ReactiveGraphEngine
                                 name,
                                 want => want.Against(Readable(name), (expect, actual) =>
                                     Check($"readable.{name}", actual, expect.GetBoolean())));
+                        }
+                    });
+                    break;
+
+                case "writable":
+                    tracked.AssertObjectKey("writable", writable =>
+                    {
+                        foreach (var p in writable.EnumerateObject())
+                        {
+                            var name = p.Name;
+                            writable.AssertKeyWith(
+                                name,
+                                want => want.Against(
+                                    Writable(name),
+                                    (expect, actual) => Check(
+                                        $"writable.{name}", actual, expect.GetBoolean())));
+                        }
+                    });
+                    break;
+
+                case "cleanups_of":
+                    tracked.AssertObjectKey("cleanups_of", cleanups =>
+                    {
+                        foreach (var p in cleanups.EnumerateObject())
+                        {
+                            var name = p.Name;
+                            cleanups.AssertKeyWith(
+                                name,
+                                want => want.Against(
+                                    _model.CleanupLog.Count(x => x == name),
+                                    (expect, actual) => Check(
+                                        $"cleanups_of.{name}", actual, expect.GetInt32())));
                         }
                     });
                     break;
@@ -669,6 +743,9 @@ public sealed class ReactiveGraphEngine
         // live, so this must NOT consult the puller.
         return n.Kind == NodeKind.Effect ? _model.IsEffectActive(n) : Read(id).Ok;
     }
+
+    private bool Writable(string id) =>
+        _nodes.TryGetValue(id, out var n) && n.Kind == NodeKind.Cell && Readable(id);
 
     private (bool Ok, long Value) Read(string id)
     {

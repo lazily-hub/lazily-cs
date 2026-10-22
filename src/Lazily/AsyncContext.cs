@@ -67,6 +67,7 @@ public abstract class AsyncNode
 {
     internal AsyncNode() { }
 
+    internal ReactiveNodeHandle Handle;
     internal readonly HashSet<AsyncNode> Dependents = [];
     internal readonly HashSet<AsyncNode> Dependencies = [];
     internal bool Disposed;
@@ -351,6 +352,13 @@ public sealed class AsyncEffectHandle
 /// </remarks>
 public sealed class AsyncContext : IAsyncDisposable
 {
+    private sealed class NodeSlot
+    {
+        internal ulong Generation;
+        internal ReactiveNodeKind Kind;
+        internal AsyncNode? Node;
+    }
+
     private readonly object _gate = new();
 
     private bool _disposed;
@@ -358,6 +366,8 @@ public sealed class AsyncContext : IAsyncDisposable
     private readonly HashSet<AsyncNode> _batchQueue = [];
     private readonly HashSet<AsyncSlotNode> _computing = [];
     private readonly HashSet<AsyncEffectNode> _effects = [];
+    private readonly List<NodeSlot> _nodeSlots = [];
+    private readonly Stack<int> _freeNodeSlots = [];
     private int _bodiesRunning;
 
     /// <summary>Creates an empty async reactive graph.</summary>
@@ -401,7 +411,12 @@ public sealed class AsyncContext : IAsyncDisposable
     /// <summary>Creates a mutable input cell.</summary>
     /// <typeparam name="T">The value type.</typeparam>
     /// <param name="initial">The initial value.</param>
-    public AsyncSource<T> Source<T>(T initial) => new(this, new AsyncCellNode { Value = initial });
+    public AsyncSource<T> Source<T>(T initial)
+    {
+        var node = new AsyncCellNode { Value = initial };
+        RegisterNode(node, ReactiveNodeKind.Cell);
+        return new AsyncSource<T>(this, node);
+    }
 
     /// <summary>Creates an UNGUARDED async computed slot: every resolution cascades.</summary>
     /// <typeparam name="T">The value type.</typeparam>
@@ -433,6 +448,7 @@ public sealed class AsyncContext : IAsyncDisposable
             Compute = async cc => await compute(cc).ConfigureAwait(false),
             Guard = equals,
         };
+        RegisterNode(node, ReactiveNodeKind.Computed);
         return new AsyncComputed<T>(this, node);
     }
 
@@ -451,11 +467,63 @@ public sealed class AsyncContext : IAsyncDisposable
         var handle = new AsyncEffectHandle(this, node);
         lock (_gate)
         {
-            if (_disposed) return handle;
+            if (_disposed)
+            {
+                node.Disposed = true;
+                return handle;
+            }
+            RegisterNodeLocked(node, ReactiveNodeKind.Effect);
             _effects.Add(node);
             ScheduleEffectRerun(node);
         }
         return handle;
+    }
+
+    private void RegisterNode(AsyncNode node, ReactiveNodeKind kind)
+    {
+        lock (_gate) RegisterNodeLocked(node, kind);
+    }
+
+    private void RegisterNodeLocked(AsyncNode node, ReactiveNodeKind kind)
+    {
+        if (_freeNodeSlots.Count == 0)
+        {
+            var slot = new NodeSlot { Generation = 1, Kind = kind, Node = node };
+            _nodeSlots.Add(slot);
+            node.Handle = new ReactiveNodeHandle(_nodeSlots.Count - 1, slot.Generation, kind);
+            return;
+        }
+
+        var id = _freeNodeSlots.Pop();
+        var recycled = _nodeSlots[id];
+        recycled.Generation = checked(recycled.Generation + 1);
+        recycled.Kind = kind;
+        recycled.Node = node;
+        node.Handle = new ReactiveNodeHandle(id, recycled.Generation, kind);
+    }
+
+    private bool TryRetireNodeLocked(ReactiveNodeHandle handle, out AsyncNode? node)
+    {
+        node = null;
+        if (handle.Slot < 0 || handle.Slot >= _nodeSlots.Count) return false;
+        var slot = _nodeSlots[handle.Slot];
+        if (slot.Node is null || slot.Kind != handle.Kind || slot.Generation != handle.Generation)
+            return false;
+
+        node = slot.Node;
+        slot.Node = null;
+        _freeNodeSlots.Push(handle.Slot);
+        return true;
+    }
+
+    /// <summary>Whether two handles prove reuse of one slot by distinct generations.</summary>
+    internal bool RecycledIdConfirmed(AsyncNode stale, AsyncNode successor)
+    {
+        lock (_gate)
+        {
+            return stale.Handle.Slot == successor.Handle.Slot &&
+                stale.Handle.Generation != successor.Handle.Generation;
+        }
     }
 
     /// <summary>Opens a teardown scope on this async graph.</summary>
@@ -822,14 +890,15 @@ public sealed class AsyncContext : IAsyncDisposable
         Func<Task>? cleanup;
         lock (_gate)
         {
-            if (node.Disposed) return;
-            node.Disposed = true;
-            node.RerunScheduled = false;
-            node.Cts?.Cancel();
-            _effects.Remove(node);
-            DetachUpstream(node);
-            cleanup = node.Cleanup;
-            node.Cleanup = null;
+            if (!TryRetireNodeLocked(node.Handle, out var live) || live is not AsyncEffectNode effect)
+                return;
+            effect.Disposed = true;
+            effect.RerunScheduled = false;
+            effect.Cts?.Cancel();
+            _effects.Remove(effect);
+            DetachUpstream(effect);
+            cleanup = effect.Cleanup;
+            effect.Cleanup = null;
         }
         if (cleanup is not null) await RunCleanupSafe(cleanup).ConfigureAwait(false);
     }
@@ -896,9 +965,10 @@ public sealed class AsyncContext : IAsyncDisposable
     {
         lock (_gate)
         {
-            if (node.Disposed) return;
-            node.Disposed = true;
-            DetachNode(node);
+            if (!TryRetireNodeLocked(node.Handle, out var live) || live is not AsyncCellNode cell)
+                return;
+            cell.Disposed = true;
+            DetachNode(cell);
         }
     }
 
@@ -906,20 +976,21 @@ public sealed class AsyncContext : IAsyncDisposable
     {
         lock (_gate)
         {
-            if (node.Disposed) return;
-            node.Disposed = true;
+            if (!TryRetireNodeLocked(node.Handle, out var live) || live is not AsyncSlotNode slot)
+                return;
+            slot.Disposed = true;
             // Blocked waiters get the disposal error rather than a supersession, which would send
             // them round the re-resolve loop only to find the slot gone.
-            var inFlight = node.InFlight;
-            node.InFlight = null;
-            _computing.Remove(node);
+            var inFlight = slot.InFlight;
+            slot.InFlight = null;
+            _computing.Remove(slot);
             inFlight?.Cts.Cancel();
-            Deliver(node, new AsyncResult(null, new DisposedNodeException(null, "computed"), Superseded: false));
-            node.State = AsyncSlotState.Empty;
-            node.Value = null;
-            node.HasValue = false;
-            DetachUpstream(node);
-            DetachNode(node);
+            Deliver(slot, new AsyncResult(null, new DisposedNodeException(null, "computed"), Superseded: false));
+            slot.State = AsyncSlotState.Empty;
+            slot.Value = null;
+            slot.HasValue = false;
+            DetachUpstream(slot);
+            DetachNode(slot);
         }
     }
 

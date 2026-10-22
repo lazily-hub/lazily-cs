@@ -9,6 +9,23 @@
 
 namespace Lazily;
 
+/// <summary>The allocator-level kind carried by every reactive node handle.</summary>
+internal enum ReactiveNodeKind
+{
+    Cell,
+    Computed,
+    Effect,
+}
+
+/// <summary>
+/// Stable handle metadata for one occupation of a reusable context slot.
+/// </summary>
+/// <remarks>
+/// Slot alone is not identity: after disposal the allocator may hand it to another node. A
+/// mutation through a handle is valid only while slot, generation, and kind all still match.
+/// </remarks>
+internal readonly record struct ReactiveNodeHandle(int Slot, ulong Generation, ReactiveNodeKind Kind);
+
 /// <summary>
 /// Any node in a <see cref="Context"/>'s reactive graph: a <see cref="Source{T}"/>,
 /// a <see cref="Computed{T}"/>, or an <see cref="Effect"/>.
@@ -20,9 +37,17 @@ namespace Lazily;
 /// </remarks>
 public abstract class ReactiveNode
 {
-    internal ReactiveNode(Context ctx) => Ctx = ctx;
+    internal ReactiveNode(Context ctx, ReactiveNodeKind kind)
+    {
+        if (ctx is null) throw new ArgumentNullException(nameof(ctx));
+        Ctx = ctx;
+        Handle = ctx.RegisterNode(this, kind);
+    }
 
     internal Context Ctx { get; }
+
+    /// <summary>The generation-fenced allocator handle for this node.</summary>
+    internal ReactiveNodeHandle Handle { get; }
 
     /// <summary>Nodes that read this one (downstream / reverse edges).</summary>
     internal readonly HashSet<ReactiveNode> Dependents = [];

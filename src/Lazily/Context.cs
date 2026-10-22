@@ -49,6 +49,13 @@ public interface IComputeOps
 /// </remarks>
 public sealed class Context : IComputeOps
 {
+    private sealed class NodeSlot
+    {
+        internal ulong Generation;
+        internal ReactiveNodeKind Kind;
+        internal ReactiveNode? Node;
+    }
+
     // Monotonic counter stamped onto each Compute view minted by NewCompute. It is the
     // generation half of the compute-view fortification guard: a view is dead the moment its
     // recompute returns, and the stamp lets a superseded view be told apart from the live one.
@@ -56,6 +63,8 @@ public sealed class Context : IComputeOps
 
     private readonly List<ICacheable> _slots = [];
     private int _cachedCount;
+    private readonly List<NodeSlot> _nodeSlots = [];
+    private readonly Stack<int> _freeNodeSlots = [];
 
     private int _batchDepth;
     private readonly HashSet<ReactiveNode> _batchedSources = [];
@@ -92,6 +101,47 @@ public sealed class Context : IComputeOps
     /// idempotent and lets <see cref="Context"/> satisfy <see cref="IComputeOps"/> uniformly.
     /// </summary>
     public Context Untracked() => this;
+
+    /// <summary>Allocates one reusable logical node id and stamps its occupation.</summary>
+    internal ReactiveNodeHandle RegisterNode(ReactiveNode node, ReactiveNodeKind kind)
+    {
+        if (_freeNodeSlots.Count == 0)
+        {
+            var slot = new NodeSlot { Generation = 1, Kind = kind, Node = node };
+            _nodeSlots.Add(slot);
+            return new ReactiveNodeHandle(_nodeSlots.Count - 1, slot.Generation, kind);
+        }
+
+        var id = _freeNodeSlots.Pop();
+        var recycled = _nodeSlots[id];
+        recycled.Generation = checked(recycled.Generation + 1);
+        recycled.Kind = kind;
+        recycled.Node = node;
+        return new ReactiveNodeHandle(id, recycled.Generation, kind);
+    }
+
+    /// <summary>
+    /// Resolves and retires a live handle. Kind and generation are checked before any slot or
+    /// graph mutation, so a stale handle is an idempotent no-op even after id reuse.
+    /// </summary>
+    internal bool TryRetireNode(ReactiveNodeHandle handle, out ReactiveNode? node)
+    {
+        node = null;
+        if (handle.Slot < 0 || handle.Slot >= _nodeSlots.Count) return false;
+        var slot = _nodeSlots[handle.Slot];
+        if (slot.Node is null || slot.Kind != handle.Kind || slot.Generation != handle.Generation)
+            return false;
+
+        node = slot.Node;
+        slot.Node = null;
+        _freeNodeSlots.Push(handle.Slot);
+        return true;
+    }
+
+    /// <summary>Whether two handles prove reuse of one slot by distinct generations.</summary>
+    internal static bool RecycledIdConfirmed(ReactiveNode stale, ReactiveNode successor) =>
+        stale.Handle.Slot == successor.Handle.Slot &&
+        stale.Handle.Generation != successor.Handle.Generation;
 
     /// <summary>Records a value-bearing node so <see cref="Clear"/> can reset it.</summary>
     internal void RegisterSlot(ICacheable s)
