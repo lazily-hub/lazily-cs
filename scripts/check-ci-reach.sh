@@ -277,6 +277,7 @@ EXPECTED_CLOSURE_TARGETS=(
 	ci-reach
 	conformance-coverage
 	core-artifact-consumer-check
+	core-evidence-check
 	ffi-check
 	format-check
 	interop-peer-check
@@ -368,6 +369,7 @@ EXPECTED_GATE_STEPS=(
 	"ci-reach|CI-reachability guard (#lzcheckcireachguard)"
 	"conformance-coverage|Conformance coverage + scenario replay ledger"
 	"core-artifact-consumer-check|Core artifact consumer (minimum/current)"
+	"core-evidence-check|Core evidence gate (#lzbindingevidenceci)"
 	"ffi-check|FFI surface check (#lzinteroppeerci)"
 	"format-check|dotnet format --verify-no-changes"
 	"interop-peer-check|Interop peer self-check (#lzinteroppeerci)"

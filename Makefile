@@ -1,6 +1,6 @@
 # lazily-cs — build, test, and verification targets.
 
-.PHONY: all restore build test format format-check conformance pack package-check api-compat-check ffi-check interop-peer-check benchmark-r3 check clean conformance-coverage assertion-ordering-check ci-reach core-artifact-consumer-check
+.PHONY: all restore build test format format-check conformance pack package-check api-compat-check ffi-check interop-peer-check benchmark-r3 check clean conformance-coverage assertion-ordering-check ci-reach core-artifact-consumer-check core-evidence-check
 
 DOTNET ?= dotnet
 
@@ -31,6 +31,16 @@ all: check
 
 core-artifact-consumer-check:
 	./scripts/core-artifact-consumer-check.sh
+
+# Per-binding Core evidence gate (#lzbindingevidenceci). Runs lazily-spec's
+# verifier for this binding alone: it regenerates the Core report through
+# scripts/core-conformance.json's report_command, then checks it against the
+# canonical profile, so stale evidence handles, unreported skips and a missing
+# report are red on push instead of only at cohort qualification.
+# --require-all turns an absent ../lazily-spec layout or declaration into a
+# failure, never a skip.
+core-evidence-check:
+	node ../lazily-spec/scripts/check-core-evidence.mjs --bindings-root .. --binding csharp --reports build/core-evidence --generate-reports --require-all
 
 restore:
 	$(DOTNET) restore
@@ -97,7 +107,7 @@ benchmark-r3:
 assertion-ordering-check:
 	python3 ../lazily-spec/scripts/check-assertion-ordering.py --binding cs --root .
 
-check: format-check build test conformance-coverage package-check api-compat-check ffi-check interop-peer-check assertion-ordering-check core-artifact-consumer-check ci-reach
+check: format-check build test conformance-coverage package-check api-compat-check ffi-check interop-peer-check assertion-ordering-check core-artifact-consumer-check core-evidence-check ci-reach
 	@echo "lazily-cs: check OK"
 
 # CI-reachability guard (#lzcheckcireachguard). Fails when a target above runs a
