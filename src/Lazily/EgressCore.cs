@@ -93,6 +93,12 @@ public enum EgressAckKind
     Advanced,
     /// <summary>The watermark already covered the acknowledgement.</summary>
     Unchanged,
+    /// <summary>
+    /// The acknowledgement covers a sequence at or beyond <see cref="EgressCore{T}.NextSequence"/>:
+    /// one never assigned, so never sent. A protocol error; nothing changes and nothing is
+    /// invalidated. Accepting it would lift the watermark over the next enqueued record and strand it.
+    /// </summary>
+    BeyondSent,
     /// <summary>The caller's attachment belongs to a superseded incarnation.</summary>
     StaleGeneration,
 }
@@ -101,7 +107,12 @@ public enum EgressAckKind
 /// <param name="Kind">The outcome category.</param>
 /// <param name="Through">The watermark after the call (Advanced/Unchanged).</param>
 /// <param name="Current">The current generation (StaleGeneration).</param>
-public readonly record struct EgressAckResult(EgressAckKind Kind, long? Through = null, long? Current = null);
+/// <param name="NextSequence">The first unassigned sequence (BeyondSent).</param>
+public readonly record struct EgressAckResult(
+    EgressAckKind Kind,
+    long? Through = null,
+    long? Current = null,
+    long? NextSequence = null);
 
 /// <summary>The outcome category of <see cref="EgressCore{T}.Fail"/>.</summary>
 public enum EgressFailureKind
@@ -260,12 +271,19 @@ public sealed class EgressCore<T>
     }
 
     /// <summary>Advances the acknowledgement watermark and prunes acknowledged records.</summary>
+    /// <remarks>
+    /// An acknowledgement may only cover ASSIGNED sequences: <paramref name="through"/> at or beyond
+    /// <see cref="NextSequence"/> is refused with <see cref="EgressAckKind.BeyondSent"/>. The
+    /// generation fence is checked first, so a stale attachment is fenced before the boundary.
+    /// </remarks>
     /// <param name="generation">The attachment's captured generation.</param>
     /// <param name="through">The highest sequence the receiver has durably accepted.</param>
     public (EgressChange Change, EgressAckResult Ack) Ack(long generation, long through)
     {
         if (generation != Generation)
             return (default, new EgressAckResult(EgressAckKind.StaleGeneration, Current: Generation));
+        if (through >= NextSequence)
+            return (default, new EgressAckResult(EgressAckKind.BeyondSent, NextSequence: NextSequence));
         if (AckedThrough is { } current && through <= current)
             return (default, new EgressAckResult(EgressAckKind.Unchanged, Through: AckedThrough));
 
@@ -339,6 +357,10 @@ public sealed class EgressCore<T>
 
         Generation = generation;
         var replayed = _inflight.Count + _failed.Count;
+        // Every retained envelope is rewritten to the new generation, so the pending projection
+        // changes whenever anything is retained — including never-claimed records when nothing
+        // replays.
+        var pendingChanged = replayed > 0 || _pending.Count > 0;
         foreach (var record in _inflight.Values) InsertPendingOrdered(record);
         _inflight.Clear();
         foreach (var record in _failed.Values) InsertPendingOrdered(record);
@@ -347,7 +369,7 @@ public sealed class EgressCore<T>
         var retryChanged = _retry is not null;
         _retry = null;
         return (
-            new EgressChange(Pending: replayed > 0, Inflight: replayed > 0, AckedThrough: false, Retry: retryChanged),
+            new EgressChange(Pending: pendingChanged, Inflight: replayed > 0, AckedThrough: false, Retry: retryChanged),
             new EgressReconnectResult(EgressReconnectKind.Advanced, generation, replayed));
     }
 

@@ -184,6 +184,52 @@ public sealed class EgressCellTests
     }
 
     [Fact]
+    public void AckBeyondNextSequenceIsRefusedAndChangesNothing()
+    {
+        var core = new EgressCore<string>(1, EgressPolicy.Default);
+        Assert.Equal(
+            (default(EgressChange), new EgressAckResult(EgressAckKind.BeyondSent, NextSequence: 0)),
+            core.Ack(1, 0));
+        Assert.Null(core.AckedThrough);
+
+        core.Enqueue("a");
+        Assert.Equal(
+            (default(EgressChange), new EgressAckResult(EgressAckKind.BeyondSent, NextSequence: 1)),
+            core.Ack(1, 5));
+        Assert.Null(core.AckedThrough);
+        Assert.Single(core.Pending());
+
+        // A stale attachment is fenced BEFORE the boundary is checked.
+        Assert.Equal(new EgressAckResult(EgressAckKind.StaleGeneration, Current: 1), core.Ack(0, 5).Ack);
+
+        // The next record is not stranded under a lifted watermark: its genuine ack advances.
+        Assert.Equal(new EgressAckResult(EgressAckKind.Advanced, Through: 0), core.Ack(1, 0).Ack);
+        Assert.Empty(core.Pending());
+    }
+
+    [Fact]
+    public void ReconnectWithoutReplayStillRefreshesPendingGeneration()
+    {
+        var core = new EgressCore<string>(3, EgressPolicy.Default);
+        core.Enqueue("a");
+        var (change, outcome) = core.Reconnect(4);
+        Assert.Equal(new EgressReconnectResult(EgressReconnectKind.Advanced, 4, Replayed: 0), outcome);
+        Assert.True(change.Pending);
+        Assert.False(change.Inflight);
+        Assert.Equal(4, core.Pending().Single().Generation);
+
+        // Nothing retained: nothing to invalidate.
+        Assert.True(new EgressCore<string>(3, EgressPolicy.Default).Reconnect(4).Change.IsEmpty);
+
+        // And through a shell: the reactive pending reader serves the NEW generation.
+        var cell = new EgressCell<string>(new Context(), 3, EgressPolicy.Default);
+        cell.Enqueue("a");
+        Assert.Equal(3, cell.Pending().Single().Generation);
+        cell.Reconnect(4);
+        Assert.Equal(4, cell.Pending().Single().Generation);
+    }
+
+    [Fact]
     public void AnInvalidPolicyIsRefusedOnEveryFlavor()
     {
         var bad = EgressPolicy.Default with { InflightLimit = 0 };

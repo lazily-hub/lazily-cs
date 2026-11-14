@@ -101,6 +101,26 @@ public sealed class EffectCasConformanceTests
         Assert.Throws<ArgumentException>(() => new EffectIdentity(""));
     }
 
+    /// <summary>
+    /// A re-sent intent is compared with the ORIGINAL submitted intent, never with the expected
+    /// authority a completed plan step advanced.
+    /// </summary>
+    [Fact]
+    public void SameEpochResendComparesTheOriginalIntentNotTheAdvancedAuthority()
+    {
+        var core = new EffectCasCore<string, long, string, string, string>(1);
+        core.UpsertDesired(Intent("plan", 1, "doc", 10, "canonical", "snapshot"));
+        var first = core.Claim("doc", 1, 0).Claim.Attempt!;
+        Assert.Equal(EffectCasAppliedKind.StepApplied, core.RecordApplied("doc", first.Identity, "r0", 11).Applied.Kind);
+        Assert.Equal(11, core.State("doc")!.Pending!.Expected);
+
+        Assert.Equal(EffectCasUpsertKind.Unchanged, core.UpsertDesired(Intent("plan", 1, "doc", 10, "canonical", "snapshot")).Upsert.Kind);
+        Assert.Equal(EffectCasUpsertKind.EpochConflict, core.UpsertDesired(Intent("plan", 1, "doc", 11, "canonical", "snapshot")).Upsert.Kind);
+
+        _ = core.Claim("doc", 1, 0);
+        Assert.Equal(EffectCasUpsertKind.Unchanged, core.UpsertDesired(Intent("plan", 1, "doc", 10, "canonical", "snapshot")).Upsert.Kind);
+    }
+
     private static EffectIntent<string, long, string> Intent(
         string identity, long epoch, string key, long expected, params string[] plan) =>
         new(new EffectIdentity(identity), epoch, key, expected, new EffectPlan<string>(plan));

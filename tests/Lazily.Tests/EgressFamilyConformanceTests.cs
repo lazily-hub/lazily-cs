@@ -255,6 +255,7 @@ public sealed class EgressFamilyConformanceTests
     {
         EgressAckKind.Advanced => new() { ["ack"] = "advanced", ["through"] = ack.Through },
         EgressAckKind.Unchanged => new() { ["ack"] = "unchanged", ["through"] = ack.Through },
+        EgressAckKind.BeyondSent => new() { ["ack"] = "beyond_sent", ["next_sequence"] = ack.NextSequence },
         EgressAckKind.StaleGeneration => new() { ["ack"] = "stale_generation", ["current"] = ack.Current },
         _ => throw new ArgumentOutOfRangeException(nameof(ack)),
     };
