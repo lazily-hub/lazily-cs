@@ -560,11 +560,6 @@ KNOWN_UNCOVERED=(
   "durable-owner/inbox_outbox_deduplication.json"
   "durable-owner/ordered_replay.json"
   "durable-owner/projection_fingerprint.json"
-  # Reactive egress is currently Rust-only; C# has no egress replay runner.
-  "egress/egress_generation_fence.json"
-  "egress/egress_inflight_window.json"
-  "egress/egress_ordered_ack.json"
-  "egress/egress_retry_budget.json"
   # Experimental protobuf-v1 generation is piloted in Rust/Kotlin/TypeScript;
   # C# must negotiate the capability before replaying this typed trace.
   "protobuf/graph_boundary_traces.json"
@@ -578,7 +573,7 @@ KNOWN_UNCOVERED=(
 # reports "coverage OK: 2/2" and exits 0, which is the vacuous green #lzvacuousrun
 # named after this binding printed "0/0" on three rungs in a row.
 #
-# EXACT: 154 is what a green CI run on the current corpus actually opens, with
+# EXACT: 159 is what a green CI run on the current corpus actually opens, with
 # no margin. NEVER lower this to make the gate green: a drop means a replay was
 # removed, renamed, or short-circuited, and that is the finding, not the floor.
 #
@@ -589,9 +584,10 @@ KNOWN_UNCOVERED=(
 # reality, so the gap only ever widens. It had reached 141 against an actual
 # 145: four fixtures could stop being opened while the gate kept printing OK.
 #
-# Re-pinned for lazily-spec v0.44.0 (c30bd8f), including the canonical
-# generation-fenced stale-handle matrix. Verified exact: 155 fails this floor.
-MIN_FIXTURES="${MIN_FIXTURES:-154}"
+# Re-pinned for lazily-spec main 7240cc3 (the v0.46.0 candidate): the four
+# reactive-egress fixtures and egress/effect_cas.json now replay here
+# (#lzegress, #lzeffectcas). Verified exact: 160 fails this floor.
+MIN_FIXTURES="${MIN_FIXTURES:-159}"
 
 # Scenarios deliberately not replayed, one per line as
 #   corpus/fixture.json|scenario-id|reason
@@ -620,7 +616,7 @@ KNOWN_UNREPLAYED_SCENARIOS=(
 # at 138/138 and then prints "0/0 scenarios across 0 opened fixtures" and exits 0.
 # That was reproducible on this script before this constant existed.
 #
-# EXACT: 183 is what a green CI run on the current corpus actually replays,
+# EXACT: 192 is what a green CI run on the current corpus actually replays,
 # with no margin. A fixture growing scenarios while the floor stays put is how
 # a binding replays the old half of a hardened fixture and reports the same
 # green as before, so the floor moves WITH the corpus — all the way, not part
@@ -638,10 +634,10 @@ KNOWN_UNREPLAYED_SCENARIOS=(
 # NEVER lower this to make the gate green: a drop means scenarios stopped being
 # reached, and that is the finding, not the floor.
 #
-# Re-pinned for lazily-spec v0.44.0 (`scenario replay coverage OK: 183/183`),
-# matching a local green replay of the nine-scenario stale-handle matrix.
-# Verified exact: 184 fails this floor.
-MIN_SCENARIOS="${MIN_SCENARIOS:-183}"
+# Re-pinned for lazily-spec main 7240cc3 (`scenario replay coverage OK:
+# 192/192`): the nine egress/effect_cas.json scenarios now replay here
+# (#lzeffectcas). Verified exact: 193 fails this floor.
+MIN_SCENARIOS="${MIN_SCENARIOS:-192}"
 
 MANIFEST="${LAZILY_CONFORMANCE_MANIFEST:-build/conformance-fixtures-loaded.txt}"
 # PRESENCE, not size (#lzstampsatisfiesnonempty).

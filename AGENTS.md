@@ -259,6 +259,20 @@ Recorded here so they are decisions rather than drift:
   because an `AsyncComputed<T>` read is Task-typed by construction. The 3x3 conformance runner
   bridges that with `GetAwaiter().GetResult()` rather than pretending the plane is synchronous.
 
+- **The async egress flavor's READS are Task-typed; its ops are not.** Same split as the ingress
+  and queue flavors: sequencing, the window, the watermark, the retry budget and the generation
+  fence await nothing, so every `AsyncEgressCell` op is synchronous and every reader body resolves
+  with `Task.FromResult`; only `PendingAsync`/`InflightAsync`/`AckedThroughAsync`/`RetryAsync` are
+  Task-typed. The one async-coloured seam is the transport attachment (`IAsyncEgressTransport`),
+  whose `SendAsync` deliberately takes no cancellation token: the attempt is already claimed into
+  the unacknowledged window, so an abandoned send would strand it until the next reconnect.
+
+- **The egress family and effect CAS are cores plus shells.** `EgressCore` and `EffectCasCore` own
+  every transition and perform no graph write; `EgressCell` / `ThreadSafeEgressCell` /
+  `AsyncEgressCell` bump exactly the reader versions the core reports inside one `Batch`. Effect
+  CAS ships the pure core only (the corpus pins the core); lazily-rs's `ThreadSafeEffectCas` shell
+  and `durable_state()`/`hydrate()` image are not ported yet.
+
 - **The queue family is a core plus three shells.** `QueueCore` / `TopicCore` / `WorkQueueCore`
   own the transitions and perform NO graph write; each mutator returns which reader kinds it
   dirtied and the shell bumps exactly those version sources inside one `Batch`. That is what makes

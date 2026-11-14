@@ -42,7 +42,7 @@ jobs:
       - name: Guard — canonical fixtures present
         run: |
           test -d ../lazily-spec/conformance || { echo "::error::../lazily-spec/conformance missing"; exit 1; }
-          for corpus in reactive-graph; do
+          for corpus in reactive-graph egress; do
             test -d "../lazily-spec/conformance/$corpus" || { echo "::error::../lazily-spec/conformance/$corpus missing"; exit 1; }
           done
 
