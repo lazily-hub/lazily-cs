@@ -7,7 +7,7 @@ namespace Lazily.Tests;
 public sealed class StateProjectionConformanceTests
 {
     [Fact]
-    public void ReplaysAgentDocSnapshotAndDeltaThroughTheProductionMirror()
+    public void ReplaysWorkflowSnapshotAndDeltaThroughTheProductionMirror()
     {
         using var snapshotFixture = SpecCorpus.Load(
             "agent-doc",
@@ -44,7 +44,7 @@ public sealed class StateProjectionConformanceTests
         AssertPayloadField(projection, 102, "phase", "committed");
         AssertPayloadField(projection, 103, "phase", "completed");
         Assert.True(projection.TryGetNode(104, out var transport));
-        Assert.Equal("agent_doc.transport.patch", transport.TypeTag);
+        Assert.Equal(delta.Ops.OfType<DeltaOp.NodeAdd>().Single().TypeTag, transport.TypeTag);
         Assert.Contains(
             new EdgeSnapshot(104, 102),
             projection.Edges);
@@ -74,11 +74,12 @@ public sealed class StateProjectionConformanceTests
         snapshotAssertions.AssertKey("edge_count", snapshot.Edges.Count);
         snapshotAssertions.AssertKey("root_count", snapshot.Roots.Count);
         snapshotAssertions.AssertKey("type_tags", snapshot.Nodes.Select(node => node.TypeTag));
+        var snapshotVocabulary = LoadTypeTagVocabulary(snapshotFixture.RootElement);
         snapshotAssertions.AssertKeyWith(
             "all_type_tags_in_vocabulary",
             want => want.AssertEqual(w =>
                 w.GetBoolean(),
-                snapshot.Nodes.All(node => node.TypeTag.StartsWith("agent_doc.", StringComparison.Ordinal))));
+                snapshot.Nodes.All(node => snapshotVocabulary.Contains(node.TypeTag))));
         snapshotAssertions.AssertKeyWith(
             "cycle_phase",
             want => want.Against(
@@ -101,12 +102,13 @@ public sealed class StateProjectionConformanceTests
         deltaAssertions.AssertKey(
             "added_type_tags",
             delta.Ops.OfType<DeltaOp.NodeAdd>().Select(op => op.TypeTag));
+        var deltaVocabulary = LoadTypeTagVocabulary(deltaFixture.RootElement);
         deltaAssertions.AssertKeyWith(
             "all_type_tags_in_vocabulary",
             want => want.AssertEqual(w =>
                 w.GetBoolean(),
                 delta.Ops.OfType<DeltaOp.NodeAdd>()
-                    .All(op => op.TypeTag.StartsWith("agent_doc.", StringComparison.Ordinal))));
+                    .All(op => deltaVocabulary.Contains(op.TypeTag))));
         deltaAssertions.AssertKeyWith(
             "cycle_phase_after",
             want => want.Against(
@@ -118,6 +120,19 @@ public sealed class StateProjectionConformanceTests
                 projection,
                 (expect, got) => AssertPayloadField(got, 103, "phase", expect.GetString()!)));
         deltaAssertions.Verify();
+    }
+
+    private static HashSet<string> LoadTypeTagVocabulary(JsonElement fixture)
+    {
+        var version = fixture.GetProperty("schema_version").GetString()!;
+        var file = version.StartsWith("1.", StringComparison.Ordinal)
+            ? "agent-doc-state.json"
+            : "workflow-state.json";
+        using var schema = JsonDocument.Parse(File.ReadAllText(
+            Path.Combine(SpecCorpus.RequireSchemasRoot(), file)));
+        return schema.RootElement.GetProperty("$defs").GetProperty("TypeTag")
+            .GetProperty("enum").EnumerateArray()
+            .Select(tag => tag.GetString()!).ToHashSet(StringComparer.Ordinal);
     }
 
     [Fact]
