@@ -106,9 +106,10 @@ public sealed class AsyncGraphModel : IGraphModel
     }
 
     /// <inheritdoc/>
-    public NodeRef Effect(string id, IReadOnlyList<NodeRef> reads)
+    public NodeRef Effect(string id, IReadOnlyList<NodeRef> reads, EffectCleanup cleanup = EffectCleanup.EveryRun)
     {
         var deps = reads.ToArray();
+        var run = 0;
         var handle = _ctx.Effect(async cc =>
         {
             _log.Run(id);
@@ -125,6 +126,9 @@ public sealed class AsyncGraphModel : IGraphModel
                     // the cleanup below still get returned and still run on dispose.
                 }
             }
+            // The idiomatic no-cleanup form: the body returns Func<Task>?, so an explicit null.
+            // Reruns are serialized per effect, so the counter needs no lock.
+            if (!EffectCleanups.Returns(cleanup, ++run)) return null;
             return () =>
             {
                 _log.Cleanup(id);
@@ -232,9 +236,9 @@ public sealed class AsyncGraphModel : IGraphModel
             return n;
         }
 
-        public NodeRef Effect(string id, IReadOnlyList<NodeRef> reads)
+        public NodeRef Effect(string id, IReadOnlyList<NodeRef> reads, EffectCleanup cleanup = EffectCleanup.EveryRun)
         {
-            var n = model.Effect(id, reads);
+            var n = model.Effect(id, reads, cleanup);
             scope.Own((AsyncEffectHandle)n.Handle);
             return n;
         }

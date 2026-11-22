@@ -683,6 +683,10 @@ public sealed class ReactiveGraphEngine
         var id = Str(op, "id")!;
         var mergesInto = Str(op, "merges_into");
         var writesOwnCone = Str(op, "writes_own_cone");
+        // Parsed before dispatch so an unknown shape is a hard failure on every path (#lzeffectvoid).
+        var cleanup = EffectCleanups.Parse(Str(op, "cleanup"));
+        if (cleanup != EffectCleanup.EveryRun && (mergesInto is not null || writesOwnCone is not null))
+            throw new NotSupportedException($"{_fixture}: `cleanup` is only modelled on a plain effect");
 
         // A feed effect reads upstream (tracked) and folds the sum into a merge cell through the
         // UNTRACKED write surface; the divergent effect reads and writes the same cell, closing a
@@ -691,7 +695,7 @@ public sealed class ReactiveGraphEngine
             ? _model.FeedEffect(id, ReadsOf(op), _nodes[mergesInto])
             : writesOwnCone is not null
                 ? _model.SelfWritingEffect(id, _nodes[writesOwnCone])
-                : Factory(op).Effect(id, ReadsOf(op));
+                : Factory(op).Effect(id, ReadsOf(op), cleanup);
         Define(node);
     }
 

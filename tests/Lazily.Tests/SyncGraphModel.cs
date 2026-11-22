@@ -129,16 +129,19 @@ public class SyncGraphModel : IGraphModel
     };
 
     /// <inheritdoc/>
-    public NodeRef Effect(string id, IReadOnlyList<NodeRef> reads) =>
-        new(NodeKind.Effect, id, Run(() => NewEffect(id, reads)));
+    public NodeRef Effect(string id, IReadOnlyList<NodeRef> reads, EffectCleanup cleanup = EffectCleanup.EveryRun) =>
+        new(NodeKind.Effect, id, Run(() => NewEffect(id, reads, cleanup)));
 
-    private Effect NewEffect(string id, IReadOnlyList<NodeRef> reads)
+    private Effect NewEffect(string id, IReadOnlyList<NodeRef> reads, EffectCleanup cleanup)
     {
         var deps = reads.ToArray();
+        var run = 0;
         return new Effect(_ctx, c =>
         {
             _log.Run(id);
             foreach (var d in deps) TrackRead(d, c);
+            // The idiomatic no-cleanup form: EffectRun returns Action?, so an explicit null.
+            if (!EffectCleanups.Returns(cleanup, ++run)) return null;
             return () => _log.Cleanup(id);
         });
     }
@@ -256,7 +259,8 @@ public class SyncGraphModel : IGraphModel
         public NodeRef Computed(string id, IReadOnlyList<NodeRef> reads, long offset) =>
             Own(model.Computed(id, reads, offset));
 
-        public NodeRef Effect(string id, IReadOnlyList<NodeRef> reads) => Own(model.Effect(id, reads));
+        public NodeRef Effect(string id, IReadOnlyList<NodeRef> reads, EffectCleanup cleanup = EffectCleanup.EveryRun) =>
+            Own(model.Effect(id, reads, cleanup));
 
         private NodeRef Own(NodeRef n)
         {

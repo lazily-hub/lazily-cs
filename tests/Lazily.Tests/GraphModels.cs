@@ -63,7 +63,54 @@ public interface INodeFactory
     /// <summary>Creates a side-effect observer that reads <paramref name="reads"/>, tracked.</summary>
     /// <param name="id">The fixture-level id.</param>
     /// <param name="reads">The nodes the body reads.</param>
-    NodeRef Effect(string id, IReadOnlyList<NodeRef> reads);
+    /// <param name="cleanup">Which runs return a cleanup (the `effect` op's `cleanup` field).</param>
+    NodeRef Effect(string id, IReadOnlyList<NodeRef> reads, EffectCleanup cleanup = EffectCleanup.EveryRun);
+}
+
+/// <summary>
+/// The `effect` op's `cleanup` field (#lzeffectvoid): which runs of the body return a cleanup.
+/// </summary>
+/// <remarks>
+/// A run that returns no cleanup returns the binding's IDIOMATIC no-cleanup form — an explicit
+/// <c>null</c> from the body, which is what <see cref="EffectRun"/>'s <c>Action?</c> return and
+/// the async body's <c>Func&lt;Task&gt;?</c> already require. Never a no-op closure: that is
+/// observationally identical to a cleanup and would exercise nothing.
+/// </remarks>
+public enum EffectCleanup
+{
+    /// <summary>Every run returns a cleanup (absent or <c>"every_run"</c>).</summary>
+    EveryRun,
+
+    /// <summary>No run returns a cleanup (<c>"none"</c>).</summary>
+    None,
+
+    /// <summary>Runs 1, 3, 5, … return a cleanup; runs 2, 4, … return none (<c>"alternate"</c>).</summary>
+    Alternate,
+}
+
+/// <summary>Parsing and per-run evaluation of <see cref="EffectCleanup"/>.</summary>
+public static class EffectCleanups
+{
+    /// <summary>Parses the op field; an unknown value is a hard runner failure, never a default.</summary>
+    /// <param name="value">The raw field, or <c>null</c> when absent.</param>
+    public static EffectCleanup Parse(string? value) => value switch
+    {
+        null or "every_run" => EffectCleanup.EveryRun,
+        "none" => EffectCleanup.None,
+        "alternate" => EffectCleanup.Alternate,
+        _ => throw new NotSupportedException($"unknown effect cleanup shape {value}"),
+    };
+
+    /// <summary>Whether the <paramref name="run"/>-th run (1-based, creation is run 1) returns a cleanup.</summary>
+    /// <param name="shape">The effect's cleanup shape.</param>
+    /// <param name="run">The 1-based run number.</param>
+    public static bool Returns(EffectCleanup shape, int run) => shape switch
+    {
+        EffectCleanup.EveryRun => true,
+        EffectCleanup.None => false,
+        EffectCleanup.Alternate => run % 2 == 1,
+        _ => throw new NotSupportedException($"unknown effect cleanup shape {shape}"),
+    };
 }
 
 /// <summary>One teardown scope in whichever graph is under test.</summary>

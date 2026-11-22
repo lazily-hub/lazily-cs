@@ -573,7 +573,7 @@ KNOWN_UNCOVERED=(
 # reports "coverage OK: 2/2" and exits 0, which is the vacuous green #lzvacuousrun
 # named after this binding printed "0/0" on three rungs in a row.
 #
-# EXACT: 159 is what a green CI run on the current corpus actually opens, with
+# EXACT: 160 is what a green CI run on the current corpus actually opens, with
 # no margin. NEVER lower this to make the gate green: a drop means a replay was
 # removed, renamed, or short-circuited, and that is the finding, not the floor.
 #
@@ -587,7 +587,9 @@ KNOWN_UNCOVERED=(
 # Re-pinned for lazily-spec main 7240cc3 (the v0.46.0 candidate): the four
 # reactive-egress fixtures and egress/effect_cas.json now replay here
 # (#lzegress, #lzeffectcas). Verified exact: 160 fails this floor.
-MIN_FIXTURES="${MIN_FIXTURES:-159}"
+# Re-pinned 159 -> 160 for reactive-graph/effect_cleanup_is_optional.json
+# (#lzeffectvoid), which every graph model now replays.
+MIN_FIXTURES="${MIN_FIXTURES:-160}"
 
 # Scenarios deliberately not replayed, one per line as
 #   corpus/fixture.json|scenario-id|reason
