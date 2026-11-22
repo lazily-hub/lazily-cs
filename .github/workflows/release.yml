@@ -56,8 +56,8 @@ jobs:
 
       - name: Fetch canonical lazily-spec conformance fixtures
         env:
-          LAZILY_SPEC_TAG: v0.46.0
-          LAZILY_SPEC_COMMIT: ca676a1a7173525066e90bca48b2ead230a9cd88
+          LAZILY_SPEC_TAG: v0.47.0
+          LAZILY_SPEC_COMMIT: e3bd642ea955325a4f27b73c454fa5a2c9496b15
         run: |
           git clone --depth 1 --branch "$LAZILY_SPEC_TAG" https://github.com/lazily-hub/lazily-spec.git ../lazily-spec
           test "$(git -C ../lazily-spec rev-parse HEAD)" = "$LAZILY_SPEC_COMMIT"
