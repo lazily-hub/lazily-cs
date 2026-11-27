@@ -306,7 +306,7 @@ public sealed class View
 
     private static ViewValue Literal(JsonElement value) => value.ValueKind switch
     {
-        JsonValueKind.Null => new ViewValue(Kind.Null, false, 0, ""),
+        JsonValueKind.Null or JsonValueKind.Undefined => new ViewValue(Kind.Null, false, 0, ""),
         JsonValueKind.True => new ViewValue(Kind.Bool, true, 0, ""),
         JsonValueKind.False => new ViewValue(Kind.Bool, false, 0, ""),
         JsonValueKind.String => new ViewValue(Kind.Str, false, 0, value.GetString()!),

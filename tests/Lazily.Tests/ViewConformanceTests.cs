@@ -23,6 +23,28 @@ public sealed class ViewConformanceTests
     }
 
     [Fact]
+    public void OmittedEventPayloadIsNull()
+    {
+        using var doc = JsonDocument.Parse("""
+            {
+              "id": "input",
+              "root": "field",
+              "signals": {"current": {"initial": "draft"}},
+              "nodes": {"field": {
+                "role": "field",
+                "effects": {"change": {
+                  "op": "set", "args": ["current", {"op": "call", "args": ["event"]}]
+                }}
+              }}
+            }
+            """);
+        var view = View.Install(new Context(), doc.RootElement);
+
+        Assert.Null(Assert.Single(view.DispatchJson("field", "change"))["value"]);
+        Assert.Null(view.SignalsJson()["current"]);
+    }
+
+    [Fact]
     public void ReplaysTheViewCorpusWhenTheAreaExists()
     {
         var names = SpecCorpus.FixtureNames("view");
