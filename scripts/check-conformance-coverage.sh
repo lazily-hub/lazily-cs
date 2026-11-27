@@ -589,7 +589,7 @@ KNOWN_UNCOVERED=(
 # (#lzegress, #lzeffectcas). Verified exact: 160 fails this floor.
 # Re-pinned 159 -> 160 for reactive-graph/effect_cleanup_is_optional.json
 # (#lzeffectvoid), which every graph model now replays.
-MIN_FIXTURES="${MIN_FIXTURES:-160}"
+MIN_FIXTURES="${MIN_FIXTURES:-164}"
 
 # Scenarios deliberately not replayed, one per line as
 #   corpus/fixture.json|scenario-id|reason
