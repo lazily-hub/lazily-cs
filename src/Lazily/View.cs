@@ -239,33 +239,33 @@ internal sealed class View
         switch (op)
         {
             case "set":
-            {
-                var sid = Str(args[0], "set signal");
-                if (!_signals.TryGetValue(sid, out var src)) throw new InvalidOperationException("unknown signal `" + sid + "`");
-                var next = EvalArg(args[1], id => _signals[id].Get(), _payload);
-                src.Set(next);
-                trace.Add(new Dictionary<string, object?>(StringComparer.Ordinal)
                 {
-                    ["op"] = "set",
-                    ["signal"] = sid,
-                    ["value"] = next.ToJson(),
-                });
-                break;
-            }
+                    var sid = Str(args[0], "set signal");
+                    if (!_signals.TryGetValue(sid, out var src)) throw new InvalidOperationException("unknown signal `" + sid + "`");
+                    var next = EvalArg(args[1], id => _signals[id].Get(), _payload);
+                    src.Set(next);
+                    trace.Add(new Dictionary<string, object?>(StringComparer.Ordinal)
+                    {
+                        ["op"] = "set",
+                        ["signal"] = sid,
+                        ["value"] = next.ToJson(),
+                    });
+                    break;
+                }
             case "send":
-            {
-                if (_chart is null) throw new InvalidOperationException("send requires a chart");
-                var name = Str(args[0], "send event");
-                var record = new Dictionary<string, object?>(StringComparer.Ordinal)
                 {
-                    ["op"] = "send",
-                    ["event"] = name,
-                };
-                if (args.Count == 2) record["payload"] = EvalArg(args[1], id => _signals[id].Get(), _payload).ToJson();
-                _chart.Send(name, new Dictionary<string, bool>());
-                trace.Add(record);
-                break;
-            }
+                    if (_chart is null) throw new InvalidOperationException("send requires a chart");
+                    var name = Str(args[0], "send event");
+                    var record = new Dictionary<string, object?>(StringComparer.Ordinal)
+                    {
+                        ["op"] = "send",
+                        ["event"] = name,
+                    };
+                    if (args.Count == 2) record["payload"] = EvalArg(args[1], id => _signals[id].Get(), _payload).ToJson();
+                    _chart.Send(name, new Dictionary<string, bool>());
+                    trace.Add(record);
+                    break;
+                }
             case "batch":
                 foreach (var nested in args) Exec(nested, trace);
                 break;
