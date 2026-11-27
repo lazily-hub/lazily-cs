@@ -14,6 +14,15 @@ public sealed class ViewConformanceTests
     ];
 
     [Fact]
+    public void ExposesTheHostApiToAssembliesWithoutFriendAccess()
+    {
+        var type = typeof(View);
+        Assert.True(type.IsPublic);
+        foreach (var method in new[] { "Install", "SignalsJson", "ExpressionsJson", "LayoutJson", "ChartJson", "DispatchJson" })
+            Assert.NotNull(type.GetMethod(method));
+    }
+
+    [Fact]
     public void ReplaysTheViewCorpusWhenTheAreaExists()
     {
         var names = SpecCorpus.FixtureNames("view");

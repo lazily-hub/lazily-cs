@@ -5,9 +5,9 @@ namespace Lazily;
 /// <summary>
 /// Host-neutral view compute document. Signals are sources, standing expressions
 /// are guarded computeds, and the optional chart is one statechart cell.
-/// Internal conformance interpreter, not a widget toolkit.
+/// The host owns rendering and submits semantic events.
 /// </summary>
-internal sealed class View
+public sealed class View
 {
     private readonly Context _ctx;
     private readonly string _root;
@@ -68,7 +68,8 @@ internal sealed class View
     private static readonly HashSet<string> EffectOps = ["set", "batch", "send"];
     private static readonly HashSet<string> Calls = ["event", "not", "add", "len"];
 
-    internal static View Install(Context ctx, JsonElement doc)
+    /// <summary>Install a portable View document on the given reactive context.</summary>
+    public static View Install(Context ctx, JsonElement doc)
     {
         var obj = Obj(doc, "view");
         Allow(obj, "view", "id", "root", "signals", "nodes", "chart");
@@ -177,21 +178,24 @@ internal sealed class View
         return new View(ctx, root, nodes, signals, exprs, effects, chart, subscription);
     }
 
-    internal Dictionary<string, object?> SignalsJson()
+    /// <summary>Return a snapshot of the signal values.</summary>
+    public Dictionary<string, object?> SignalsJson()
     {
         var outMap = new Dictionary<string, object?>(StringComparer.Ordinal);
         foreach (var pair in _signals) outMap[pair.Key] = _ctx.Get(pair.Value).ToJson();
         return outMap;
     }
 
-    internal Dictionary<string, object?> ExpressionsJson()
+    /// <summary>Return the current standing expression values by node and field.</summary>
+    public Dictionary<string, object?> ExpressionsJson()
     {
         var outMap = new Dictionary<string, object?>(StringComparer.Ordinal);
         foreach (var pair in _exprs) outMap[pair.Key] = _ctx.Get(pair.Value).ToJson();
         return outMap;
     }
 
-    internal List<Dictionary<string, object?>> LayoutJson()
+    /// <summary>Return the abstract node layout in preorder.</summary>
+    public List<Dictionary<string, object?>> LayoutJson()
     {
         var outList = new List<Dictionary<string, object?>>();
         void Walk(string id)
@@ -211,9 +215,11 @@ internal sealed class View
         return outList;
     }
 
-    internal List<string>? ChartJson() => _chart is null ? null : [.. _chart.ActiveLeaves()];
+    /// <summary>Return the active chart leaves, or null when the view has no chart.</summary>
+    public List<string>? ChartJson() => _chart is null ? null : [.. _chart.ActiveLeaves()];
 
-    internal List<Dictionary<string, object?>> DispatchJson(string node, string evt, JsonElement value)
+    /// <summary>Deliver a semantic event and return its ordered effect trace.</summary>
+    public List<Dictionary<string, object?>> DispatchJson(string node, string evt, JsonElement value = default)
     {
         if (!Events.Contains(evt)) throw new InvalidOperationException("unknown event `" + evt + "`");
         if (!_nodes.ContainsKey(node)) throw new InvalidOperationException("unknown node `" + node + "`");
